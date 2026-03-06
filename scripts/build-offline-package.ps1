@@ -20,6 +20,14 @@ trap {
     throw
 }
 
+function Write-BuildTrace {
+    param([string]$Message)
+
+    if ($env:GITHUB_ACTIONS -eq 'true') {
+        Write-Host "[build-offline] $Message"
+    }
+}
+
 function Resolve-AbsolutePath {
     param(
         [Parameter(Mandatory = $true)][string]$BasePath,
