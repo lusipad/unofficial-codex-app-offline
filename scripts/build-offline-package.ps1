@@ -167,6 +167,12 @@ Write-BuildTrace 'App payload copied to package root.'
 Copy-Item -Path (Join-Path $sourceExportRoot 'app') -Destination (Join-Path $packageRoot 'app') -Recurse -Force
 Copy-Item -Path (Join-Path $scriptRoot 'bootstrap-codex-skills.ps1') -Destination (Join-Path $packageRoot 'bootstrap-codex-skills.ps1') -Force
 
+# Copy the example env config so users can find it next to the launch scripts.
+$envExampleSrc = Join-Path $repoRoot 'vendor/skills/.system/skill-installer/skill-installer.env.example'
+if (Test-Path $envExampleSrc) {
+    Copy-Item -Path $envExampleSrc -Destination (Join-Path $packageRoot 'skill-installer.env.example') -Force
+}
+
 $launchCmd = @(
     '@echo off',
     'setlocal',
