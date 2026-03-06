@@ -57,7 +57,7 @@ All of these scripts use network, so when running in the sandbox, request escala
 
 ## Notes
 
-- Curated listing is fetched from `https://github.com/openai/skills/tree/main/skills/.curated` via the GitHub API. If GitHub is unreachable (e.g., offline or intranet environment), the script automatically falls back to listing locally bundled skills from `$CODEX_HOME/skills`.
+- Curated listing is fetched from `https://github.com/openai/skills/tree/main/skills/.curated` via the GitHub API. When running from the offline package, `CODEX_SKILL_SOURCE_DIR` is set automatically by bootstrap — the script then uses the local seed directory directly and never contacts GitHub. If `CODEX_SKILL_SOURCE_DIR` is not set and GitHub is unreachable (e.g., intranet without a mirror), the script falls back to listing locally installed skills from `$CODEX_HOME/skills`.
 - Private GitHub repos can be accessed via existing git credentials or optional `GITHUB_TOKEN`/`GH_TOKEN` for download.
 - Git fallback tries HTTPS first, then SSH.
 - The skills at https://github.com/openai/skills/tree/main/skills/.system are preinstalled, so no need to help users install those. If they ask, just explain this. If they insist, you can download and overwrite.
@@ -82,6 +82,7 @@ precedence over the file, so you can override per-session if needed.
 
 | Variable | Default | Purpose |
 |---|---|---|
+| `CODEX_SKILL_SOURCE_DIR` | — (auto-set by offline-package bootstrap) | Local directory used as skill source; when set, skips GitHub entirely for both listing and installation |
 | `CODEX_GITHUB_BASE` | `https://github.com` | Web URL base (git clone, URL parsing) |
 | `CODEX_GITHUB_API_BASE` | `https://api.github.com` | REST API base (listing, metadata) |
 | `CODEX_CODELOAD_BASE` | derived from `CODEX_GITHUB_BASE` | Zip download base |
