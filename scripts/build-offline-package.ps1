@@ -244,14 +244,13 @@ if ($config.packaging.setupExe -and -not $SkipInstaller) {
         $templateFile = Join-Path $repoRoot 'installer/CodexOffline.iss.tpl'
         $issFile = Join-Path $workRoot 'CodexOffline.generated.iss'
         $template = Get-Content -Path $templateFile -Raw
-        $rendered = ($template
-            .Replace('__APP_NAME__', [string]$config.appName)
-            .Replace('__APP_VERSION__', [string]$version)
-            .Replace('__APP_DIR_NAME__', [string]$config.installDirName)
-            .Replace('__SOURCE_ROOT__', [string]$packageRoot.Replace('/', '\\'))
-            .Replace('__OUTPUT_ROOT__', [string]$artifactRoot.Replace('/', '\\'))
-            .Replace('__OUTPUT_BASENAME__', [string]('{0}-setup' -f $releaseBase))
-        )
+        $rendered = $template
+        $rendered = $rendered.Replace('__APP_NAME__', [string]$config.appName)
+        $rendered = $rendered.Replace('__APP_VERSION__', [string]$version)
+        $rendered = $rendered.Replace('__APP_DIR_NAME__', [string]$config.installDirName)
+        $rendered = $rendered.Replace('__SOURCE_ROOT__', [string]$packageRoot.Replace('/', '\\'))
+        $rendered = $rendered.Replace('__OUTPUT_ROOT__', [string]$artifactRoot.Replace('/', '\\'))
+        $rendered = $rendered.Replace('__OUTPUT_BASENAME__', [string]('{0}-setup' -f $releaseBase))
         $rendered | Set-Content -Path $issFile -Encoding UTF8
         & $iscc $issFile | Out-Host
 
