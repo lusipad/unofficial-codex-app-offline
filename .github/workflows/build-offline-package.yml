@@ -101,12 +101,17 @@ jobs:
         shell: pwsh
         run: |
           if ('${{ github.event_name }}' -eq 'workflow_dispatch' -and '${{ inputs.build_installer }}' -eq 'false') {
-            $metadata = & ./scripts/build-offline-package.ps1 -ConfigPath 'config/offline-package.json' -SkipInstaller | ConvertFrom-Json
+            $metadataJson = pwsh -NoProfile -File ./scripts/build-offline-package.ps1 -ConfigPath 'config/offline-package.json' -SkipInstaller
           }
           else {
-            $metadata = & ./scripts/build-offline-package.ps1 -ConfigPath 'config/offline-package.json' | ConvertFrom-Json
+            $metadataJson = pwsh -NoProfile -File ./scripts/build-offline-package.ps1 -ConfigPath 'config/offline-package.json'
           }
 
+          if ($LASTEXITCODE -ne 0) {
+            throw 'build-offline-package.ps1 failed.'
+          }
+
+          $metadata = $metadataJson | ConvertFrom-Json
           "release_tag=$($metadata.releaseTag)" >> $env:GITHUB_OUTPUT
           "release_name=$($metadata.releaseName)" >> $env:GITHUB_OUTPUT
           "artifact_dir=$($metadata.artifactDirectoryRelative)" >> $env:GITHUB_OUTPUT
