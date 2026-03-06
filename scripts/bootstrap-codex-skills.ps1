@@ -62,6 +62,13 @@ else {
 
 $seedRoot = Join-Path $resolvedInstallRoot 'seed/codex-home/skills'
 $manifestPath = Join-Path $resolvedInstallRoot 'seed/skills-manifest.json'
+
+# Expose the bundled skills directory to skill-installer scripts so they
+# default to local source without requiring network access.  Only set when
+# the caller hasn't already configured a preferred source.
+if (-not [System.Environment]::GetEnvironmentVariable('CODEX_SKILL_SOURCE_DIR')) {
+    [System.Environment]::SetEnvironmentVariable('CODEX_SKILL_SOURCE_DIR', $seedRoot, 'Process')
+}
 $stateRoot = Join-Path $resolvedCodexHome '.offline-package'
 $statePath = Join-Path $stateRoot 'skills-manifest.json'
 $targetSkillsRoot = Join-Path $resolvedCodexHome 'skills'

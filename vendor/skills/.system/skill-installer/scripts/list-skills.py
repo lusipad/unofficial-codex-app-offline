@@ -120,6 +120,11 @@ def _parse_args(argv: list[str]) -> Args:
 
 def main(argv: list[str]) -> int:
     args = _parse_args(argv)
+    # CODEX_SKILL_SOURCE_DIR: local directory used as skill source instead of
+    # GitHub.  Set automatically by bootstrap when running from an offline
+    # package; can also be set manually in skill-installer.env.
+    if not args.source_dir:
+        args.source_dir = os.environ.get("CODEX_SKILL_SOURCE_DIR") or None
     offline_fallback = False
     source_label: str | None = None
     try:

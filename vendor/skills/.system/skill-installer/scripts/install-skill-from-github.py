@@ -323,6 +323,11 @@ def _parse_args(argv: list[str]) -> Args:
 
 def main(argv: list[str]) -> int:
     args = _parse_args(argv)
+    # CODEX_SKILL_SOURCE_DIR: when set (e.g. by bootstrap in an offline package)
+    # and the caller did not explicitly request a GitHub source, default to
+    # installing from the local directory instead of reaching out to GitHub.
+    if not args.local_dir and not args.url and not args.repo:
+        args.local_dir = os.environ.get("CODEX_SKILL_SOURCE_DIR") or None
     try:
         dest_root = args.dest or _default_dest()
         if args.local_dir:
