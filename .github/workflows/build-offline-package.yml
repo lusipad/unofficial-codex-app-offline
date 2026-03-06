@@ -15,6 +15,7 @@ on:
       - main
     paths:
       - '.github/workflows/build-offline-package.yml'
+      - '.github/workflows/build-offline-package-monitor.yml'
       - 'config/**'
       - 'installer/**'
       - 'package.json'
@@ -49,8 +50,44 @@ jobs:
       - name: Install Playwright browser
         run: npx playwright install chromium
 
+      - name: Resolve source version
+        id: source
+        shell: pwsh
+        run: |
+          $metadata = & ./scripts/get-app-source-version.ps1 -ConfigPath 'config/offline-package.json' | ConvertFrom-Json
+          "release_tag=$($metadata.releaseTag)" >> $env:GITHUB_OUTPUT
+          "release_name=$($metadata.releaseName)" >> $env:GITHUB_OUTPUT
+          "version=$($metadata.version)" >> $env:GITHUB_OUTPUT
+          "package_id=$($metadata.packageId)" >> $env:GITHUB_OUTPUT
+          "source_mode=$($metadata.sourceMode)" >> $env:GITHUB_OUTPUT
+          if ($null -ne $metadata.packageFamilyName) {
+            "package_family_name=$($metadata.packageFamilyName)" >> $env:GITHUB_OUTPUT
+          }
+
+      - name: Skip build when version already released
+        id: release_check
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = '${{ steps.source.outputs.release_tag }}'
+          $repo = '${{ github.repository }}'
+          $existingReleaseUrl = ''
+
+          gh release view $tag --repo $repo --json url --jq '.url' *> $null
+          if ($LASTEXITCODE -eq 0) {
+            $existingReleaseUrl = gh release view $tag --repo $repo --json url --jq '.url'
+            "skip_build=true" >> $env:GITHUB_OUTPUT
+            "existing_release_url=$existingReleaseUrl" >> $env:GITHUB_OUTPUT
+            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "Version $tag is already published at $existingReleaseUrl. Build and publish steps were skipped."
+          }
+          else {
+            "skip_build=false" >> $env:GITHUB_OUTPUT
+            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "Version $tag is new. Build and publish steps will continue."
+          }
+
       - name: Ensure Inno Setup
-        if: ${{ github.event_name != 'workflow_dispatch' || inputs.build_installer }}
+        if: ${{ steps.release_check.outputs.skip_build != 'true' && (github.event_name != 'workflow_dispatch' || inputs.build_installer) }}
         shell: pwsh
         run: |
           if (-not (Get-Command ISCC.exe -ErrorAction SilentlyContinue)) {
@@ -58,6 +95,7 @@ jobs:
           }
 
       - name: Build offline bundle
+        if: ${{ steps.release_check.outputs.skip_build != 'true' }}
         id: build
         shell: pwsh
         run: |
@@ -80,6 +118,7 @@ jobs:
           "source_mode=$($metadata.appSource.mode)" >> $env:GITHUB_OUTPUT
 
       - name: Upload workflow artifacts
+        if: ${{ steps.release_check.outputs.skip_build != 'true' }}
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.build.outputs.release_tag }}
@@ -87,6 +126,7 @@ jobs:
           if-no-files-found: error
 
       - name: Publish release assets
+        if: ${{ steps.release_check.outputs.skip_build != 'true' }}
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.build.outputs.release_tag }}

@@ -1,0 +1,73 @@
+name: build-offline-package-monitor
+
+on:
+  workflow_run:
+    workflows:
+      - build-offline-package
+    types:
+      - completed
+
+permissions:
+  actions: write
+  issues: write
+  contents: read
+
+jobs:
+  retry-failed-run:
+    if: ${{ github.event.workflow_run.conclusion == 'failure' && github.event.workflow_run.run_attempt < 3 }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Re-run failed jobs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+        run: |
+          gh run rerun "$RUN_ID" --repo "$REPO" --failed
+          echo "Requested retry for run $RUN_ID after attempt $RUN_ATTEMPT."
+
+  alert-after-final-failure:
+    if: ${{ github.event.workflow_run.conclusion == 'failure' && github.event.workflow_run.run_attempt >= 3 }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Create or update failure issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+          WORKFLOW_NAME: ${{ github.event.workflow_run.name }}
+          BRANCH_NAME: ${{ github.event.workflow_run.head_branch }}
+          COMMIT_SHA: ${{ github.event.workflow_run.head_sha }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+          EVENT_NAME: ${{ github.event.workflow_run.event }}
+        run: |
+          title="[CI Alert] build-offline-package failed after retries"
+          body=$(cat <<EOF
+          The workflow has failed after the configured automatic retries.
+
+          - Name: ${WORKFLOW_NAME}
+          - Run ID: ${RUN_ID}
+          - Attempts: ${RUN_ATTEMPT}
+          - Branch: ${BRANCH_NAME}
+          - Commit: ${COMMIT_SHA}
+          - Event: ${EVENT_NAME}
+          - Run URL: ${RUN_URL}
+          EOF
+          )
+
+          issue_number=$(gh issue list \
+            --repo "$REPO" \
+            --state open \
+            --search 'build-offline-package failed after retries in:title' \
+            --json number \
+            --jq '.[0].number')
+
+          if [ -n "$issue_number" ] && [ "$issue_number" != "null" ]; then
+            gh issue comment "$issue_number" --repo "$REPO" --body "$body"
+          else
+            gh issue create --repo "$REPO" --title "$title" --body "$body"
+          fi
