@@ -2,7 +2,8 @@
 param(
     [string]$ConfigPath = 'config/offline-package.json',
     [switch]$SkipInstaller,
-    [switch]$RequireInstaller
+    [switch]$RequireInstaller,
+    [string]$MetadataOutputPath = ''
 )
 
 Set-StrictMode -Version Latest
@@ -258,6 +259,14 @@ $buildMetadata = [ordered]@{
     assets = $assetInfo
 }
 
-$buildMetadata | ConvertTo-Json -Depth 8 | Set-Content -Path (Join-Path $outputRoot 'build-metadata.json') -Encoding UTF8
-$buildMetadata | ConvertTo-Json -Depth 8 | Set-Content -Path (Join-Path $artifactRoot 'build-metadata.json') -Encoding UTF8
-$buildMetadata | ConvertTo-Json -Depth 8
+$buildMetadataJson = $buildMetadata | ConvertTo-Json -Depth 8
+$buildMetadataJson | Set-Content -Path (Join-Path $outputRoot 'build-metadata.json') -Encoding UTF8
+$buildMetadataJson | Set-Content -Path (Join-Path $artifactRoot 'build-metadata.json') -Encoding UTF8
+
+if (-not [string]::IsNullOrWhiteSpace($MetadataOutputPath)) {
+    $metadataOutputFile = Resolve-AbsolutePath -BasePath $repoRoot -PathValue $MetadataOutputPath
+    New-Item -ItemType Directory -Force -Path (Split-Path $metadataOutputFile -Parent) | Out-Null
+    $buildMetadataJson | Set-Content -Path $metadataOutputFile -Encoding UTF8
+}
+
+$buildMetadataJson
