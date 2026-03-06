@@ -10,14 +10,14 @@
   },
   "skills": {
     "sources": [
-      "vendor/skills-official",
+      "build/work/skills-official",
       "vendor/skills"
     ],
     "official": {
       "owner": "openai",
       "repo": "skills",
       "ref": "main",
-      "destination": "vendor/skills-official"
+      "destination": "build/work/skills-official"
     }
   },
   "packaging": {

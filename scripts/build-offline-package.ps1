@@ -115,6 +115,10 @@ $stageRoot = Join-Path $workRoot 'stage'
 New-Item -ItemType Directory -Force -Path $workRoot | Out-Null
 New-Item -ItemType Directory -Force -Path $outputRoot | Out-Null
 
+if ($null -ne $config.skills.official) {
+    & (Join-Path $scriptRoot 'sync-official-skills.ps1') -ConfigPath $ConfigPath | Out-Null
+}
+
 $appSourceInfo = Export-AppSource -Config $config -ScriptRoot $scriptRoot -SourceExportRoot $sourceExportRoot
 $sourceMetadata = Get-Content -Path (Join-Path $sourceExportRoot 'metadata/package-metadata.json') -Raw | ConvertFrom-Json
 $version = $sourceMetadata.version
