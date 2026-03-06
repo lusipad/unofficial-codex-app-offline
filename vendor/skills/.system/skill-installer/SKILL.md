@@ -65,26 +65,43 @@ All of these scripts use network, so when running in the sandbox, request escala
 
 ## Mirror / Intranet Configuration
 
-Set environment variables to redirect all GitHub requests to a local mirror:
+### Config file (recommended)
+
+Copy `skill-installer.env.example` (in this skill's directory) to one of these locations
+and edit it — no system environment variables needed:
+
+```
+%USERPROFILE%\.codex\skill-installer.env          ← user-level (recommended)
+<skill-installer dir>\skill-installer.env         ← portable / per-install
+```
+
+Values in the file are loaded at startup. System environment variables always take
+precedence over the file, so you can override per-session if needed.
+
+### Available variables
 
 | Variable | Default | Purpose |
 |---|---|---|
 | `CODEX_GITHUB_BASE` | `https://github.com` | Web URL base (git clone, URL parsing) |
 | `CODEX_GITHUB_API_BASE` | `https://api.github.com` | REST API base (listing, metadata) |
 | `CODEX_CODELOAD_BASE` | derived from `CODEX_GITHUB_BASE` | Zip download base |
+| `GITHUB_TOKEN` / `GH_TOKEN` | — | Auth token for private repos or rate limits |
+| `CODEX_HOME` | `~/.codex` | Codex home directory |
 
 If only `CODEX_GITHUB_BASE` is set, `CODEX_CODELOAD_BASE` is automatically derived as
 `{scheme}://codeload.{host}` (matching GitHub's subdomain layout).
 
 For GitHub Enterprise, set `CODEX_GITHUB_API_BASE=https://GHE_HOST/api/v3`.
 
-Example (simple mirror, same subdomain structure as GitHub):
+### Examples
+
+Simple mirror (same subdomain structure as GitHub):
 ```
 CODEX_GITHUB_BASE=https://github.company.local
 CODEX_GITHUB_API_BASE=https://api.github.company.local
 ```
 
-Example (GitHub Enterprise):
+GitHub Enterprise:
 ```
 CODEX_GITHUB_BASE=https://ghe.company.local
 CODEX_GITHUB_API_BASE=https://ghe.company.local/api/v3
