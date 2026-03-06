@@ -94,5 +94,17 @@ def github_request(url: str, user_agent: str) -> bytes:
         return resp.read()
 
 
+def skill_source_dir() -> str | None:
+    """Return a local directory to use as the skill source, or ``None``.
+
+    When set (e.g. by the offline-package bootstrap), skill-installer scripts
+    should prefer this directory over fetching from GitHub.
+
+    An empty value is treated as unset so that ``CODEX_SKILL_SOURCE_DIR=``
+    does not accidentally override the default behavior.
+    """
+    return os.environ.get("CODEX_SKILL_SOURCE_DIR") or None
+
+
 def github_api_contents_url(repo: str, path: str, ref: str) -> str:
     return f"{github_api_base()}/repos/{repo}/contents/{path}?ref={ref}"

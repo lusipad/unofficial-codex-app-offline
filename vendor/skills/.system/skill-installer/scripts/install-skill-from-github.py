@@ -14,7 +14,7 @@ import urllib.error
 import urllib.parse
 import zipfile
 
-from github_utils import codeload_base, github_base, github_request
+from github_utils import codeload_base, github_base, github_request, skill_source_dir
 DEFAULT_REF = "main"
 
 
@@ -327,7 +327,7 @@ def main(argv: list[str]) -> int:
     # and the caller did not explicitly request a GitHub source, default to
     # installing from the local directory instead of reaching out to GitHub.
     if not args.local_dir and not args.url and not args.repo:
-        args.local_dir = os.environ.get("CODEX_SKILL_SOURCE_DIR") or None
+        args.local_dir = skill_source_dir()
     try:
         dest_root = args.dest or _default_dest()
         if args.local_dir:

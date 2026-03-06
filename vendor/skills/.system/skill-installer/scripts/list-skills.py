@@ -9,7 +9,7 @@ import os
 import sys
 import urllib.error
 
-from github_utils import github_api_contents_url, github_request
+from github_utils import github_api_contents_url, github_request, skill_source_dir
 
 DEFAULT_REPO = "openai/skills"
 DEFAULT_PATH = "skills/.curated"
@@ -124,7 +124,7 @@ def main(argv: list[str]) -> int:
     # GitHub.  Set automatically by bootstrap when running from an offline
     # package; can also be set manually in skill-installer.env.
     if not args.source_dir:
-        args.source_dir = os.environ.get("CODEX_SKILL_SOURCE_DIR") or None
+        args.source_dir = skill_source_dir()
     offline_fallback = False
     source_label: str | None = None
     try:
