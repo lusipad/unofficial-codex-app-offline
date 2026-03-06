@@ -1,0 +1,13 @@
+{
+  "name": "codex-app-offline",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Build Codex offline packages from Store bundle sources and embedded skills.",
+  "license": "UNLICENSED",
+  "scripts": {
+    "resolve:store-bundle": "node ./scripts/resolve-store-bundle-url.mjs"
+  },
+  "devDependencies": {
+    "playwright": "1.58.2"
+  }
+}

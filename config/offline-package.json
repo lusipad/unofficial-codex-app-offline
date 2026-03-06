@@ -1,0 +1,26 @@
+{
+  "appName": "Codex",
+  "packageId": "OpenAI.Codex",
+  "releaseNamePrefix": "codex-offline",
+  "installDirName": "Codex Offline",
+  "appSource": {
+    "mode": "rg_adguard",
+    "packageFamilyName": "OpenAI.Codex_2p2nqsd0c76g0",
+    "ring": "Retail"
+  },
+  "skills": {
+    "sources": [
+      "vendor/skills"
+    ]
+  },
+  "packaging": {
+    "outputDir": "dist/offline",
+    "portableZip": true,
+    "setupExe": true,
+    "skillArchive": true,
+    "sourceExportArchive": true
+  },
+  "github": {
+    "runner": "windows-latest"
+  }
+}

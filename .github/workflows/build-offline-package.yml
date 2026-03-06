@@ -1,0 +1,107 @@
+name: build-offline-package
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_installer:
+        description: Build the Inno Setup installer
+        required: false
+        default: true
+        type: boolean
+  schedule:
+    - cron: '15 3 * * *'
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/build-offline-package.yml'
+      - 'config/**'
+      - 'installer/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'scripts/**'
+      - 'vendor/skills/**'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: codex-offline-build
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install resolver dependencies
+        run: npm ci
+
+      - name: Install Playwright browser
+        run: npx playwright install chromium
+
+      - name: Ensure Inno Setup
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.build_installer }}
+        shell: pwsh
+        run: |
+          if (-not (Get-Command ISCC.exe -ErrorAction SilentlyContinue)) {
+            choco install innosetup --no-progress -y
+          }
+
+      - name: Build offline bundle
+        id: build
+        shell: pwsh
+        run: |
+          $args = @(
+            '-ConfigPath',
+            'config/offline-package.json'
+          )
+
+          if ('${{ github.event_name }}' -eq 'workflow_dispatch' -and '${{ inputs.build_installer }}' -eq 'false') {
+            $args += '-SkipInstaller'
+          }
+
+          $metadata = & ./scripts/build-offline-package.ps1 @args | ConvertFrom-Json
+          "release_tag=$($metadata.releaseTag)" >> $env:GITHUB_OUTPUT
+          "release_name=$($metadata.releaseName)" >> $env:GITHUB_OUTPUT
+          "artifact_dir=$($metadata.artifactDirectoryRelative)" >> $env:GITHUB_OUTPUT
+          "version=$($metadata.version)" >> $env:GITHUB_OUTPUT
+          "package_id=$($metadata.packageId)" >> $env:GITHUB_OUTPUT
+          "generated_at=$($metadata.generatedAt)" >> $env:GITHUB_OUTPUT
+          "source_mode=$($metadata.appSource.mode)" >> $env:GITHUB_OUTPUT
+
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.build.outputs.release_tag }}
+          path: ${{ steps.build.outputs.artifact_dir }}
+          if-no-files-found: error
+
+      - name: Publish release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.build.outputs.release_tag }}
+          name: ${{ steps.build.outputs.release_name }}
+          files: ${{ steps.build.outputs.artifact_dir }}/*
+          overwrite_files: true
+          body: |
+            Source package: `${{ steps.build.outputs.package_id }}`
+            Store version: `${{ steps.build.outputs.version }}`
+            Source mode: `${{ steps.build.outputs.source_mode }}`
+            Built at: `${{ steps.build.outputs.generated_at }}`
+
+            Assets:
+            - portable zip
+            - setup exe
+            - bundled skills zip
+            - exported store snapshot zip
+            - SHA256SUMS.txt

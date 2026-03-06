@@ -1,0 +1,259 @@
+[CmdletBinding()]
+param(
+    [string]$ConfigPath = 'config/offline-package.json',
+    [switch]$SkipInstaller,
+    [switch]$RequireInstaller
+)
+
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+
+function Resolve-AbsolutePath {
+    param(
+        [Parameter(Mandatory = $true)][string]$BasePath,
+        [Parameter(Mandatory = $true)][string]$PathValue
+    )
+
+    if ([System.IO.Path]::IsPathRooted($PathValue)) {
+        return [System.IO.Path]::GetFullPath($PathValue)
+    }
+
+    return [System.IO.Path]::GetFullPath((Join-Path $BasePath $PathValue))
+}
+
+function Get-RelativePath {
+    param(
+        [Parameter(Mandatory = $true)][string]$BasePath,
+        [Parameter(Mandatory = $true)][string]$PathValue
+    )
+
+    return [System.IO.Path]::GetRelativePath($BasePath, $PathValue).Replace('\\', '/').Replace('\', '/')
+}
+
+function Get-FileSha256 {
+    param([Parameter(Mandatory = $true)][string]$PathValue)
+
+    return (Get-FileHash -Algorithm SHA256 -Path $PathValue).Hash.ToLowerInvariant()
+}
+
+function Find-Iscc {
+    $command = Get-Command ISCC.exe -ErrorAction SilentlyContinue
+
+    if ($null -ne $command) {
+        return $command.Source
+    }
+
+    $candidates = @(
+        'C:/Program Files (x86)/Inno Setup 6/ISCC.exe',
+        'C:/Program Files/Inno Setup 6/ISCC.exe'
+    )
+
+    foreach ($candidate in $candidates) {
+        if (Test-Path $candidate) {
+            return $candidate
+        }
+    }
+
+    return $null
+}
+
+function Export-AppSource {
+    param(
+        [Parameter(Mandatory = $true)]$Config,
+        [Parameter(Mandatory = $true)][string]$ScriptRoot,
+        [Parameter(Mandatory = $true)][string]$SourceExportRoot
+    )
+
+    $mode = [string]$Config.appSource.mode
+
+    switch ($mode) {
+        'installed_store' {
+            & (Join-Path $ScriptRoot 'export-installed-store-app.ps1') -PackageId $Config.packageId -Destination $SourceExportRoot | Out-Null
+            return [ordered]@{
+                mode = $mode
+                resolver = 'local-store-install'
+            }
+        }
+        'rg_adguard' {
+            $resolverJson = node (Join-Path $ScriptRoot 'resolve-store-bundle-url.mjs') --package-family-name $Config.appSource.packageFamilyName --ring $Config.appSource.ring
+            if ($LASTEXITCODE -ne 0) {
+                throw 'The rg-adguard resolver failed.'
+            }
+
+            $resolved = $resolverJson | ConvertFrom-Json
+            & (Join-Path $ScriptRoot 'import-store-bundle-from-url.ps1') `
+                -BundleUrl $resolved.selected.href `
+                -DownloadedFileName $resolved.selected.fileName `
+                -ExpectedSha1 $resolved.selected.sha1 `
+                -Destination $SourceExportRoot `
+                -PackageFamilyName $Config.appSource.packageFamilyName | Out-Null
+
+            return [ordered]@{
+                mode = $mode
+                resolver = 'rg-adguard'
+                packageFamilyName = $resolved.packageFamilyName
+                selected = $resolved.selected
+                version = $resolved.version
+            }
+        }
+        default {
+            throw "Unsupported app source mode: $mode"
+        }
+    }
+}
+
+$scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+$repoRoot = [System.IO.Path]::GetFullPath((Join-Path $scriptRoot '..'))
+$configFile = Resolve-AbsolutePath -BasePath $repoRoot -PathValue $ConfigPath
+$config = Get-Content -Path $configFile -Raw | ConvertFrom-Json
+
+$workRoot = Join-Path $repoRoot 'build/work'
+$outputRoot = Resolve-AbsolutePath -BasePath $repoRoot -PathValue $config.packaging.outputDir
+$sourceExportRoot = Join-Path $workRoot 'source-app'
+$stageRoot = Join-Path $workRoot 'stage'
+
+New-Item -ItemType Directory -Force -Path $workRoot | Out-Null
+New-Item -ItemType Directory -Force -Path $outputRoot | Out-Null
+
+$appSourceInfo = Export-AppSource -Config $config -ScriptRoot $scriptRoot -SourceExportRoot $sourceExportRoot
+$sourceMetadata = Get-Content -Path (Join-Path $sourceExportRoot 'metadata/package-metadata.json') -Raw | ConvertFrom-Json
+$version = $sourceMetadata.version
+$releaseBase = '{0}-{1}' -f $config.releaseNamePrefix, $version
+$releaseTag = 'offline-v{0}' -f $version
+$artifactRoot = Join-Path $outputRoot $releaseBase
+$packageRoot = Join-Path $stageRoot $releaseBase
+
+if (Test-Path $artifactRoot) {
+    Remove-Item -Path $artifactRoot -Recurse -Force
+}
+
+if (Test-Path $packageRoot) {
+    Remove-Item -Path $packageRoot -Recurse -Force
+}
+
+New-Item -ItemType Directory -Force -Path $artifactRoot | Out-Null
+New-Item -ItemType Directory -Force -Path $packageRoot | Out-Null
+
+Copy-Item -Path (Join-Path $sourceExportRoot 'app') -Destination (Join-Path $packageRoot 'app') -Recurse -Force
+Copy-Item -Path (Join-Path $scriptRoot 'bootstrap-codex-skills.ps1') -Destination (Join-Path $packageRoot 'bootstrap-codex-skills.ps1') -Force
+
+$launchCmd = @(
+    '@echo off',
+    'setlocal',
+    'powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0bootstrap-codex-skills.ps1"'
+)
+$launchCmd | Set-Content -Path (Join-Path $packageRoot 'Launch Codex Offline.cmd') -Encoding ASCII
+
+$syncCmd = @(
+    '@echo off',
+    'setlocal',
+    'powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0bootstrap-codex-skills.ps1" -NoLaunch'
+)
+$syncCmd | Set-Content -Path (Join-Path $packageRoot 'Sync Codex Skills.cmd') -Encoding ASCII
+
+$skillSources = @()
+foreach ($source in $config.skills.sources) {
+    $skillSources += (Resolve-AbsolutePath -BasePath $repoRoot -PathValue $source)
+}
+
+& (Join-Path $scriptRoot 'bundle-skills.ps1') `
+    -SourceRoots $skillSources `
+    -Destination (Join-Path $packageRoot 'seed/codex-home/skills') `
+    -ManifestPath (Join-Path $packageRoot 'seed/skills-manifest.json') `
+    -PackageVersion $version | Out-Null
+
+$buildInfo = [ordered]@{
+    appName = $config.appName
+    packageId = $config.packageId
+    version = $version
+    releaseTag = $releaseTag
+    builtAt = (Get-Date).ToString('o')
+    sourceMetadata = $sourceMetadata
+    appSource = $appSourceInfo
+}
+
+$buildInfo | ConvertTo-Json -Depth 8 | Set-Content -Path (Join-Path $packageRoot 'build-info.json') -Encoding UTF8
+
+$assets = [System.Collections.Generic.List[string]]::new()
+
+if ($config.packaging.portableZip) {
+    $portableZip = Join-Path $artifactRoot ('{0}-portable.zip' -f $releaseBase)
+    Compress-Archive -Path $packageRoot -DestinationPath $portableZip -Force
+    $assets.Add($portableZip) | Out-Null
+}
+
+if ($config.packaging.skillArchive) {
+    $skillsZip = Join-Path $artifactRoot ('{0}-skills.zip' -f $releaseBase)
+    Compress-Archive -Path (Join-Path $packageRoot 'seed/codex-home') -DestinationPath $skillsZip -Force
+    $assets.Add($skillsZip) | Out-Null
+}
+
+if ($config.packaging.sourceExportArchive) {
+    $sourceZip = Join-Path $artifactRoot ('{0}-store-export.zip' -f $releaseBase)
+    Compress-Archive -Path $sourceExportRoot -DestinationPath $sourceZip -Force
+    $assets.Add($sourceZip) | Out-Null
+}
+
+if ($config.packaging.setupExe -and -not $SkipInstaller) {
+    $iscc = Find-Iscc
+
+    if ($null -eq $iscc) {
+        if ($RequireInstaller) {
+            throw 'Inno Setup was not found. Install Inno Setup 6 or run with -SkipInstaller.'
+        }
+
+        Write-Warning 'Inno Setup was not found. Skipping installer build.'
+    }
+    else {
+        $templateFile = Join-Path $repoRoot 'installer/CodexOffline.iss.tpl'
+        $issFile = Join-Path $workRoot 'CodexOffline.generated.iss'
+        $template = Get-Content -Path $templateFile -Raw
+        $rendered = $template
+            .Replace('__APP_NAME__', [string]$config.appName)
+            .Replace('__APP_VERSION__', [string]$version)
+            .Replace('__APP_DIR_NAME__', [string]$config.installDirName)
+            .Replace('__SOURCE_ROOT__', [string]$packageRoot.Replace('/', '\\'))
+            .Replace('__OUTPUT_ROOT__', [string]$artifactRoot.Replace('/', '\\'))
+            .Replace('__OUTPUT_BASENAME__', [string]('{0}-setup' -f $releaseBase))
+
+        $rendered | Set-Content -Path $issFile -Encoding UTF8
+        & $iscc $issFile | Out-Host
+
+        $setupExe = Join-Path $artifactRoot ('{0}-setup.exe' -f $releaseBase)
+        if (Test-Path $setupExe) {
+            $assets.Add($setupExe) | Out-Null
+        }
+    }
+}
+
+$checksumFile = Join-Path $artifactRoot 'SHA256SUMS.txt'
+($assets | Sort-Object | ForEach-Object {
+    '{0} *{1}' -f (Get-FileSha256 -PathValue $_), (Split-Path $_ -Leaf)
+}) | Set-Content -Path $checksumFile -Encoding ASCII
+$assets.Add($checksumFile) | Out-Null
+
+$assetInfo = @($assets | Sort-Object | ForEach-Object {
+    [ordered]@{
+        fileName = Split-Path $_ -Leaf
+        fullPath = $_
+        relativePath = Get-RelativePath -BasePath $repoRoot -PathValue $_
+        sha256 = if ((Split-Path $_ -Leaf) -eq 'SHA256SUMS.txt') { $null } else { Get-FileSha256 -PathValue $_ }
+    }
+})
+
+$buildMetadata = [ordered]@{
+    appName = $config.appName
+    packageId = $config.packageId
+    version = $version
+    releaseTag = $releaseTag
+    releaseName = '{0} Offline {1}' -f $config.appName, $version
+    artifactDirectory = $artifactRoot
+    artifactDirectoryRelative = Get-RelativePath -BasePath $repoRoot -PathValue $artifactRoot
+    generatedAt = (Get-Date).ToString('o')
+    appSource = $appSourceInfo
+    assets = $assetInfo
+}
+
+$buildMetadata | ConvertTo-Json -Depth 8 | Set-Content -Path (Join-Path $outputRoot 'build-metadata.json') -Encoding UTF8
+$buildMetadata | ConvertTo-Json -Depth 8 | Set-Content -Path (Join-Path $artifactRoot 'build-metadata.json') -Encoding UTF8
+$buildMetadata | ConvertTo-Json -Depth 8

@@ -1,0 +1,7 @@
+build/
+dist/
+node_modules/
+.tmp-home/
+.tmp-test/
+test-version.txt
+*.log

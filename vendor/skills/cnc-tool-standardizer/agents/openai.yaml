@@ -1,0 +1,4 @@
+interface:
+  display_name: "CNC Tool Standardizer"
+  short_description: "Standardize AI CNC tool development and QA"
+  default_prompt: "Use $cnc-tool-standardizer to add or refactor an AI CNC tool with per-tool diagrams, LLM localization (API or multi-agent), and acceptance gates."
