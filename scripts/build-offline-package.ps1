@@ -124,13 +124,17 @@ $outputRoot = Resolve-AbsolutePath -BasePath $repoRoot -PathValue $config.packag
 $sourceExportRoot = Join-Path $workRoot 'source-app'
 $stageRoot = Join-Path $workRoot 'stage'
 
+Write-BuildTrace 'Prepared work directories.'
 New-Item -ItemType Directory -Force -Path $workRoot | Out-Null
 New-Item -ItemType Directory -Force -Path $outputRoot | Out-Null
 
+    Write-BuildTrace 'Syncing official skills.'
 if ($null -ne $config.skills.official) {
     & (Join-Path $scriptRoot 'sync-official-skills.ps1') -ConfigPath $ConfigPath | Out-Null
+    Write-BuildTrace 'Official skills synced.'
 }
 
+Write-BuildTrace 'Exporting app source.'
 $appSourceInfo = Export-AppSource -Config $config -ScriptRoot $scriptRoot -SourceExportRoot $sourceExportRoot
 $sourceMetadata = Get-Content -Path (Join-Path $sourceExportRoot 'metadata/package-metadata.json') -Raw | ConvertFrom-Json
 $version = $sourceMetadata.version
@@ -139,6 +143,7 @@ $releaseTag = 'offline-v{0}' -f $version
 $artifactRoot = Join-Path $outputRoot $releaseBase
 $packageRoot = Join-Path $stageRoot $releaseBase
 
+Write-BuildTrace 'Preparing package staging directories.'
 if (Test-Path $artifactRoot) {
     Remove-Item -Path $artifactRoot -Recurse -Force
 }
@@ -150,6 +155,7 @@ if (Test-Path $packageRoot) {
 New-Item -ItemType Directory -Force -Path $artifactRoot | Out-Null
 New-Item -ItemType Directory -Force -Path $packageRoot | Out-Null
 
+Write-BuildTrace 'App payload copied to package root.'
 Copy-Item -Path (Join-Path $sourceExportRoot 'app') -Destination (Join-Path $packageRoot 'app') -Recurse -Force
 Copy-Item -Path (Join-Path $scriptRoot 'bootstrap-codex-skills.ps1') -Destination (Join-Path $packageRoot 'bootstrap-codex-skills.ps1') -Force
 
@@ -167,16 +173,19 @@ $syncCmd = @(
 )
 $syncCmd | Set-Content -Path (Join-Path $packageRoot 'Sync Codex Skills.cmd') -Encoding ASCII
 
+Write-BuildTrace 'Resolving skill source roots.'
 $skillSources = @()
 foreach ($source in $config.skills.sources) {
     $skillSources += (Resolve-AbsolutePath -BasePath $repoRoot -PathValue $source)
 }
 
+Write-BuildTrace 'Bundling skills.'
 & (Join-Path $scriptRoot 'bundle-skills.ps1') `
     -SourceRoots $skillSources `
     -Destination (Join-Path $packageRoot 'seed/codex-home/skills') `
     -ManifestPath (Join-Path $packageRoot 'seed/skills-manifest.json') `
     -PackageVersion $version | Out-Null
+Write-BuildTrace 'Skills bundled.'
 
 $buildInfo = [ordered]@{
     appName = $config.appName
@@ -188,10 +197,12 @@ $buildInfo = [ordered]@{
     appSource = $appSourceInfo
 }
 
+Write-BuildTrace 'Build info written.'
 $buildInfo | ConvertTo-Json -Depth 8 | Set-Content -Path (Join-Path $packageRoot 'build-info.json') -Encoding UTF8
 
 $assets = [System.Collections.Generic.List[string]]::new()
 
+Write-BuildTrace 'Creating archives.'
 if ($config.packaging.portableZip) {
     $portableZip = Join-Path $artifactRoot ('{0}-portable.zip' -f $releaseBase)
     Compress-Archive -Path $packageRoot -DestinationPath $portableZip -Force
@@ -210,6 +221,7 @@ if ($config.packaging.sourceExportArchive) {
     $assets.Add($sourceZip) | Out-Null
 }
 
+Write-BuildTrace 'Checking installer generation.'
 if ($config.packaging.setupExe -and -not $SkipInstaller) {
     $iscc = Find-Iscc
 
@@ -242,6 +254,7 @@ if ($config.packaging.setupExe -and -not $SkipInstaller) {
     }
 }
 
+Write-BuildTrace 'Writing checksums.'
 $checksumFile = Join-Path $artifactRoot 'SHA256SUMS.txt'
 ($assets | Sort-Object | ForEach-Object {
     '{0} *{1}' -f (Get-FileSha256 -PathValue $_), (Split-Path $_ -Leaf)
@@ -270,6 +283,7 @@ $buildMetadata = [ordered]@{
     assets = $assetInfo
 }
 
+Write-BuildTrace 'Finalizing metadata.'
 $buildMetadataJson = $buildMetadata | ConvertTo-Json -Depth 8
 $buildMetadataJson | Set-Content -Path (Join-Path $outputRoot 'build-metadata.json') -Encoding UTF8
 $buildMetadataJson | Set-Content -Path (Join-Path $artifactRoot 'build-metadata.json') -Encoding UTF8
