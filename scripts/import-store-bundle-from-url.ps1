@@ -159,6 +159,17 @@ try {
     }
 
     $metadata | ConvertTo-Json -Depth 6 | Set-Content -Path (Join-Path $metadataPath 'package-metadata.json') -Encoding UTF8
+
+    # Patch the extracted asar so Store-gated features (e.g. Settings menu)
+    # work when running as a standalone exe outside the MSIX container.
+    $patchScript = Join-Path $PSScriptRoot 'patch-app-asar.mjs'
+    if (Test-Path $patchScript) {
+        node $patchScript --app-dir (Join-Path $destinationRoot 'app')
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning "patch-app-asar.mjs exited with code $LASTEXITCODE – continuing anyway."
+        }
+    }
+
     Write-Output $destinationRoot
 }
 finally {

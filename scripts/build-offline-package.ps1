@@ -163,21 +163,32 @@ if (Test-Path $packageRoot) {
 New-Item -ItemType Directory -Force -Path $artifactRoot | Out-Null
 New-Item -ItemType Directory -Force -Path $packageRoot | Out-Null
 
-Write-BuildTrace 'App payload copied to package root.'
-Copy-Item -Path (Join-Path $sourceExportRoot 'app') -Destination (Join-Path $packageRoot 'app') -Recurse -Force
-Copy-Item -Path (Join-Path $scriptRoot 'bootstrap-codex-skills.ps1') -Destination (Join-Path $packageRoot 'bootstrap-codex-skills.ps1') -Force
+# Internal subdirectory — holds app payload and data files users don't need to
+# touch.  Only the .cmd launchers and the env config example are at the root.
+$internalRoot = Join-Path $packageRoot '_internal'
+New-Item -ItemType Directory -Force -Path $internalRoot | Out-Null
+
+Write-BuildTrace 'App payload copied to _internal.'
+Copy-Item -Path (Join-Path $sourceExportRoot 'app') -Destination (Join-Path $internalRoot 'app') -Recurse -Force
+Copy-Item -Path (Join-Path $scriptRoot 'bootstrap-codex-skills.ps1') -Destination (Join-Path $internalRoot 'bootstrap-codex-skills.ps1') -Force
+
+# Config example stays at the root so users find it next to the .cmd files.
+$envExampleSrc = Join-Path $repoRoot 'vendor/skills/.system/skill-installer/skill-installer.env.example'
+if (Test-Path $envExampleSrc) {
+    Copy-Item -Path $envExampleSrc -Destination (Join-Path $packageRoot 'skill-installer.env.example') -Force
+}
 
 $launchCmd = @(
     '@echo off',
     'setlocal',
-    'powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0bootstrap-codex-skills.ps1"'
+    'powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0_internal\bootstrap-codex-skills.ps1"'
 )
 $launchCmd | Set-Content -Path (Join-Path $packageRoot 'Launch Codex Offline.cmd') -Encoding ASCII
 
 $syncCmd = @(
     '@echo off',
     'setlocal',
-    'powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0bootstrap-codex-skills.ps1" -NoLaunch'
+    'powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0_internal\bootstrap-codex-skills.ps1" -NoLaunch'
 )
 $syncCmd | Set-Content -Path (Join-Path $packageRoot 'Sync Codex Skills.cmd') -Encoding ASCII
 
@@ -190,8 +201,8 @@ foreach ($source in $config.skills.sources) {
 Write-BuildTrace 'Bundling skills.'
 & (Join-Path $scriptRoot 'bundle-skills.ps1') `
     -SourceRoots $skillSources `
-    -Destination (Join-Path $packageRoot 'seed/codex-home/skills') `
-    -ManifestPath (Join-Path $packageRoot 'seed/skills-manifest.json') `
+    -Destination (Join-Path $internalRoot 'seed/codex-home/skills') `
+    -ManifestPath (Join-Path $internalRoot 'seed/skills-manifest.json') `
     -PackageVersion $version | Out-Null
 Write-BuildTrace 'Skills bundled.'
 
@@ -206,7 +217,7 @@ $buildInfo = [ordered]@{
 }
 
 Write-BuildTrace 'Build info written.'
-$buildInfo | ConvertTo-Json -Depth 8 | Set-Content -Path (Join-Path $packageRoot 'build-info.json') -Encoding UTF8
+$buildInfo | ConvertTo-Json -Depth 8 | Set-Content -Path (Join-Path $internalRoot 'build-info.json') -Encoding UTF8
 
 $assets = [System.Collections.Generic.List[string]]::new()
 
@@ -219,7 +230,7 @@ if ($config.packaging.portableZip) {
 
 if ($config.packaging.skillArchive) {
     $skillsZip = Join-Path $artifactRoot ('{0}-skills.zip' -f $releaseBase)
-    Compress-Archive -Path (Join-Path $packageRoot 'seed/codex-home') -DestinationPath $skillsZip -Force
+    Compress-Archive -Path (Join-Path $internalRoot 'seed/codex-home') -DestinationPath $skillsZip -Force
     $assets.Add($skillsZip) | Out-Null
 }
 

@@ -14,7 +14,7 @@ import urllib.error
 import urllib.parse
 import zipfile
 
-from github_utils import github_request
+from github_utils import codeload_base, github_base, github_request, skill_source_dir
 DEFAULT_REF = "main"
 
 
@@ -27,6 +27,7 @@ class Args:
     dest: str | None = None
     name: str | None = None
     method: str = "auto"
+    local_dir: str | None = None
 
 
 @dataclass
@@ -58,8 +59,12 @@ def _request(url: str) -> bytes:
 
 def _parse_github_url(url: str, default_ref: str) -> tuple[str, str, str, str | None]:
     parsed = urllib.parse.urlparse(url)
-    if parsed.netloc != "github.com":
-        raise InstallError("Only GitHub URLs are supported for download mode.")
+    configured_host = urllib.parse.urlparse(github_base()).hostname
+    if parsed.hostname not in ("github.com", configured_host):
+        raise InstallError(
+            f"URL host '{parsed.hostname}' does not match github.com or "
+            f"configured CODEX_GITHUB_BASE host '{configured_host}'."
+        )
     parts = [p for p in parsed.path.split("/") if p]
     if len(parts) < 2:
         raise InstallError("Invalid GitHub URL.")
@@ -78,7 +83,7 @@ def _parse_github_url(url: str, default_ref: str) -> tuple[str, str, str, str | 
 
 
 def _download_repo_zip(owner: str, repo: str, ref: str, dest_dir: str) -> str:
-    zip_url = f"https://codeload.github.com/{owner}/{repo}/zip/{ref}"
+    zip_url = f"{codeload_base()}/{owner}/{repo}/zip/{ref}"
     zip_path = os.path.join(dest_dir, "repo.zip")
     try:
         payload = _request(zip_url)
@@ -176,12 +181,53 @@ def _copy_skill(src: str, dest_dir: str) -> None:
     shutil.copytree(src, dest_dir)
 
 
+def _install_from_local_dir(
+    local_dir: str,
+    paths: list[str] | None,
+    dest_root: str,
+    name: str | None,
+) -> list[tuple[str, str]]:
+    """Install skill(s) directly from a local directory or LAN share."""
+    src_root = os.path.realpath(local_dir)
+    if not os.path.isdir(src_root):
+        raise InstallError(f"Local directory not found: {local_dir}")
+
+    if paths:
+        installed = []
+        for path in paths:
+            skill_name = (name if len(paths) == 1 else None) or os.path.basename(
+                path.rstrip("/\\")
+            )
+            if not skill_name:
+                raise InstallError("Unable to derive skill name.")
+            _validate_skill_name(skill_name)
+            skill_src = os.path.realpath(os.path.join(src_root, path))
+            if not (skill_src == src_root or skill_src.startswith(src_root + os.sep)):
+                raise InstallError("Path escapes local directory.")
+            _validate_skill(skill_src)
+            dest_dir = os.path.join(dest_root, skill_name)
+            _copy_skill(skill_src, dest_dir)
+            installed.append((skill_name, dest_dir))
+        return installed
+    else:
+        # local_dir itself is the skill directory
+        skill_name = name or os.path.basename(src_root.rstrip("/\\"))
+        if not skill_name:
+            raise InstallError("Unable to derive skill name from path.")
+        _validate_skill_name(skill_name)
+        _validate_skill(src_root)
+        dest_dir = os.path.join(dest_root, skill_name)
+        _copy_skill(src_root, dest_dir)
+        return [(skill_name, dest_dir)]
+
+
 def _build_repo_url(owner: str, repo: str) -> str:
-    return f"https://github.com/{owner}/{repo}.git"
+    return f"{github_base()}/{owner}/{repo}.git"
 
 
 def _build_repo_ssh(owner: str, repo: str) -> str:
-    return f"git@github.com:{owner}/{repo}.git"
+    host = urllib.parse.urlparse(github_base()).hostname or "github.com"
+    return f"git@{host}:{owner}/{repo}.git"
 
 
 def _prepare_repo(source: Source, method: str, tmp_dir: str) -> str:
@@ -245,13 +291,13 @@ def _default_dest() -> str:
 
 
 def _parse_args(argv: list[str]) -> Args:
-    parser = argparse.ArgumentParser(description="Install a skill from GitHub.")
+    parser = argparse.ArgumentParser(description="Install a skill from GitHub or a local directory.")
     parser.add_argument("--repo", help="owner/repo")
     parser.add_argument("--url", help="https://github.com/owner/repo[/tree/ref/path]")
     parser.add_argument(
         "--path",
         nargs="+",
-        help="Path(s) to skill(s) inside repo",
+        help="Path(s) to skill(s) inside repo or local directory",
     )
     parser.add_argument("--ref", default=DEFAULT_REF)
     parser.add_argument("--dest", help="Destination skills directory")
@@ -263,39 +309,58 @@ def _parse_args(argv: list[str]) -> Args:
         choices=["auto", "download", "git"],
         default="auto",
     )
+    parser.add_argument(
+        "--local-dir",
+        dest="local_dir",
+        help=(
+            "Local directory to install skill(s) from (bypasses GitHub). "
+            "Use alone to install the directory itself as a skill, "
+            "or combine with --path to install subdirectory skill(s)."
+        ),
+    )
     return parser.parse_args(argv, namespace=Args())
 
 
 def main(argv: list[str]) -> int:
     args = _parse_args(argv)
+    # CODEX_SKILL_SOURCE_DIR: when set (e.g. by bootstrap in an offline package)
+    # and the caller did not explicitly request a GitHub source, default to
+    # installing from the local directory instead of reaching out to GitHub.
+    if not args.local_dir and not args.url and not args.repo:
+        args.local_dir = skill_source_dir()
     try:
-        source = _resolve_source(args)
-        source.ref = source.ref or args.ref
-        if not source.paths:
-            raise InstallError("No skill paths provided.")
-        for path in source.paths:
-            _validate_relative_path(path)
         dest_root = args.dest or _default_dest()
-        tmp_dir = tempfile.mkdtemp(prefix="skill-install-", dir=_tmp_root())
-        try:
-            repo_root = _prepare_repo(source, args.method, tmp_dir)
-            installed = []
+        if args.local_dir:
+            installed = _install_from_local_dir(
+                args.local_dir, args.path, dest_root, args.name
+            )
+        else:
+            source = _resolve_source(args)
+            source.ref = source.ref or args.ref
+            if not source.paths:
+                raise InstallError("No skill paths provided.")
             for path in source.paths:
-                skill_name = args.name if len(source.paths) == 1 else None
-                skill_name = skill_name or os.path.basename(path.rstrip("/"))
-                _validate_skill_name(skill_name)
-                if not skill_name:
-                    raise InstallError("Unable to derive skill name.")
-                dest_dir = os.path.join(dest_root, skill_name)
-                if os.path.exists(dest_dir):
-                    raise InstallError(f"Destination already exists: {dest_dir}")
-                skill_src = os.path.join(repo_root, path)
-                _validate_skill(skill_src)
-                _copy_skill(skill_src, dest_dir)
-                installed.append((skill_name, dest_dir))
-        finally:
-            if os.path.isdir(tmp_dir):
-                shutil.rmtree(tmp_dir, ignore_errors=True)
+                _validate_relative_path(path)
+            tmp_dir = tempfile.mkdtemp(prefix="skill-install-", dir=_tmp_root())
+            try:
+                repo_root = _prepare_repo(source, args.method, tmp_dir)
+                installed = []
+                for path in source.paths:
+                    skill_name = args.name if len(source.paths) == 1 else None
+                    skill_name = skill_name or os.path.basename(path.rstrip("/"))
+                    _validate_skill_name(skill_name)
+                    if not skill_name:
+                        raise InstallError("Unable to derive skill name.")
+                    dest_dir = os.path.join(dest_root, skill_name)
+                    if os.path.exists(dest_dir):
+                        raise InstallError(f"Destination already exists: {dest_dir}")
+                    skill_src = os.path.join(repo_root, path)
+                    _validate_skill(skill_src)
+                    _copy_skill(skill_src, dest_dir)
+                    installed.append((skill_name, dest_dir))
+            finally:
+                if os.path.isdir(tmp_dir):
+                    shutil.rmtree(tmp_dir, ignore_errors=True)
         for skill_name, dest_dir in installed:
             print(f"Installed {skill_name} to {dest_dir}")
         return 0

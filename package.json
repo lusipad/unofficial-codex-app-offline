@@ -8,6 +8,7 @@
     "resolve:store-bundle": "node ./scripts/resolve-store-bundle-url.mjs"
   },
   "devDependencies": {
+    "@electron/asar": "3.2.18",
     "playwright": "1.58.2"
   }
 }
