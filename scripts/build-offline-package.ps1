@@ -9,6 +9,17 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+trap {
+    Write-Error ('Unhandled error: ' + $_.Exception.Message)
+    if ($null -ne $_.InvocationInfo) {
+        Write-Error $_.InvocationInfo.PositionMessage
+    }
+    if (-not [string]::IsNullOrWhiteSpace($_.ScriptStackTrace)) {
+        Write-Error $_.ScriptStackTrace
+    }
+    throw
+}
+
 function Resolve-AbsolutePath {
     param(
         [Parameter(Mandatory = $true)][string]$BasePath,
@@ -270,3 +281,4 @@ if (-not [string]::IsNullOrWhiteSpace($MetadataOutputPath)) {
 }
 
 $buildMetadataJson
+
