@@ -72,11 +72,9 @@ jobs:
         run: |
           $tag = '${{ steps.source.outputs.release_tag }}'
           $repo = '${{ github.repository }}'
-          $existingReleaseUrl = ''
+          $existingReleaseUrl = gh release view $tag --repo $repo --json url --jq '.url' 2>$null
 
-          gh release view $tag --repo $repo --json url --jq '.url' *> $null
-          if ($LASTEXITCODE -eq 0) {
-            $existingReleaseUrl = gh release view $tag --repo $repo --json url --jq '.url'
+          if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($existingReleaseUrl)) {
             "skip_build=true" >> $env:GITHUB_OUTPUT
             "existing_release_url=$existingReleaseUrl" >> $env:GITHUB_OUTPUT
             Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "Version $tag is already published at $existingReleaseUrl. Build and publish steps were skipped."
@@ -85,6 +83,9 @@ jobs:
             "skip_build=false" >> $env:GITHUB_OUTPUT
             Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "Version $tag is new. Build and publish steps will continue."
           }
+
+          $global:LASTEXITCODE = 0
+          exit 0
 
       - name: Ensure Inno Setup
         if: ${{ steps.release_check.outputs.skip_build != 'true' && (github.event_name != 'workflow_dispatch' || inputs.build_installer) }}
