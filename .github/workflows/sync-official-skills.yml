@@ -1,0 +1,47 @@
+name: sync-official-skills
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '30 3 * * 1'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-official-skills
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Sync official skills snapshot
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          ./scripts/sync-official-skills.ps1 -ConfigPath 'config/offline-package.json'
+
+      - name: Commit official skills update
+        shell: pwsh
+        run: |
+          $metadata = Get-Content 'vendor/skills-official/.sync-metadata.json' -Raw | ConvertFrom-Json
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+
+          if ((git status --porcelain).Length -eq 0) {
+            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value 'Official skills snapshot is already up to date.'
+            exit 0
+          }
+
+          git add config/offline-package.json scripts/sync-official-skills.ps1 vendor/skills-official
+          git commit -m "Sync official skills to $($metadata.commit.Substring(0, 7))"
+          git push
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "Updated official skills snapshot to commit $($metadata.commit)."

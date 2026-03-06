@@ -21,7 +21,7 @@ on:
       - 'package.json'
       - 'package-lock.json'
       - 'scripts/**'
-      - 'vendor/skills/**'
+      - 'vendor/**'
 
 permissions:
   contents: write
@@ -148,3 +148,4 @@ jobs:
             - bundled skills zip
             - exported store snapshot zip
             - SHA256SUMS.txt
+
