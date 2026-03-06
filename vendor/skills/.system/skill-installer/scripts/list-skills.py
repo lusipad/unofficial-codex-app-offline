@@ -47,6 +47,21 @@ def _installed_skills() -> set[str]:
     return entries
 
 
+def _list_local_skills() -> list[str]:
+    """List non-system skills available locally in CODEX_HOME/skills."""
+    root = os.path.join(_codex_home(), "skills")
+    if not os.path.isdir(root):
+        return []
+    entries = []
+    for name in os.listdir(root):
+        if name.startswith("."):
+            continue
+        path = os.path.join(root, name)
+        if os.path.isdir(path):
+            entries.append(name)
+    return sorted(entries)
+
+
 def _list_skills(repo: str, path: str, ref: str) -> list[str]:
     api_url = github_api_contents_url(repo, path, ref)
     try:
@@ -85,8 +100,17 @@ def _parse_args(argv: list[str]) -> Args:
 
 def main(argv: list[str]) -> int:
     args = _parse_args(argv)
+    offline_fallback = False
     try:
-        skills = _list_skills(args.repo, args.path, args.ref)
+        try:
+            skills = _list_skills(args.repo, args.path, args.ref)
+        except urllib.error.URLError as exc:
+            print(
+                f"Warning: Cannot reach GitHub ({exc}). Showing locally bundled skills.",
+                file=sys.stderr,
+            )
+            skills = _list_local_skills()
+            offline_fallback = True
         installed = _installed_skills()
         if args.format == "json":
             payload = [
@@ -94,6 +118,8 @@ def main(argv: list[str]) -> int:
             ]
             print(json.dumps(payload))
         else:
+            if offline_fallback:
+                print("(Offline mode: GitHub unavailable, showing locally bundled skills)\n")
             for idx, name in enumerate(skills, start=1):
                 suffix = " (already installed)" if name in installed else ""
                 print(f"{idx}. {name}{suffix}")

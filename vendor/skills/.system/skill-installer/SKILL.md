@@ -51,7 +51,7 @@ All of these scripts use network, so when running in the sandbox, request escala
 
 ## Notes
 
-- Curated listing is fetched from `https://github.com/openai/skills/tree/main/skills/.curated` via the GitHub API. If it is unavailable, explain the error and exit.
+- Curated listing is fetched from `https://github.com/openai/skills/tree/main/skills/.curated` via the GitHub API. If GitHub is unreachable (e.g., offline or intranet environment), the script automatically falls back to listing locally bundled skills from `$CODEX_HOME/skills`.
 - Private GitHub repos can be accessed via existing git credentials or optional `GITHUB_TOKEN`/`GH_TOKEN` for download.
 - Git fallback tries HTTPS first, then SSH.
 - The skills at https://github.com/openai/skills/tree/main/skills/.system are preinstalled, so no need to help users install those. If they ask, just explain this. If they insist, you can download and overwrite.
