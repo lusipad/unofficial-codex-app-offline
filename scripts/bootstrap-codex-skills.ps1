@@ -44,6 +44,9 @@ function Import-EnvFile {
     }
 }
 
+# Check the package root (parent of _internal/) first so the user's config at
+# the root takes priority, then fall back to a file beside this script.
+Import-EnvFile -Path (Join-Path $PSScriptRoot '..' 'skill-installer.env')
 Import-EnvFile -Path (Join-Path $PSScriptRoot 'skill-installer.env')
 
 $resolvedInstallRoot = Resolve-AbsolutePath -PathValue $InstallRoot
