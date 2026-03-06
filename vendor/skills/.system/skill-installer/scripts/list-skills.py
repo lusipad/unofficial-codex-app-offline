@@ -25,6 +25,7 @@ class Args(argparse.Namespace):
     path: str
     ref: str
     format: str
+    source_dir: str | None
 
 
 def _request(url: str) -> bytes:
@@ -57,6 +58,20 @@ def _list_local_skills() -> list[str]:
         if name.startswith("."):
             continue
         path = os.path.join(root, name)
+        if os.path.isdir(path):
+            entries.append(name)
+    return sorted(entries)
+
+
+def _list_skills_from_dir(source_dir: str) -> list[str]:
+    """List skill directories from a local path (LAN share or local folder)."""
+    if not os.path.isdir(source_dir):
+        raise ListError(f"Source directory not found: {source_dir}")
+    entries = []
+    for name in os.listdir(source_dir):
+        if name.startswith("."):
+            continue
+        path = os.path.join(source_dir, name)
         if os.path.isdir(path):
             entries.append(name)
     return sorted(entries)
@@ -95,22 +110,32 @@ def _parse_args(argv: list[str]) -> Args:
         default="text",
         help="Output format",
     )
+    parser.add_argument(
+        "--source-dir",
+        dest="source_dir",
+        help="Local directory containing skills (bypasses GitHub, e.g. a LAN share)",
+    )
     return parser.parse_args(argv, namespace=Args())
 
 
 def main(argv: list[str]) -> int:
     args = _parse_args(argv)
     offline_fallback = False
+    source_label: str | None = None
     try:
-        try:
-            skills = _list_skills(args.repo, args.path, args.ref)
-        except urllib.error.URLError as exc:
-            print(
-                f"Warning: Cannot reach GitHub ({exc}). Showing locally bundled skills.",
-                file=sys.stderr,
-            )
-            skills = _list_local_skills()
-            offline_fallback = True
+        if args.source_dir:
+            skills = _list_skills_from_dir(args.source_dir)
+            source_label = args.source_dir
+        else:
+            try:
+                skills = _list_skills(args.repo, args.path, args.ref)
+            except urllib.error.URLError as exc:
+                print(
+                    f"Warning: Cannot reach GitHub ({exc}). Showing locally bundled skills.",
+                    file=sys.stderr,
+                )
+                skills = _list_local_skills()
+                offline_fallback = True
         installed = _installed_skills()
         if args.format == "json":
             payload = [
@@ -118,7 +143,9 @@ def main(argv: list[str]) -> int:
             ]
             print(json.dumps(payload))
         else:
-            if offline_fallback:
+            if source_label:
+                print(f"Skills from {source_label}:\n")
+            elif offline_fallback:
                 print("(Offline mode: GitHub unavailable, showing locally bundled skills)\n")
             for idx, name in enumerate(skills, start=1):
                 suffix = " (already installed)" if name in installed else ""
