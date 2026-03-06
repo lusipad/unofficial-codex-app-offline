@@ -62,3 +62,31 @@ All of these scripts use network, so when running in the sandbox, request escala
 - Git fallback tries HTTPS first, then SSH.
 - The skills at https://github.com/openai/skills/tree/main/skills/.system are preinstalled, so no need to help users install those. If they ask, just explain this. If they insist, you can download and overwrite.
 - Installed annotations come from `$CODEX_HOME/skills`.
+
+## Mirror / Intranet Configuration
+
+Set environment variables to redirect all GitHub requests to a local mirror:
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `CODEX_GITHUB_BASE` | `https://github.com` | Web URL base (git clone, URL parsing) |
+| `CODEX_GITHUB_API_BASE` | `https://api.github.com` | REST API base (listing, metadata) |
+| `CODEX_CODELOAD_BASE` | derived from `CODEX_GITHUB_BASE` | Zip download base |
+
+If only `CODEX_GITHUB_BASE` is set, `CODEX_CODELOAD_BASE` is automatically derived as
+`{scheme}://codeload.{host}` (matching GitHub's subdomain layout).
+
+For GitHub Enterprise, set `CODEX_GITHUB_API_BASE=https://GHE_HOST/api/v3`.
+
+Example (simple mirror, same subdomain structure as GitHub):
+```
+CODEX_GITHUB_BASE=https://github.company.local
+CODEX_GITHUB_API_BASE=https://api.github.company.local
+```
+
+Example (GitHub Enterprise):
+```
+CODEX_GITHUB_BASE=https://ghe.company.local
+CODEX_GITHUB_API_BASE=https://ghe.company.local/api/v3
+CODEX_CODELOAD_BASE=https://ghe.company.local/codeload
+```

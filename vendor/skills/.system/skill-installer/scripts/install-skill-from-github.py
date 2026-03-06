@@ -14,7 +14,7 @@ import urllib.error
 import urllib.parse
 import zipfile
 
-from github_utils import github_request
+from github_utils import codeload_base, github_base, github_request
 DEFAULT_REF = "main"
 
 
@@ -59,8 +59,12 @@ def _request(url: str) -> bytes:
 
 def _parse_github_url(url: str, default_ref: str) -> tuple[str, str, str, str | None]:
     parsed = urllib.parse.urlparse(url)
-    if parsed.netloc != "github.com":
-        raise InstallError("Only GitHub URLs are supported for download mode.")
+    configured_host = urllib.parse.urlparse(github_base()).hostname
+    if parsed.hostname not in ("github.com", configured_host):
+        raise InstallError(
+            f"URL host '{parsed.hostname}' does not match github.com or "
+            f"configured CODEX_GITHUB_BASE host '{configured_host}'."
+        )
     parts = [p for p in parsed.path.split("/") if p]
     if len(parts) < 2:
         raise InstallError("Invalid GitHub URL.")
@@ -79,7 +83,7 @@ def _parse_github_url(url: str, default_ref: str) -> tuple[str, str, str, str | 
 
 
 def _download_repo_zip(owner: str, repo: str, ref: str, dest_dir: str) -> str:
-    zip_url = f"https://codeload.github.com/{owner}/{repo}/zip/{ref}"
+    zip_url = f"{codeload_base()}/{owner}/{repo}/zip/{ref}"
     zip_path = os.path.join(dest_dir, "repo.zip")
     try:
         payload = _request(zip_url)
@@ -218,11 +222,12 @@ def _install_from_local_dir(
 
 
 def _build_repo_url(owner: str, repo: str) -> str:
-    return f"https://github.com/{owner}/{repo}.git"
+    return f"{github_base()}/{owner}/{repo}.git"
 
 
 def _build_repo_ssh(owner: str, repo: str) -> str:
-    return f"git@github.com:{owner}/{repo}.git"
+    host = urllib.parse.urlparse(github_base()).hostname or "github.com"
+    return f"git@{host}:{owner}/{repo}.git"
 
 
 def _prepare_repo(source: Source, method: str, tmp_dir: str) -> str:
