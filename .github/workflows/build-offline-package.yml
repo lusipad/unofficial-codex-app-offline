@@ -100,15 +100,13 @@ jobs:
         id: build
         shell: pwsh
         run: |
-          $buildArgs = @{
-            ConfigPath = 'config/offline-package.json'
-          }
-
           if ('${{ github.event_name }}' -eq 'workflow_dispatch' -and '${{ inputs.build_installer }}' -eq 'false') {
-            $buildArgs.SkipInstaller = $true
+            $metadata = & ./scripts/build-offline-package.ps1 -ConfigPath 'config/offline-package.json' -SkipInstaller | ConvertFrom-Json
+          }
+          else {
+            $metadata = & ./scripts/build-offline-package.ps1 -ConfigPath 'config/offline-package.json' | ConvertFrom-Json
           }
 
-          $metadata = & ./scripts/build-offline-package.ps1 @buildArgs | ConvertFrom-Json
           "release_tag=$($metadata.releaseTag)" >> $env:GITHUB_OUTPUT
           "release_name=$($metadata.releaseName)" >> $env:GITHUB_OUTPUT
           "artifact_dir=$($metadata.artifactDirectoryRelative)" >> $env:GITHUB_OUTPUT
