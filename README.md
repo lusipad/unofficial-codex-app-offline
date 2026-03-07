@@ -1,5 +1,183 @@
 # Codex App Offline
 
+[English](#english) | [中文](#中文)
+
+---
+
+<a id="english"></a>
+
+## English
+
+This repository repackages the `OpenAI.Codex` Windows Store app into an offline portable edition and installer, bundling the required skills together.
+
+The current implementation has two input pipelines:
+
+- **App package**: Resolves the Microsoft Store distribution link via `store.rg-adguard.net`, downloads the `OpenAI.Codex` Store package, then extracts and repackages it.
+- **Skills**: Fetched live from the official `openai/skills` repository at build time, then overlaid with local custom snapshots from `vendor/skills`.
+
+This means the GitHub Actions runner does not depend on your local `~/.codex/skills`, nor does the repository need to cache official skills snapshots long-term.
+
+### Architecture
+
+#### App Source
+
+Config file: `config/offline-package.json`
+
+Current defaults:
+
+- `appSource.mode`: `rg_adguard`
+- `appSource.packageFamilyName`: `OpenAI.Codex_2p2nqsd0c76g0`
+- `appSource.ring`: `Retail`
+
+Build flow:
+
+1. `scripts/resolve-store-bundle-url.mjs` opens `store.rg-adguard.net` via Playwright
+2. Resolves `OpenAI.Codex_2p2nqsd0c76g0` by `PackageFamilyName`
+3. Obtains a temporary Microsoft CDN download link
+4. `scripts/import-store-bundle-from-url.ps1` downloads and extracts the `.msix/.appx/.bundle`
+5. Extracts the `app` directory and enters the unified packaging flow
+
+#### Skills Source
+
+Two layers of skills sources at build time:
+
+- **Official**: `scripts/sync-official-skills.ps1` downloads a zipball from `openai/skills` at build time, extracting `.system` and `.curated`
+- **Custom**: `vendor/skills` in the repository
+
+Merge order:
+
+1. Place official skills into the temp directory `build/work/skills-official`
+2. Overlay `vendor/skills` on top
+
+If a skill with the same name exists in `vendor/skills`, it overrides the official version.
+
+#### Skills Packaging Behavior
+
+- `scripts/build-offline-package.ps1` automatically runs `scripts/sync-official-skills.ps1` before each build
+- `scripts/bundle-skills.ps1` merges `build/work/skills-official` and `vendor/skills` into `seed/codex-home/skills`
+- `scripts/bootstrap-codex-skills.ps1` syncs bundled skills to `~/.codex/skills` on the target machine at first launch
+- Does not overwrite the user's existing `config.toml`, credentials, or other personal data
+
+### GitHub Actions
+
+#### 1. Offline Build Workflow
+
+File: `.github/workflows/build-offline-package.yml`
+
+Features:
+
+- Runs on `windows-latest`
+- Auto-installs Node.js and Playwright Chromium
+- Auto-resolves the Store download link
+- Fetches official skills live at build time
+- Auto-generates `portable.zip`, `setup.exe`, `skills.zip`, `store-export.zip`
+- Includes "skip if version unchanged" logic: skips build and release if the same release tag already exists
+
+#### 2. Build Failure Retry / Alert Workflow
+
+File: `.github/workflows/build-offline-package-monitor.yml`
+
+Features:
+
+- Automatically retries the failed job when the main build fails
+- Retries up to 3 times
+- If still failing, automatically creates or updates a GitHub Issue as an alert
+- Automatically closes the alert Issue when a subsequent successful run is detected
+
+### Local Commands
+
+#### Sync local custom skills
+
+```powershell
+./scripts/sync-local-skills.ps1
+```
+
+Syncs your local `~/.codex/skills` to `vendor/skills` by default.
+
+#### Test official skills fetch only
+
+```powershell
+./scripts/sync-official-skills.ps1
+```
+
+Fetches official `openai/skills` to `build/work/skills-official` based on the config in `config/offline-package.json`.
+
+#### Test Store link resolution only
+
+```powershell
+node ./scripts/resolve-store-bundle-url.mjs --package-family-name OpenAI.Codex_2p2nqsd0c76g0
+```
+
+#### Build the offline package
+
+```powershell
+pwsh -NoProfile -File ./scripts/build-offline-package.ps1 -ConfigPath config/offline-package.json
+```
+
+#### Skip installer, generate zip only
+
+```powershell
+pwsh -NoProfile -File ./scripts/build-offline-package.ps1 -ConfigPath config/offline-package.json -SkipInstaller
+```
+
+### Artifacts
+
+Default output directory: `dist/offline/<release-name>/`
+
+Includes:
+
+- `portable.zip`
+- `setup.exe` (when Inno Setup is available)
+- `skills.zip`
+- `store-export.zip`
+- `SHA256SUMS.txt`
+
+### Verified Results
+
+Locally verified:
+
+- Successfully resolved the `OpenAI.Codex` Store download link via `rg-adguard`
+- Successfully fetched official `openai/skills` before packaging
+- Successfully merged official skills with `vendor/skills`
+- Successfully generated the offline package directory `dist/offline/codex-offline-26.305.950.0`
+- `app/resources/codex.exe --version` runs correctly after extraction
+
+### Directory Reference
+
+- `config/offline-package.json` — Offline build configuration
+- `scripts/build-offline-package.ps1` — Main build orchestration script
+- `scripts/resolve-store-bundle-url.mjs` — Unofficial Store download link resolver
+- `scripts/import-store-bundle-from-url.ps1` — Download and extract Store packages
+- `scripts/bundle-skills.ps1` — Merge and organize multiple skills sources
+- `scripts/sync-local-skills.ps1` — Sync local custom skills to `vendor/skills`
+- `scripts/sync-official-skills.ps1` — Fetch official `openai/skills` at build time
+- `scripts/bootstrap-codex-skills.ps1` — Sync bundled skills to user directory before launch
+- `vendor/skills` — Local custom skills snapshot
+- `.github/workflows/build-offline-package.yml` — Offline build and release
+- `.github/workflows/build-offline-package-monitor.yml` — Failure retry and alerting
+
+### Risks & Limitations
+
+This approach prioritizes "works for now" over being an official offline distribution channel. Key risks:
+
+- `store.rg-adguard.net` is a third-party service that may go down, rate-limit, or change its page structure
+- Microsoft CDN returns temporary links; each build must re-resolve them
+- Official `openai/skills` are fetched live at build time; if the upstream repo structure changes, the sync script may need updates
+- Changes to the internal structure of Store packages may require updates to the extraction logic
+
+### Design Principles
+
+- **KISS**: App packages, official skills, and local skills are handled independently, then unified during packaging
+- **YAGNI**: Only implements what's needed for offline distribution — live fetch, merge, and release — no extra snapshot caching
+- **DRY**: App resolution, skills sync, skills merge, and installer generation each have a single responsibility
+- **SOLID**: Clear script boundaries; switching the Store source or skills source has minimal impact
+
+---
+
+<a id="中文"></a>
+
+## 中文
+
 这个仓库用于把 `OpenAI.Codex` 的 Windows Store 包重新封装为离线绿色版和安装包，并把需要的 skills 一起打进去。
 
 当前实现包含两条输入链路：
@@ -9,9 +187,9 @@
 
 这意味着 GitHub Actions 服务器不需要依赖你本机的 `~/.codex/skills`，也不需要仓库长期缓存官方 skills 快照。
 
-## 当前结构
+### 当前结构
 
-### 应用来源
+#### 应用来源
 
 配置文件：`config/offline-package.json`
 
@@ -29,7 +207,7 @@
 4. `scripts/import-store-bundle-from-url.ps1` 下载并解包 `.msix/.appx/.bundle`
 5. 提取 `app` 目录并进入统一打包流程
 
-### skills 来源
+#### skills 来源
 
 打包时会有两层 skills 来源：
 
@@ -43,16 +221,16 @@
 
 因此如果 `vendor/skills` 里存在同名 skill，会覆盖官方内容。
 
-### skills 打包行为
+#### skills 打包行为
 
 - `scripts/build-offline-package.ps1` 会在每次打包前自动执行 `scripts/sync-official-skills.ps1`
 - `scripts/bundle-skills.ps1` 会把 `build/work/skills-official` 和 `vendor/skills` 合并到 `seed/codex-home/skills`
 - `scripts/bootstrap-codex-skills.ps1` 会在用户首次启动离线包时，把内置 skills 同步到目标机器的 `~/.codex/skills`
 - 不覆盖用户已有的 `config.toml`、认证信息和其他个人数据
 
-## GitHub Actions
+### GitHub Actions
 
-### 1. 离线构建工作流
+#### 1. 离线构建工作流
 
 文件：`.github/workflows/build-offline-package.yml`
 
@@ -65,7 +243,7 @@
 - 自动生成 `portable.zip`、`setup.exe`、`skills.zip`、`store-export.zip`
 - 已加“版本不变时跳过发布”逻辑：如果同一个 release tag 已存在，则跳过构建和发布
 
-### 2. 构建失败重试/告警工作流
+#### 2. 构建失败重试/告警工作流
 
 文件：`.github/workflows/build-offline-package-monitor.yml`
 
@@ -76,9 +254,9 @@
 - 仍失败时自动创建或更新 GitHub Issue 告警
 - 后续有成功运行时自动关闭这个告警 Issue
 
-## 本地命令
+### 本地命令
 
-### 同步本地自定义 skills
+#### 同步本地自定义 skills
 
 ```powershell
 ./scripts/sync-local-skills.ps1
@@ -86,7 +264,7 @@
 
 默认会把本机 `~/.codex/skills` 同步到 `vendor/skills`。
 
-### 只测试官方 skills 拉取
+#### 只测试官方 skills 拉取
 
 ```powershell
 ./scripts/sync-official-skills.ps1
@@ -94,25 +272,25 @@
 
 默认会按 `config/offline-package.json` 中的配置，把官方 `openai/skills` 拉到临时目录 `build/work/skills-official`。
 
-### 只测试 Store 下载链接解析
+#### 只测试 Store 下载链接解析
 
 ```powershell
 node ./scripts/resolve-store-bundle-url.mjs --package-family-name OpenAI.Codex_2p2nqsd0c76g0
 ```
 
-### 构建离线包
+#### 构建离线包
 
 ```powershell
 pwsh -NoProfile -File ./scripts/build-offline-package.ps1 -ConfigPath config/offline-package.json
 ```
 
-### 跳过安装器，只生成 zip
+#### 跳过安装器，只生成 zip
 
 ```powershell
 pwsh -NoProfile -File ./scripts/build-offline-package.ps1 -ConfigPath config/offline-package.json -SkipInstaller
 ```
 
-## 产物
+### 产物
 
 默认输出到：`dist/offline/<release-name>/`
 
@@ -124,7 +302,7 @@ pwsh -NoProfile -File ./scripts/build-offline-package.ps1 -ConfigPath config/off
 - `store-export.zip`
 - `SHA256SUMS.txt`
 
-## 已验证结果
+### 已验证结果
 
 本地已经验证通过的事项：
 
@@ -134,7 +312,7 @@ pwsh -NoProfile -File ./scripts/build-offline-package.ps1 -ConfigPath config/off
 - 成功生成离线包目录 `dist/offline/codex-offline-26.305.950.0`
 - 解包后的 `app/resources/codex.exe --version` 可执行
 
-## 目录说明
+### 目录说明
 
 - `config/offline-package.json`：离线构建配置
 - `scripts/build-offline-package.ps1`：总控打包脚本
@@ -148,7 +326,7 @@ pwsh -NoProfile -File ./scripts/build-offline-package.ps1 -ConfigPath config/off
 - `.github/workflows/build-offline-package.yml`：离线构建与发布
 - `.github/workflows/build-offline-package-monitor.yml`：失败重试与告警
 
-## 风险与边界
+### 风险与边界
 
 当前方案仍然是“临时可用优先”，不是官方离线分发链路，主要风险：
 
@@ -157,7 +335,7 @@ pwsh -NoProfile -File ./scripts/build-offline-package.ps1 -ConfigPath config/off
 - 构建时实时拉官方 `openai/skills`，如果官方仓库结构变化，同步脚本可能需要调整
 - Store 包内部结构变化后，解包规则也可能需要调整
 
-## 原则说明
+### 原则说明
 
 - KISS：应用包、官方 skills、本地 skills 分别独立处理，再统一打包
 - YAGNI：只做当前离线分发所需的实时拉取、合并和发布，不额外维护官方快照缓存
