@@ -270,10 +270,6 @@ if ($config.packaging.portableZip) {
     $assets.Add($portableZip) | Out-Null
 }
 
-attrib +h (Join-Path $packageRoot '_internal')
-attrib +h (Join-Path $packageRoot 'Launch Codex Offline.cmd')
-attrib +h (Join-Path $packageRoot 'Sync Codex Skills.cmd')
-
 if ($config.packaging.skillArchive) {
     $skillsZip = Join-Path $artifactRoot ('{0}-skills.zip' -f $releaseBase)
     Compress-Archive -Path (Join-Path $internalRoot 'seed/codex-home') -DestinationPath $skillsZip -Force
@@ -357,6 +353,11 @@ if (-not [string]::IsNullOrWhiteSpace($MetadataOutputPath)) {
     New-Item -ItemType Directory -Force -Path (Split-Path $metadataOutputFile -Parent) | Out-Null
     $buildMetadataJson | Set-Content -Path $metadataOutputFile -Encoding UTF8
 }
+
+# Hide implementation details from the user (after all archives/installer are built).
+attrib +h (Join-Path $packageRoot '_internal')
+attrib +h (Join-Path $packageRoot 'Launch Codex Offline.cmd')
+attrib +h (Join-Path $packageRoot 'Sync Codex Skills.cmd')
 
 $buildMetadataJson
 
