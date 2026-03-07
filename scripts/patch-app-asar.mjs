@@ -34,6 +34,7 @@ import crypto from 'crypto';
 
 const require = createRequire(import.meta.url);
 const asar = require('@electron/asar');
+const { flipFuses, FuseVersion, FuseV1Options } = require('@electron/fuses');
 
 // ── CLI args ─────────────────────────────────────────────────────────────────
 
@@ -131,6 +132,16 @@ try {
   await asar.createPackage(tmpDir, asarPath);
   // Remove backup only after successful repack.
   fs.rmSync(asarPath + '.orig', { force: true });
+
+  // Disable asar integrity validation fuse in the Electron binary so it
+  // accepts the modified asar without crashing on hash mismatch.
+  const exePath = path.resolve(appDir, 'Codex.exe');
+  log(`Flipping asar integrity fuse in ${path.basename(exePath)}…`);
+  await flipFuses(exePath, {
+    version: FuseVersion.V1,
+    [FuseV1Options.EnableEmbeddedAsarIntegrityValidation]: false,
+  });
+  log('Asar integrity fuse disabled.');
 
   log('Done.');
 } finally {
