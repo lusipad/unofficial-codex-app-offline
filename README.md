@@ -16,9 +16,10 @@ Unofficial offline / portable repackaging of the **OpenAI Codex** Windows app, w
 
 1. Go to [Releases](../../releases) and download the latest `*-portable.zip`.
 2. Extract anywhere.
-3. Double-click **`Launch Codex Offline.cmd`**.
+3. Double-click **`Launch Codex Offline.vbs`**.
 
-On first launch the bundled skills are automatically copied to `~\.codex\skills`, then Codex opens.
+On first launch the bundled skills are automatically copied to `~\.codex\skills`, then Codex opens.  
+No console window will appear — the app starts silently in the background.
 
 #### Option B — Installer
 
@@ -28,27 +29,29 @@ On first launch the bundled skills are automatically copied to `~\.codex\skills`
 
 #### Updating Skills
 
-Run **`Sync Codex Skills.cmd`** (in the install directory or portable folder) to re-sync bundled skills without launching the app.
+Double-click **`Sync Codex Skills.vbs`** to re-sync bundled skills without launching the app.  
+A message box will confirm when the sync is complete.
+
+> **Note:** Always use the provided launchers (`.vbs` or `.cmd` files). Do not run `Codex.exe` directly — it will skip skill syncing and may not work correctly on first use.
 
 ### Package Contents
 
 ```
 <root>/
-├── Launch Codex Offline.cmd        ← double-click to start
-├── Sync Codex Skills.cmd           ← re-sync skills only
-├── README.md                       ← this document
-├── skill-installer.env.example     ← configuration template (copy & edit)
-└── _internal/
-    ├── app/                        ← Codex executable & dependencies
-    ├── bootstrap-codex-skills.ps1  ← launch-time skill sync logic
-    └── seed/codex-home/skills/     ← bundled official + custom skills
+├── Launch Codex Offline.vbs        ← double-click to start
+├── Sync Codex Skills.vbs           ← re-sync skills only
+└── README.md                       ← this document
+    (hidden files)
+    ├── _internal/                  ← app payload, skills, bootstrap script
+    ├── Launch Codex Offline.cmd    ← command-line launcher (alternative)
+    └── Sync Codex Skills.cmd       ← command-line sync (alternative)
 ```
 
 ### Configuration
 
 No configuration is needed for standard offline use — everything works out of the box.
 
-For advanced scenarios, copy `skill-installer.env.example` to `skill-installer.env` (same directory as the `.cmd` files) and uncomment the variables you need.
+For advanced scenarios, copy `_internal\skill-installer.env.example` to `skill-installer.env` in the package root directory and uncomment the variables you need.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -228,9 +231,10 @@ Artifacts are written to `dist/offline/<release-name>/`.
 
 1. 前往 [Releases](../../releases) 下载最新的 `*-portable.zip`。
 2. 解压到任意目录。
-3. 双击 **`Launch Codex Offline.cmd`**。
+3. 双击 **`Launch Codex Offline.vbs`**。
 
 首次启动时，内置 skills 会自动复制到 `~\.codex\skills`，然后打开 Codex。
+不会弹出任何控制台窗口，应用在后台静默启动。
 
 #### 方式 B — 安装器
 
@@ -240,27 +244,29 @@ Artifacts are written to `dist/offline/<release-name>/`.
 
 #### 更新 Skills
 
-运行 **`Sync Codex Skills.cmd`**（在安装目录或便携包根目录下）即可重新同步内置 skills，不会启动应用。
+双击 **`Sync Codex Skills.vbs`** 即可重新同步内置 skills，不会启动应用。
+同步完成后会弹出提示框确认。
+
+> **注意：** 请始终使用提供的启动器（`.vbs` 或 `.cmd` 文件）。不要直接运行 `Codex.exe` — 这样会跳过 skill 同步，首次使用时可能无法正常工作。
 
 ### 包内结构
 
 ```
 <根目录>/
-├── Launch Codex Offline.cmd        ← 双击启动
-├── Sync Codex Skills.cmd           ← 仅同步 skills
-├── README.md                       ← 本文档
-├── skill-installer.env.example     ← 配置模板（复制后编辑）
-└── _internal/
-    ├── app/                        ← Codex 可执行文件和依赖
-    ├── bootstrap-codex-skills.ps1  ← 启动时 skills 同步逻辑
-    └── seed/codex-home/skills/     ← 内置的官方 + 自定义 skills
+├── Launch Codex Offline.vbs        ← 双击启动
+├── Sync Codex Skills.vbs           ← 仅同步 skills
+└── README.md                       ← 本文档
+    （隐藏文件）
+    ├── _internal/                  ← 应用载荷、skills、引导脚本
+    ├── Launch Codex Offline.cmd    ← 命令行启动器（备选）
+    └── Sync Codex Skills.cmd       ← 命令行同步（备选）
 ```
 
 ### 配置说明
 
 标准离线使用**无需任何配置**，开箱即用。
 
-如需高级配置，将 `skill-installer.env.example` 复制为 `skill-installer.env`（放在 `.cmd` 文件同目录），取消注释所需变量即可。
+如需高级配置，将 `_internal\skill-installer.env.example` 复制为包根目录下的 `skill-installer.env`，取消注释所需变量即可。
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|

@@ -98,6 +98,7 @@ if (Test-Path $statePath) {
 }
 
 if ($needSync) {
+    Write-Host 'Syncing bundled skills...' -ForegroundColor Cyan
     New-Item -ItemType Directory -Force -Path $targetSkillsRoot | Out-Null
 
     foreach ($skillDirectory in (Get-ChildItem -Path $seedRoot -Directory -Force | Sort-Object Name)) {
@@ -108,6 +109,9 @@ if ($needSync) {
 
     New-Item -ItemType Directory -Force -Path $stateRoot | Out-Null
     $manifest | ConvertTo-Json -Depth 6 | Set-Content -Path $statePath -Encoding UTF8
+    Write-Host 'Skills synced.' -ForegroundColor Green
+} else {
+    Write-Host 'Skills up to date.' -ForegroundColor Green
 }
 
 if ($NoLaunch) {
@@ -115,4 +119,5 @@ if ($NoLaunch) {
     return
 }
 
+Write-Host 'Launching Codex...' -ForegroundColor Cyan
 Start-Process -FilePath $launcherPath -WorkingDirectory (Split-Path $launcherPath -Parent)

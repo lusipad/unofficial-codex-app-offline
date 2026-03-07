@@ -27,9 +27,9 @@ PrivilegesRequired=lowest
 Source: "{#MySourceRoot}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{group}\Launch Codex Offline"; Filename: "{cmd}"; Parameters: "/c ""{app}\Launch Codex Offline.cmd"""
-Name: "{autodesktop}\Launch Codex Offline"; Filename: "{cmd}"; Parameters: "/c ""{app}\Launch Codex Offline.cmd"""
-Name: "{group}\Sync Codex Skills"; Filename: "{cmd}"; Parameters: "/c ""{app}\Sync Codex Skills.cmd"""
+Name: "{group}\Launch Codex Offline"; Filename: "{app}\Launch Codex Offline.vbs"; IconFilename: "{app}\_internal\app\Codex.exe"
+Name: "{autodesktop}\Launch Codex Offline"; Filename: "{app}\Launch Codex Offline.vbs"; IconFilename: "{app}\_internal\app\Codex.exe"
+Name: "{group}\Sync Codex Skills"; Filename: "{app}\Sync Codex Skills.vbs"; IconFilename: "{app}\_internal\app\Codex.exe"
 
 [Run]
-Filename: "{cmd}"; Parameters: "/c ""{app}\Launch Codex Offline.cmd"""; Description: "Launch Codex Offline"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\Launch Codex Offline.vbs"; Description: "Launch Codex Offline"; Flags: nowait postinstall skipifsilent shellexec

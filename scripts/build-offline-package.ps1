@@ -182,10 +182,10 @@ if ($LASTEXITCODE -ne 0) {
 }
 Write-BuildTrace 'app.asar patched successfully.'
 
-# Config example stays at the root so users find it next to the .cmd files.
+# Config example and build-info go into _internal — only the launcher stays at root.
 $envExampleSrc = Join-Path $repoRoot 'vendor/skills/.system/skill-installer/skill-installer.env.example'
 if (Test-Path $envExampleSrc) {
-    Copy-Item -Path $envExampleSrc -Destination (Join-Path $packageRoot 'skill-installer.env.example') -Force
+    Copy-Item -Path $envExampleSrc -Destination (Join-Path $internalRoot 'skill-installer.env.example') -Force
 }
 
 # Include README so users have documentation inside the package.
@@ -194,6 +194,27 @@ if (Test-Path $readmeSrc) {
     Copy-Item -Path $readmeSrc -Destination (Join-Path $packageRoot 'README.md') -Force
 }
 
+# Generate a small VBScript wrapper that launches PowerShell without showing a
+# console window.  The .cmd files call this wrapper so the user never sees a
+# flashing terminal.
+$launcherVbs = @'
+Set shell = CreateObject("WScript.Shell")
+scriptDir = CreateObject("Scripting.FileSystemObject").GetParentFolderName(WScript.ScriptFullName)
+psArgs = "-NoProfile -ExecutionPolicy Bypass -File """ & scriptDir & "\_internal\bootstrap-codex-skills.ps1"""
+shell.Run "powershell.exe " & psArgs, 0, False
+'@
+$launcherVbs | Set-Content -Path (Join-Path $packageRoot 'Launch Codex Offline.vbs') -Encoding ASCII
+
+$syncVbs = @'
+Set shell = CreateObject("WScript.Shell")
+scriptDir = CreateObject("Scripting.FileSystemObject").GetParentFolderName(WScript.ScriptFullName)
+psArgs = "-NoProfile -ExecutionPolicy Bypass -File """ & scriptDir & "\_internal\bootstrap-codex-skills.ps1"" -NoLaunch"
+shell.Run "powershell.exe " & psArgs, 0, True
+MsgBox "Skills synced successfully.", vbInformation, "Codex Offline"
+'@
+$syncVbs | Set-Content -Path (Join-Path $packageRoot 'Sync Codex Skills.vbs') -Encoding ASCII
+
+# Keep .cmd launchers as fallback for users who prefer command-line access.
 $launchCmd = @(
     '@echo off',
     'setlocal',
@@ -207,6 +228,11 @@ $syncCmd = @(
     'powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0_internal\bootstrap-codex-skills.ps1" -NoLaunch'
 )
 $syncCmd | Set-Content -Path (Join-Path $packageRoot 'Sync Codex Skills.cmd') -Encoding ASCII
+
+# Hide implementation details from the user.
+attrib +h (Join-Path $packageRoot '_internal')
+attrib +h (Join-Path $packageRoot 'Launch Codex Offline.cmd')
+attrib +h (Join-Path $packageRoot 'Sync Codex Skills.cmd')
 
 Write-BuildTrace 'Resolving skill source roots.'
 $skillSources = @()
