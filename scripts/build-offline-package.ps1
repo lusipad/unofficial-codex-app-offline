@@ -172,6 +172,16 @@ Write-BuildTrace 'App payload copied to _internal.'
 Copy-Item -Path (Join-Path $sourceExportRoot 'app') -Destination (Join-Path $internalRoot 'app') -Recurse -Force
 Copy-Item -Path (Join-Path $scriptRoot 'bootstrap-codex-skills.ps1') -Destination (Join-Path $internalRoot 'bootstrap-codex-skills.ps1') -Force
 
+# Patch app.asar so Codex runs correctly outside the MSIX container.
+$patchScript = Join-Path $scriptRoot 'patch-app-asar.mjs'
+$stagedAppDir = Join-Path $internalRoot 'app'
+Write-BuildTrace 'Patching app.asar for standalone launch.'
+node $patchScript --app-dir $stagedAppDir
+if ($LASTEXITCODE -ne 0) {
+    throw 'patch-app-asar.mjs failed.'
+}
+Write-BuildTrace 'app.asar patched successfully.'
+
 # Config example stays at the root so users find it next to the .cmd files.
 $envExampleSrc = Join-Path $repoRoot 'vendor/skills/.system/skill-installer/skill-installer.env.example'
 if (Test-Path $envExampleSrc) {
