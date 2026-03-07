@@ -36,6 +36,7 @@ Run **`Sync Codex Skills.cmd`** (in the install directory or portable folder) to
 <root>/
 ├── Launch Codex Offline.cmd        ← double-click to start
 ├── Sync Codex Skills.cmd           ← re-sync skills only
+├── README.md                       ← this document
 ├── skill-installer.env.example     ← configuration template (copy & edit)
 └── _internal/
     ├── app/                        ← Codex executable & dependencies
@@ -247,6 +248,7 @@ Artifacts are written to `dist/offline/<release-name>/`.
 <根目录>/
 ├── Launch Codex Offline.cmd        ← 双击启动
 ├── Sync Codex Skills.cmd           ← 仅同步 skills
+├── README.md                       ← 本文档
 ├── skill-installer.env.example     ← 配置模板（复制后编辑）
 └── _internal/
     ├── app/                        ← Codex 可执行文件和依赖

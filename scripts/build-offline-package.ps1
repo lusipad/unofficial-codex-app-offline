@@ -178,6 +178,12 @@ if (Test-Path $envExampleSrc) {
     Copy-Item -Path $envExampleSrc -Destination (Join-Path $packageRoot 'skill-installer.env.example') -Force
 }
 
+# Include README so users have documentation inside the package.
+$readmeSrc = Join-Path $repoRoot 'README.md'
+if (Test-Path $readmeSrc) {
+    Copy-Item -Path $readmeSrc -Destination (Join-Path $packageRoot 'README.md') -Force
+}
+
 $launchCmd = @(
     '@echo off',
     'setlocal',
