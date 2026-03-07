@@ -354,10 +354,5 @@ if (-not [string]::IsNullOrWhiteSpace($MetadataOutputPath)) {
     $buildMetadataJson | Set-Content -Path $metadataOutputFile -Encoding UTF8
 }
 
-# Hide implementation details from the user (after all archives/installer are built).
-attrib +h (Join-Path $packageRoot '_internal')
-attrib +h (Join-Path $packageRoot 'Launch Codex Offline.cmd')
-attrib +h (Join-Path $packageRoot 'Sync Codex Skills.cmd')
-
 $buildMetadataJson
 
