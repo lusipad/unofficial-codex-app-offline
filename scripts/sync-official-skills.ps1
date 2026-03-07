@@ -74,10 +74,14 @@ $expandRoot = Join-Path $tempRoot 'expanded'
 New-Item -ItemType Directory -Force -Path $tempRoot | Out-Null
 
 try {
-    Invoke-WebRequest -Uri $archiveUri -OutFile $archivePath -Headers @{
+    $dlHeaders = @{
         'User-Agent' = 'codex-app-offline'
-        'Accept' = 'application/vnd.github+json'
+        'Accept'     = 'application/vnd.github+json'
     }
+    if (-not [string]::IsNullOrWhiteSpace($token)) {
+        $dlHeaders['Authorization'] = 'Bearer {0}' -f $token
+    }
+    Invoke-WebRequest -Uri $archiveUri -OutFile $archivePath -Headers $dlHeaders
 
     Expand-Archive -LiteralPath $archivePath -DestinationPath $expandRoot -Force
 
