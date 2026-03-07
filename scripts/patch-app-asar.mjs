@@ -6,12 +6,18 @@
  * that features which are gated on "running as a Windows Store app" continue to
  * work when Codex is launched as a standalone exe.
  *
- * Root cause: Electron exposes `process.windowsStore === true` only when the
- * app runs inside an AppX / MSIX container.  Codex uses this (or a derived
- * flag) to decide whether to show the Settings menu.  The patch injects
- *   process.windowsStore = true;
- * at the very top of the app's main-process entry point so every code path
- * that checks the flag sees the expected value.
+ * Patches applied:
+ *
+ * 1. process.windowsStore = true
+ *    Electron exposes this flag only inside MSIX containers.  Codex checks it
+ *    for telemetry and build-type reporting.  We inject it at the top of the
+ *    main-process entry point.
+ *
+ * 2. Implement "show-settings" and "open-config-toml" IPC handlers
+ *    The Electron build throws "not implemented" for these messages.  We
+ *    replace the throw with real handlers: show-settings reloads the window
+ *    with the appropriate initialRoute, and open-config-toml opens the TOML
+ *    config file in the system editor.
  *
  * Usage:
  *   node scripts/patch-app-asar.mjs --app-dir <path-to-app-dir>
@@ -123,7 +129,53 @@ try {
   }
 
   patchFile(mainEntry);
-  log('Patch applied.');
+  log('windowsStore patch applied.');
+
+  // ── Patch 2: implement show-settings & open-config-toml IPC handlers ──
+  //
+  // The Electron build groups several VS Code-only message types into a single
+  // case block that throws "not implemented in Electron".  We break out
+  // show-settings and open-config-toml and provide real implementations:
+  //
+  //   show-settings  → reload the window with ?initialRoute=/settings/<section>
+  //   open-config-toml → open ~/.codex/config.toml via shell.openPath
+  //
+  // The remaining cases (open-vscode-command, etc.) keep throwing.
+
+  const NOT_IMPLEMENTED_NEEDLE =
+    'case`navigate-in-new-editor-tab`:case`open-vscode-command`:' +
+    'case`open-extension-settings`:case`open-keyboard-shortcuts`:' +
+    'case`open-config-toml`:case`show-settings`:case`install-wsl`:' +
+    'throw Error(`"${t.type}" is not implemented in Electron.`)';
+
+  const SETTINGS_REPLACEMENT =
+    // show-settings: reload the renderer with the desired settings route
+    'case`show-settings`:{' +
+      'let _sect=t.section||"agent";' +
+      'let _u=new URL(e.getURL());' +
+      '_u.searchParams.set("initialRoute","/settings/"+_sect);' +
+      'e.loadURL(_u.toString());break}' +
+    // open-config-toml: open the file in the system default editor
+    'case`open-config-toml`:{' +
+      'let _cfg=require("path").join(require("os").homedir(),".codex","config.toml");' +
+      'require("fs").mkdirSync(require("path").dirname(_cfg),{recursive:true});' +
+      'if(!require("fs").existsSync(_cfg))require("fs").writeFileSync(_cfg,"# Codex config\\n",{encoding:"utf8"});' +
+      'm.shell.openPath(_cfg);break}' +
+    // keep throwing for the rest
+    'case`navigate-in-new-editor-tab`:case`open-vscode-command`:' +
+    'case`open-extension-settings`:case`open-keyboard-shortcuts`:' +
+    'case`install-wsl`:' +
+    'throw Error(`"${t.type}" is not implemented in Electron.`)';
+
+  let mainContent = fs.readFileSync(mainEntry, 'utf8');
+  if (mainContent.includes(NOT_IMPLEMENTED_NEEDLE)) {
+    mainContent = mainContent.replace(NOT_IMPLEMENTED_NEEDLE, SETTINGS_REPLACEMENT);
+    fs.writeFileSync(mainEntry, mainContent, 'utf8');
+    log('show-settings / open-config-toml handlers patched.');
+  } else {
+    warn('Could not locate the "not implemented" throw for show-settings. ' +
+         'Settings patch skipped (the app version may have changed).');
+  }
 
   // Repack.
   log('Repacking asar…');
