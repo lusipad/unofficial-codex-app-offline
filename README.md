@@ -8,7 +8,8 @@
 
 ## English
 
-Unofficial offline / portable repackaging of the **OpenAI Codex** Windows app, with skills bundled in.
+Unofficial offline / portable repackaging of the **OpenAI Codex** Windows app.  
+All official skills from [`openai/skills`](https://github.com/openai/skills) are fetched at build time and bundled into the package for fully offline use.
 
 ### Quick Start
 
@@ -133,7 +134,7 @@ Artifacts are written to `dist/offline/<release-name>/`.
     "ring": "Retail"
   },
   "skills": {
-    "sources": ["build/work/skills-official", "vendor/skills"],
+    "sources": ["build/work/skills-official"],
     "official": {
       "owner": "openai", "repo": "skills", "ref": "main",
       "destination": "build/work/skills-official"
@@ -161,7 +162,7 @@ Artifacts are written to `dist/offline/<release-name>/`.
 | `appSource.mode` | `rg_adguard` (download) or `installed_store` (extract local) |
 | `appSource.packageFamilyName` | Store package family name |
 | `appSource.ring` | `Retail` / `Preview` / `Insider` |
-| `skills.sources` | Ordered directories to merge (later overrides earlier) |
+| `skills.sources` | Directories to merge into the bundled skills |
 | `skills.official.*` | GitHub repo coordinates for official skills |
 | `packaging.outputDir` | Output directory |
 | `packaging.portableZip` | Generate portable ZIP |
@@ -184,8 +185,9 @@ Artifacts are written to `dist/offline/<release-name>/`.
 
 1. Playwright opens `store.rg-adguard.net` and resolves a temporary Microsoft CDN link for the `OpenAI.Codex` Store package.
 2. The `.msixbundle` is downloaded and the x64 app payload is extracted.
-3. Official skills are fetched from `openai/skills`; `vendor/skills` is overlaid on top (same-name skills override).
-4. Everything is staged into a portable directory, then zipped / compiled into an installer.
+3. `app.asar` is patched so Codex runs outside the MSIX container, and the Electron asar integrity fuse is disabled.
+4. Official skills are fetched from [`openai/skills`](https://github.com/openai/skills) and bundled.
+5. Everything is staged into a portable directory, then zipped / compiled into an installer.
 
 #### CI / CD
 
@@ -212,15 +214,15 @@ Artifacts are written to `dist/offline/<release-name>/`.
 | `scripts/bundle-skills.ps1` | Merge multiple skills sources |
 | `scripts/sync-official-skills.ps1` | Fetch official skills from GitHub |
 | `scripts/bootstrap-codex-skills.ps1` | Launch-time skill sync |
+| `scripts/patch-app-asar.mjs` | Asar patching + Electron fuse flip |
 | `installer/CodexOffline.iss.tpl` | Inno Setup template |
-
----
 
 <a id="中文"></a>
 
 ## 中文
 
-非官方的 **OpenAI Codex** Windows 应用离线/便携版重打包，内置 skills。
+非官方的 **OpenAI Codex** Windows 应用离线/便携版重打包。
+构建时从 [`openai/skills`](https://github.com/openai/skills) 拉取全部官方 skills 并打包，支持完全离线使用。
 
 ### 快速开始
 
@@ -345,7 +347,7 @@ pwsh -NoProfile -File ./scripts/build-offline-package.ps1
     "ring": "Retail"
   },
   "skills": {
-    "sources": ["build/work/skills-official", "vendor/skills"],
+    "sources": ["build/work/skills-official"],
     "official": {
       "owner": "openai", "repo": "skills", "ref": "main",
       "destination": "build/work/skills-official"
@@ -373,7 +375,7 @@ pwsh -NoProfile -File ./scripts/build-offline-package.ps1
 | `appSource.mode` | `rg_adguard`（下载）或 `installed_store`（提取本地） |
 | `appSource.packageFamilyName` | Store 包族名 |
 | `appSource.ring` | `Retail` / `Preview` / `Insider` |
-| `skills.sources` | 有序合并目录列表（后面覆盖前面） |
+| `skills.sources` | 合并到包内的 skills 目录列表 |
 | `skills.official.*` | 官方 skills 的 GitHub 仓库坐标 |
 | `packaging.outputDir` | 输出目录 |
 | `packaging.portableZip` | 生成便携 ZIP |
@@ -396,8 +398,9 @@ pwsh -NoProfile -File ./scripts/build-offline-package.ps1
 
 1. Playwright 打开 `store.rg-adguard.net`，解析 `OpenAI.Codex` Store 包的微软 CDN 临时下载链接。
 2. 下载 `.msixbundle` 并提取 x64 应用载荷。
-3. 从 `openai/skills` 拉取官方 skills；`vendor/skills` 覆盖合并（同名 skill 以 vendor 为准）。
-4. 所有内容 stage 到便携目录，然后打包 ZIP / 编译安装器。
+3. 补丁 `app.asar` 使 Codex 可在 MSIX 容器外运行，并关闭 Electron asar 完整性校验。
+4. 从 [`openai/skills`](https://github.com/openai/skills) 拉取全部官方 skills 并打包。
+5. 所有内容 stage 到便携目录，然后打包 ZIP / 编译安装器。
 
 #### CI / CD
 
@@ -424,4 +427,5 @@ pwsh -NoProfile -File ./scripts/build-offline-package.ps1
 | `scripts/bundle-skills.ps1` | 合并多个 skills 来源 |
 | `scripts/sync-official-skills.ps1` | 从 GitHub 拉取官方 skills |
 | `scripts/bootstrap-codex-skills.ps1` | 启动时 skills 同步 |
+| `scripts/patch-app-asar.mjs` | Asar 补丁 + Electron fuse 翻转 |
 | `installer/CodexOffline.iss.tpl` | Inno Setup 模板 |
