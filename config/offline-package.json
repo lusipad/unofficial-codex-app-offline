@@ -10,8 +10,7 @@
   },
   "skills": {
     "sources": [
-      "build/work/skills-official",
-      "vendor/skills"
+      "build/work/skills-official"
     ],
     "official": {
       "owner": "openai",

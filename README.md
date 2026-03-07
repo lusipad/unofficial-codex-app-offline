@@ -175,7 +175,6 @@ Artifacts are written to `dist/offline/<release-name>/`.
 
 | Script | Purpose | Key Parameters |
 |--------|---------|----------------|
-| `sync-local-skills.ps1` | Copy `~/.codex/skills` → `vendor/skills` | `-CodexHome`, `-Destination` |
 | `sync-official-skills.ps1` | Download official skills from GitHub | `-ConfigPath`, `-Destination` |
 | `bundle-skills.ps1` | Merge skill directories + generate manifest | `-SourceRoots`, `-Destination`, `-PackageVersion` |
 | `resolve-store-bundle-url.mjs` | Resolve Store download link via rg-adguard | `--package-family-name`, `--ring` |
@@ -211,10 +210,8 @@ Artifacts are written to `dist/offline/<release-name>/`.
 | `scripts/resolve-store-bundle-url.mjs` | Store link resolver (Playwright) |
 | `scripts/import-store-bundle-from-url.ps1` | Download & extract Store packages |
 | `scripts/bundle-skills.ps1` | Merge multiple skills sources |
-| `scripts/sync-local-skills.ps1` | Sync local skills → `vendor/skills` |
 | `scripts/sync-official-skills.ps1` | Fetch official skills from GitHub |
 | `scripts/bootstrap-codex-skills.ps1` | Launch-time skill sync |
-| `vendor/skills` | Custom skills snapshot |
 | `installer/CodexOffline.iss.tpl` | Inno Setup template |
 
 ---
@@ -390,7 +387,6 @@ pwsh -NoProfile -File ./scripts/build-offline-package.ps1
 
 | 脚本 | 用途 | 主要参数 |
 |------|------|----------|
-| `sync-local-skills.ps1` | 本机 `~/.codex/skills` → `vendor/skills` | `-CodexHome`、`-Destination` |
 | `sync-official-skills.ps1` | 从 GitHub 拉取官方 skills | `-ConfigPath`、`-Destination` |
 | `bundle-skills.ps1` | 合并 skills 目录 + 生成清单 | `-SourceRoots`、`-Destination`、`-PackageVersion` |
 | `resolve-store-bundle-url.mjs` | 通过 rg-adguard 解析 Store 下载链接 | `--package-family-name`、`--ring` |
@@ -426,8 +422,6 @@ pwsh -NoProfile -File ./scripts/build-offline-package.ps1
 | `scripts/resolve-store-bundle-url.mjs` | Store 链接解析器（Playwright） |
 | `scripts/import-store-bundle-from-url.ps1` | 下载并解包 Store 包 |
 | `scripts/bundle-skills.ps1` | 合并多个 skills 来源 |
-| `scripts/sync-local-skills.ps1` | 同步本地 skills → `vendor/skills` |
 | `scripts/sync-official-skills.ps1` | 从 GitHub 拉取官方 skills |
 | `scripts/bootstrap-codex-skills.ps1` | 启动时 skills 同步 |
-| `vendor/skills` | 自定义 skills 快照 |
 | `installer/CodexOffline.iss.tpl` | Inno Setup 模板 |

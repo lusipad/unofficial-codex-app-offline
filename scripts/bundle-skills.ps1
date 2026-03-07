@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string[]]$SourceRoots = @('vendor/skills-official', 'vendor/skills'),
+    [string[]]$SourceRoots = @('build/work/skills-official'),
     [string]$Destination = 'build/seed/codex-home/skills',
     [string]$ManifestPath = 'build/seed/skills-manifest.json',
     [string]$PackageVersion = 'dev'

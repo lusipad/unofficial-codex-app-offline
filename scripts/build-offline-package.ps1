@@ -182,8 +182,12 @@ if ($LASTEXITCODE -ne 0) {
 }
 Write-BuildTrace 'app.asar patched successfully.'
 
-# Config example and build-info go into _internal — only the launcher stays at root.
-$envExampleSrc = Join-Path $repoRoot 'vendor/skills/.system/skill-installer/skill-installer.env.example'
+# Config example: look in the official skills sync output first, then fall back
+# to vendor/skills if it still exists (legacy).
+$envExampleSrc = Join-Path $repoRoot 'build/work/skills-official/.system/skill-installer/skill-installer.env.example'
+if (-not (Test-Path $envExampleSrc)) {
+    $envExampleSrc = Join-Path $repoRoot 'vendor/skills/.system/skill-installer/skill-installer.env.example'
+}
 if (Test-Path $envExampleSrc) {
     Copy-Item -Path $envExampleSrc -Destination (Join-Path $internalRoot 'skill-installer.env.example') -Force
 }
