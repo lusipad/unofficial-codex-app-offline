@@ -233,11 +233,6 @@ $syncCmd = @(
 )
 $syncCmd | Set-Content -Path (Join-Path $packageRoot 'Sync Codex Skills.cmd') -Encoding ASCII
 
-# Hide implementation details from the user.
-attrib +h (Join-Path $packageRoot '_internal')
-attrib +h (Join-Path $packageRoot 'Launch Codex Offline.cmd')
-attrib +h (Join-Path $packageRoot 'Sync Codex Skills.cmd')
-
 Write-BuildTrace 'Resolving skill source roots.'
 $skillSources = @()
 foreach ($source in $config.skills.sources) {
@@ -268,11 +263,16 @@ $buildInfo | ConvertTo-Json -Depth 8 | Set-Content -Path (Join-Path $internalRoo
 $assets = [System.Collections.Generic.List[string]]::new()
 
 Write-BuildTrace 'Creating archives.'
+# Hide implementation details AFTER creating portable zip so Compress-Archive includes hidden items.
 if ($config.packaging.portableZip) {
     $portableZip = Join-Path $artifactRoot ('{0}-portable.zip' -f $releaseBase)
     Compress-Archive -Path $packageRoot -DestinationPath $portableZip -Force
     $assets.Add($portableZip) | Out-Null
 }
+
+attrib +h (Join-Path $packageRoot '_internal')
+attrib +h (Join-Path $packageRoot 'Launch Codex Offline.cmd')
+attrib +h (Join-Path $packageRoot 'Sync Codex Skills.cmd')
 
 if ($config.packaging.skillArchive) {
     $skillsZip = Join-Path $artifactRoot ('{0}-skills.zip' -f $releaseBase)
