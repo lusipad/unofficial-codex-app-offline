@@ -131,14 +131,16 @@ try {
   patchFile(mainEntry);
   log('windowsStore patch applied.');
 
-  // ── Patch 2: implement show-settings & open-config-toml IPC handlers ──
+  // ── Patch 2: implement settings-related IPC handlers ──────────────────
   //
-  // The Electron build groups several VS Code-only message types into a single
-  // case block that throws "not implemented in Electron".  We break out
-  // show-settings and open-config-toml and provide real implementations:
+  // The Electron build groups several VS Code-only message types into a
+  // single case block that throws "not implemented in Electron".  We break
+  // out the user-facing ones and provide real implementations:
   //
-  //   show-settings  → reload the window with ?initialRoute=/settings/<section>
-  //   open-config-toml → open ~/.codex/config.toml via shell.openPath
+  //   show-settings         → reload with ?initialRoute=/settings/<section>
+  //   open-extension-settings → same, route to /settings/general-settings
+  //   open-keyboard-shortcuts → same, route to /settings/general-settings
+  //   open-config-toml      → open ~/.codex/config.toml via shell.openPath
   //
   // The remaining cases (open-vscode-command, etc.) keep throwing.
 
@@ -148,13 +150,26 @@ try {
     'case`open-config-toml`:case`show-settings`:case`install-wsl`:' +
     'throw Error(`"${t.type}" is not implemented in Electron.`)';
 
+  // Helper: reload the renderer at a given settings route.
+  const NAV_HELPER =
+    'function _nav(e,r){' +
+      'let _u=new URL(e.getURL());' +
+      '_u.searchParams.set("initialRoute",r);' +
+      'e.loadURL(_u.toString())}';
+
   const SETTINGS_REPLACEMENT =
     // show-settings: reload the renderer with the desired settings route
     'case`show-settings`:{' +
-      'let _sect=t.section||"agent";' +
-      'let _u=new URL(e.getURL());' +
-      '_u.searchParams.set("initialRoute","/settings/"+_sect);' +
-      'e.loadURL(_u.toString());break}' +
+      NAV_HELPER + ';' +
+      '_nav(e,"/settings/"+(t.section||"agent"));break}' +
+    // open-extension-settings: route to general settings
+    'case`open-extension-settings`:{' +
+      NAV_HELPER + ';' +
+      '_nav(e,"/settings/general-settings");break}' +
+    // open-keyboard-shortcuts: route to general settings (no dedicated page)
+    'case`open-keyboard-shortcuts`:{' +
+      NAV_HELPER + ';' +
+      '_nav(e,"/settings/general-settings");break}' +
     // open-config-toml: open the file in the system default editor
     'case`open-config-toml`:{' +
       'let _cfg=require("path").join(require("os").homedir(),".codex","config.toml");' +
@@ -163,7 +178,6 @@ try {
       'm.shell.openPath(_cfg);break}' +
     // keep throwing for the rest
     'case`navigate-in-new-editor-tab`:case`open-vscode-command`:' +
-    'case`open-extension-settings`:case`open-keyboard-shortcuts`:' +
     'case`install-wsl`:' +
     'throw Error(`"${t.type}" is not implemented in Electron.`)';
 
@@ -171,7 +185,7 @@ try {
   if (mainContent.includes(NOT_IMPLEMENTED_NEEDLE)) {
     mainContent = mainContent.replace(NOT_IMPLEMENTED_NEEDLE, SETTINGS_REPLACEMENT);
     fs.writeFileSync(mainEntry, mainContent, 'utf8');
-    log('show-settings / open-config-toml handlers patched.');
+    log('Settings IPC handlers patched.');
   } else {
     warn('Could not locate the "not implemented" throw for show-settings. ' +
          'Settings patch skipped (the app version may have changed).');
