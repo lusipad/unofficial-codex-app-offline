@@ -81,7 +81,20 @@ function resolveMainEntry(extractDir) {
 }
 
 const PATCH_MARKER = '/* codex-offline:windowsStore-patch */';
-const PATCH_SNIPPET = `${PATCH_MARKER}\nif(!process.windowsStore){process.windowsStore=true;}\n`;
+// Suppress EPIPE errors on stdout/stderr that surface as uncaught
+// exceptions when the Electron app writes to a console pipe that has
+// already been closed (e.g. the CMD window that launched Codex exits
+// before the renderer finishes its cleanup logging).
+const EPIPE_GUARD =
+  'function _epipeGuard(s){' +
+    'var ow=s.write;' +
+    's.write=function(){' +
+      'try{return ow.apply(s,arguments)}' +
+      'catch(e){if(e.code!=="EPIPE")throw e}' +
+    '}' +
+  '}' +
+  '_epipeGuard(process.stdout);_epipeGuard(process.stderr);\n';
+const PATCH_SNIPPET = `${PATCH_MARKER}\nif(!process.windowsStore){process.windowsStore=true;}\n${EPIPE_GUARD}`;
 
 /** Return true if the file already contains our patch marker. */
 function isAlreadyPatched(filePath) {
