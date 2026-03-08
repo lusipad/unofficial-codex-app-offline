@@ -1,12 +1,19 @@
 [CmdletBinding()]
 param(
-    [string]$InstallRoot = $PSScriptRoot,
+    [string]$InstallRoot = '',
     [string]$CodexHome = '',
     [switch]$NoLaunch
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+# Resolve InstallRoot here instead of in param() because $PSScriptRoot is
+# not yet available in param() default values under PowerShell 5.1 when
+# [CmdletBinding()] is used and the script is invoked via powershell -File.
+if ([string]::IsNullOrEmpty($InstallRoot)) {
+    $InstallRoot = $PSScriptRoot
+}
 
 function Resolve-AbsolutePath {
     param([Parameter(Mandatory = $true)][string]$PathValue)
