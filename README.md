@@ -196,6 +196,20 @@ Artifacts are written to `dist/offline/<release-name>/`.
 | Build & Release | `build-offline-package.yml` | Daily schedule + push trigger; builds, uploads artifacts, publishes GitHub Release (skips if version unchanged) |
 | Monitor | `build-offline-package-monitor.yml` | Auto-retries failed builds (up to 3×); opens/closes GitHub Issue alerts |
 
+### Desktop Notifications
+
+Codex uses a **policy-based notification system**. If you feel notifications are not working, check the following:
+
+| Mode | Behavior |
+|------|----------|
+| `off` | All desktop notifications suppressed |
+| `unfocused` (default) | Notifications only appear when the Codex window is **not** in focus |
+| `always` | Notifications always appear |
+
+Additionally, notifications for the conversation you are currently viewing are suppressed.  Approval-request notifications are controlled by a separate permission toggle.
+
+> **Tip:** If you never see notifications, make sure the system notification permission for Codex is enabled in Windows Settings → System → Notifications.
+
 ### Risks & Limitations
 
 - `store.rg-adguard.net` is a third-party service — may go down, rate-limit, or change its page structure.
@@ -408,6 +422,20 @@ pwsh -NoProfile -File ./scripts/build-offline-package.ps1
 |--------|------|------|
 | 构建与发布 | `build-offline-package.yml` | 每日定时 + push 触发；构建、上传产物、发布 GitHub Release（版本不变时跳过） |
 | 监控 | `build-offline-package-monitor.yml` | 自动重试失败构建（最多 3 次）；打开/关闭 GitHub Issue 告警 |
+
+### 桌面通知
+
+Codex 使用**策略性通知系统**。如果你觉得通知不工作，请检查以下设置：
+
+| 模式 | 行为 |
+|------|------|
+| `off` | 抑制所有桌面通知 |
+| `unfocused`（默认） | 仅在 Codex 窗口**未聚焦**时弹出通知 |
+| `always` | 始终弹出通知 |
+
+此外，当前正在查看的对话的通知也会被抑制。审批请求通知由单独的权限开关控制。
+
+> **提示：** 如果始终看不到通知，请确认 Windows 系统设置（设置 → 系统 → 通知）中已为 Codex 启用通知权限。
 
 ### 风险与边界
 

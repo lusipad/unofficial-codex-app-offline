@@ -19,6 +19,16 @@
  *    with the appropriate initialRoute, and open-config-toml opens the TOML
  *    config file in the system editor.
  *
+ * 3. Fix enable_i18n default value inconsistency
+ *    The settings page defaults enable_i18n to true (so the language selector
+ *    is visible), but the i18n provider defaults it to false (so translations
+ *    never load).  We unify the default to true.
+ *
+ * 4. Enable settings page entry for offline builds
+ *    The settings menu item is gated behind a Statsig experiment that
+ *    defaults to off when there is no network.  We bypass the gate so the
+ *    entry is always visible in offline builds.
+ *
  * Usage:
  *   node scripts/patch-app-asar.mjs --app-dir <path-to-app-dir>
  *
@@ -202,6 +212,74 @@ try {
   } else {
     warn('Could not locate the "not implemented" throw for show-settings. ' +
          'Settings patch skipped (the app version may have changed).');
+  }
+
+  // ── Patch 3: Fix enable_i18n default value inconsistency ─────────────
+  //
+  // The general-settings component checks enable_i18n with default true,
+  // so the language selector is visible and usable.  However the i18n
+  // provider that actually loads translations defaults the same flag to
+  // false, meaning selected translations never load.  Unify to true so
+  // language selection works end-to-end.
+
+  const I18N_NEEDLE = '.get(`enable_i18n`,!1)';
+  const I18N_REPLACEMENT = '.get(`enable_i18n`,!0)';
+
+  // ── Patch 4: Enable settings page entry for offline builds ─────────
+  //
+  // The settings menu item in the profile dropdown is gated behind
+  // Statsig experiment 4166894088.  In offline mode Statsig cannot reach
+  // its servers, so the gate defaults to false and the entry is hidden
+  // even though the settings pages are fully bundled.  We replace the
+  // gate check result with `true` so the entry is always visible.
+
+  const SETTINGS_GATE_RE =
+    /(`4166894088`[^;]*;let\s+)(\w+)\s*=\s*\w+\((\w+)\)/;
+
+  const assetsDir = path.join(tmpDir, 'webview', 'assets');
+  if (fs.existsSync(assetsDir)) {
+    let i18nCount = 0;
+    let gatePatched = false;
+
+    for (const file of fs.readdirSync(assetsDir)) {
+      if (!file.endsWith('.js')) continue;
+      const filePath = path.join(assetsDir, file);
+      let content = fs.readFileSync(filePath, 'utf8');
+      let modified = false;
+
+      if (content.includes(I18N_NEEDLE)) {
+        const count = content.split(I18N_NEEDLE).length - 1;
+        content = content.replaceAll(I18N_NEEDLE, I18N_REPLACEMENT);
+        i18nCount += count;
+        modified = true;
+      }
+
+      if (SETTINGS_GATE_RE.test(content)) {
+        content = content.replace(SETTINGS_GATE_RE, '$1$2=!0');
+        gatePatched = true;
+        modified = true;
+      }
+
+      if (modified) {
+        fs.writeFileSync(filePath, content, 'utf8');
+      }
+    }
+
+    if (i18nCount > 0) {
+      log(`enable_i18n default unified (${i18nCount} occurrence(s)).`);
+    } else {
+      warn('Could not locate enable_i18n default-false pattern. ' +
+           'i18n patch skipped (the app version may have changed).');
+    }
+
+    if (gatePatched) {
+      log('Settings entry gate bypassed for offline mode.');
+    } else {
+      warn('Could not locate settings gate 4166894088. ' +
+           'Settings entry patch skipped (the app version may have changed).');
+    }
+  } else {
+    warn('webview/assets directory not found. Webview patches skipped.');
   }
 
   // Repack.
