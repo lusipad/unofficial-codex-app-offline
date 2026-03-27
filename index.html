@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <!-- PROD_BASE_TAG_HERE -->
+    <!-- PROD_CSP_TAG_HERE -->
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Codex</title>
+    <style>
+      :root {
+        --startup-background: transparent;
+        --startup-logo-base: #adadad;
+        --startup-logo-shimmer-soft: rgb(255 255 255 / 0.02);
+        --startup-logo-shimmer-peak: rgb(255 255 255 / 0.46);
+        --startup-logo-shimmer-tail: rgb(255 255 255 / 0.06);
+      }
+
+      html,
+      body {
+        margin: 0;
+        width: 100%;
+        height: 100%;
+        background: var(--startup-background);
+      }
+
+      body {
+        outline: none;
+      }
+
+      #root {
+        width: 100%;
+        height: 100%;
+      }
+
+      .startup-loader {
+        display: flex;
+        width: 100%;
+        height: 100%;
+        align-items: center;
+        justify-content: center;
+        background: var(--startup-background);
+      }
+
+      .startup-loader__logo {
+        position: relative;
+        width: 56px;
+        height: 56px;
+        opacity: 0;
+        animation: startup-codex-logo-fade-in 180ms ease-out 60ms forwards;
+      }
+
+      .startup-loader__base,
+      .startup-loader__overlay {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+      }
+
+      .startup-loader__base {
+        color: var(--startup-logo-base);
+      }
+
+      .startup-loader__overlay {
+        background-image: linear-gradient(
+          112deg,
+          transparent 22%,
+          var(--startup-logo-shimmer-soft) 38%,
+          var(--startup-logo-shimmer-peak) 49%,
+          var(--startup-logo-shimmer-tail) 56%,
+          transparent 74%
+        );
+        background-position: 140% 0;
+        background-repeat: no-repeat;
+        background-size: 220% 100%;
+        animation: startup-codex-logo-shimmer 2200ms cubic-bezier(0.4, 0, 0.2, 1)
+          infinite;
+        -webkit-mask-image: url("data:image/svg+xml;utf8,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%20500%20500%22%20fill%3D%22black%22%3E%3Cpath%20d%3D%22M330.34%20313.62h-67.84c-7.65%200-13.85-6.2-13.85-13.85s6.2-13.85%2013.85-13.85h67.84c7.65%200%2013.85%206.2%2013.85%2013.85s-6.2%2013.85-13.85%2013.85Z%22/%3E%3Cpath%20d%3D%22M169.65%20313.38c-2.36%200-4.74-.6-6.93-1.87-6.62-3.83-8.88-12.31-5.05-18.93l23.78-41.08-23.91-43.21c-3.7-6.69-1.28-15.12%205.41-18.82%206.69-3.71%2015.12-1.28%2018.82%205.41l31.51%2056.94-31.64%2054.65c-2.57%204.43-7.22%206.91-12%206.91Z%22/%3E%3Cpath%20d%3D%22M144.61%20144.5c1.42-41.82%2035.79-75.27%2077.95-75.25%2027.89.02%2052.35%2014.68%2066.11%2036.71%2010.93-5.82%2023.41-9.12%2036.65-9.11%2043.05.02%2077.94%2034.94%2077.91%2078%200%2013.24-3.32%2025.72-9.16%2036.64%2022.02%2013.79%2036.66%2038.26%2036.64%2066.15-.02%2042.16-33.52%2076.48-75.34%2077.86-1.42%2041.82-35.78%2075.28-77.94%2075.25-27.89-.02-52.35-14.68-66.11-36.72-10.93%205.82-23.4%209.13-36.65%209.12-43.05-.02-77.94-34.94-77.91-78%200-13.24%203.32-25.72%209.16-36.64-22.02-13.79-36.65-38.26-36.64-66.15.02-42.16%2033.51-76.48%2075.33-77.86ZM297.77%2071.99c-19.24-19.26-45.83-31.17-75.2-31.19-49.23-.03-90.67%2033.39-102.84%2078.79-45.41%2012.12-78.87%2053.52-78.9%20102.76-.02%2029.37%2011.87%2055.97%2031.1%2075.23-2.35%208.79-3.62%2018.03-3.63%2027.56-.03%2058.77%2047.58%20106.44%20106.35%20106.47%209.53%200%2018.77-1.25%2027.55-3.6%2019.24%2019.26%2045.84%2031.18%2075.21%2031.2%2049.24.03%2090.67-33.39%20102.84-78.8%2045.42-12.11%2078.88-53.51%2078.91-102.75.02-29.37-11.87-55.98-31.11-75.24%202.35-8.78%203.62-18.02%203.63-27.55.03-58.77-47.58-106.44-106.35-106.47-9.53%200-18.77%201.25-27.56%203.59Z%22/%3E%3C/svg%3E");
+        mask-image: url("data:image/svg+xml;utf8,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%20500%20500%22%20fill%3D%22black%22%3E%3Cpath%20d%3D%22M330.34%20313.62h-67.84c-7.65%200-13.85-6.2-13.85-13.85s6.2-13.85%2013.85-13.85h67.84c7.65%200%2013.85%206.2%2013.85%2013.85s-6.2%2013.85-13.85%2013.85Z%22/%3E%3Cpath%20d%3D%22M169.65%20313.38c-2.36%200-4.74-.6-6.93-1.87-6.62-3.83-8.88-12.31-5.05-18.93l23.78-41.08-23.91-43.21c-3.7-6.69-1.28-15.12%205.41-18.82%206.69-3.71%2015.12-1.28%2018.82%205.41l31.51%2056.94-31.64%2054.65c-2.57%204.43-7.22%206.91-12%206.91Z%22/%3E%3Cpath%20d%3D%22M144.61%20144.5c1.42-41.82%2035.79-75.27%2077.95-75.25%2027.89.02%2052.35%2014.68%2066.11%2036.71%2010.93-5.82%2023.41-9.12%2036.65-9.11%2043.05.02%2077.94%2034.94%2077.91%2078%200%2013.24-3.32%2025.72-9.16%2036.64%2022.02%2013.79%2036.66%2038.26%2036.64%2066.15-.02%2042.16-33.52%2076.48-75.34%2077.86-1.42%2041.82-35.78%2075.28-77.94%2075.25-27.89-.02-52.35-14.68-66.11-36.72-10.93%205.82-23.4%209.13-36.65%209.12-43.05-.02-77.94-34.94-77.91-78%200-13.24%203.32-25.72%209.16-36.64-22.02-13.79-36.65-38.26-36.64-66.15.02-42.16%2033.51-76.48%2075.33-77.86ZM297.77%2071.99c-19.24-19.26-45.83-31.17-75.2-31.19-49.23-.03-90.67%2033.39-102.84%2078.79-45.41%2012.12-78.87%2053.52-78.9%20102.76-.02%2029.37%2011.87%2055.97%2031.1%2075.23-2.35%208.79-3.62%2018.03-3.63%2027.56-.03%2058.77%2047.58%20106.44%20106.35%20106.47%209.53%200%2018.77-1.25%2027.55-3.6%2019.24%2019.26%2045.84%2031.18%2075.21%2031.2%2049.24.03%2090.67-33.39%20102.84-78.8%2045.42-12.11%2078.88-53.51%2078.91-102.75.02-29.37-11.87-55.98-31.11-75.24%202.35-8.78%203.62-18.02%203.63-27.55.03-58.77-47.58-106.44-106.35-106.47-9.53%200-18.77%201.25-27.56%203.59Z%22/%3E%3C/svg%3E");
+        -webkit-mask-position: center;
+        mask-position: center;
+        -webkit-mask-repeat: no-repeat;
+        mask-repeat: no-repeat;
+        -webkit-mask-size: contain;
+        mask-size: contain;
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .startup-loader__logo {
+          animation: none;
+          opacity: 1;
+        }
+
+        .startup-loader__overlay {
+          animation: none;
+        }
+      }
+
+      @keyframes startup-codex-logo-fade-in {
+        0% {
+          opacity: 0;
+        }
+
+        100% {
+          opacity: 1;
+        }
+      }
+
+      @keyframes startup-codex-logo-shimmer {
+        0% {
+          background-position: 140% 0;
+        }
+
+        100% {
+          background-position: -120% 0;
+        }
+      }
+    </style>
+    <script type="module" crossorigin src="./assets/index-CQAG2N8w.js"></script>
+    <link rel="modulepreload" crossorigin href="./assets/chunk-CFjPhJqf.js">
+    <link rel="modulepreload" crossorigin href="./assets/preload-helper-Chd9yIcd.js">
+    <link rel="modulepreload" crossorigin href="./assets/react-CmOmxWgC.js">
+    <link rel="modulepreload" crossorigin href="./assets/message-bus-DcBNa_PD.js">
+    <link rel="modulepreload" crossorigin href="./assets/jsx-runtime-C0i2Pncv.js">
+    <link rel="modulepreload" crossorigin href="./assets/vscode-api-BtEtzXmw.js">
+    <link rel="modulepreload" crossorigin href="./assets/dist-B4qUhZy9.js">
+    <link rel="modulepreload" crossorigin href="./assets/settings-content-layout-csYMlvyR.js">
+    <link rel="modulepreload" crossorigin href="./assets/tooltip-CGcf2olf.js">
+    <link rel="modulepreload" crossorigin href="./assets/src-C3Br3RWU.js">
+    <link rel="modulepreload" crossorigin href="./assets/math-G8LfK7SF.js">
+    <link rel="modulepreload" crossorigin href="./assets/chunk-ABZYJK2D-BmDWKuxO.js">
+    <link rel="modulepreload" crossorigin href="./assets/_createAssigner-vurRG7Du.js">
+    <link rel="modulepreload" crossorigin href="./assets/chunk-S3R3BYOJ-DL5ELl3q.js">
+    <link rel="modulepreload" crossorigin href="./assets/chunk-JA3XYJ7Z-4YDnLUzp.js">
+    <link rel="modulepreload" crossorigin href="./assets/browser-Bp4ZFZaX.js">
+    <link rel="modulepreload" crossorigin href="./assets/es2015-CKxReiKd.js">
+    <link rel="modulepreload" crossorigin href="./assets/dropdown-PgVzQTAU.js">
+    <link rel="modulepreload" crossorigin href="./assets/use-window-type-Rv9Xf7Hv.js">
+    <link rel="modulepreload" crossorigin href="./assets/dialog-layout-DNSexElc.js">
+    <link rel="modulepreload" crossorigin href="./assets/use-is-dark-eIiV-Cc5.js">
+    <link rel="modulepreload" crossorigin href="./assets/lib-uD7idEdN.js">
+    <link rel="modulepreload" crossorigin href="./assets/v4-BrQWo4il.js">
+    <link rel="modulepreload" crossorigin href="./assets/app-server-manager-hooks-CmyJdQIE.js">
+    <link rel="modulepreload" crossorigin href="./assets/lib-meh0MI8U.js">
+    <link rel="modulepreload" crossorigin href="./assets/katex-nNLflO23.js">
+    <link rel="modulepreload" crossorigin href="./assets/isEmpty-CXR4N8kl.js">
+    <link rel="modulepreload" crossorigin href="./assets/data-url-from-svg-UX77O4yH.js">
+    <link rel="modulepreload" crossorigin href="./assets/code-snippet-B5bUxLlJ.js">
+    <link rel="modulepreload" crossorigin href="./assets/chunk-EXTU4WIE-Ed0kc6Oy.js">
+    <link rel="modulepreload" crossorigin href="./assets/chunk-KS23V3DP-hh7jgdc7.js">
+    <link rel="modulepreload" crossorigin href="./assets/chunk-MI3HLSF2-pllqsWQ3.js">
+    <link rel="modulepreload" crossorigin href="./assets/chunk-ATLVNIR6-CsvadHQZ.js">
+    <link rel="modulepreload" crossorigin href="./assets/chunk-CVBHYZKI-808-tKJ5.js">
+    <link rel="modulepreload" crossorigin href="./assets/chunk-JZLCHNYA-B1JE3L1f.js">
+    <link rel="modulepreload" crossorigin href="./assets/path-DFpIsaqN.js">
+    <link rel="modulepreload" crossorigin href="./assets/array-B4rubdDx.js">
+    <link rel="modulepreload" crossorigin href="./assets/line-ug5NsNYo.js">
+    <link rel="modulepreload" crossorigin href="./assets/chunk-HN2XXSSU-n_jlEywx.js">
+    <link rel="modulepreload" crossorigin href="./assets/chunk-QXUST7PY-CiK0MaGn.js">
+    <link rel="modulepreload" crossorigin href="./assets/chunk-N4CR4FBY-BpzhQXPj.js">
+    <link rel="modulepreload" crossorigin href="./assets/chunk-OIYGIGL5-CmK-41Zj.js">
+    <link rel="modulepreload" crossorigin href="./assets/use-platform-mT-kuuda.js">
+    <link rel="modulepreload" crossorigin href="./assets/use-global-state-Bqq6BcGW.js">
+    <link rel="modulepreload" crossorigin href="./assets/use-auth-F8ARud2n.js">
+    <link rel="modulepreload" crossorigin href="./assets/pencil-_syiXpu7.js">
+    <link rel="modulepreload" crossorigin href="./assets/invalidate-queries-and-broadcast-8vfL_aoS.js">
+    <link rel="modulepreload" crossorigin href="./assets/request-BrxVT3Aq.js">
+    <link rel="modulepreload" crossorigin href="./assets/markdown-Cy7dMEXX.js">
+    <link rel="modulepreload" crossorigin href="./assets/use-configuration-XuFaITEH.js">
+    <link rel="modulepreload" crossorigin href="./assets/code-theme-Bj4y7KE6.js">
+    <link rel="modulepreload" crossorigin href="./assets/checkbox-D-ZfB5od.js">
+    <link rel="modulepreload" crossorigin href="./assets/popover-CW-_fAXs.js">
+    <link rel="modulepreload" crossorigin href="./assets/statsig-DD42Mpyl.js">
+    <link rel="modulepreload" crossorigin href="./assets/segmented-toggle-D4dj0B9G.js">
+    <link rel="modulepreload" crossorigin href="./assets/toast-signal-yzGn1fpR.js">
+    <link rel="modulepreload" crossorigin href="./assets/toggle-BVkwvdmT.js">
+    <link rel="modulepreload" crossorigin href="./assets/composer-atoms-DvNetw0S.js">
+    <link rel="modulepreload" crossorigin href="./assets/electron-menu-shortcuts-B_YEKkSM.js">
+    <link rel="modulepreload" crossorigin href="./assets/windows-sandbox-queries-mW9JBwZQ.js">
+    <link rel="modulepreload" crossorigin href="./assets/settings-surface-YzbAbZrS.js">
+    <link rel="modulepreload" crossorigin href="./assets/settings-row-5I5Y7Xjc.js">
+    <link rel="modulepreload" crossorigin href="./assets/general-settings-CZxyKNIh.js">
+    <link rel="modulepreload" crossorigin href="./assets/_baseOrderBy-DJFBYG3w.js">
+    <link rel="modulepreload" crossorigin href="./assets/codex-api-CvleFV14.js">
+    <link rel="modulepreload" crossorigin href="./assets/_defineProperty-DBsTLTl4.js">
+    <link rel="modulepreload" crossorigin href="./assets/config-queries-Bj2dEPP6.js">
+    <link rel="modulepreload" crossorigin href="./assets/external-agent-config-utils-oiPKMaxX.js">
+    <link rel="modulepreload" crossorigin href="./assets/use-remote-connection-states-CsI2qWSz.js">
+    <link rel="modulepreload" crossorigin href="./assets/skus-BJg1ZRij.js">
+    <link rel="modulepreload" crossorigin href="./assets/local-environment-action-icon-options-Dm-vA7rF.js">
+    <link rel="modulepreload" crossorigin href="./assets/git-api-Bl3tBHdl.js">
+    <link rel="modulepreload" crossorigin href="./assets/alert-ClTkW1vZ.js">
+    <link rel="modulepreload" crossorigin href="./assets/app-server-connection-state-B070cAL_.js">
+    <link rel="modulepreload" crossorigin href="./assets/worktree-paths-BOVAseLB.js">
+    <link rel="modulepreload" crossorigin href="./assets/check-circle-filled-aiuOrSWp.js">
+    <link rel="modulepreload" crossorigin href="./assets/control-group-BtaS0-D3.js">
+    <link rel="modulepreload" crossorigin href="./assets/arrow-left-B87F_UWa.js">
+    <link rel="modulepreload" crossorigin href="./assets/link-external-DKVVRse9.js">
+    <link rel="modulepreload" crossorigin href="./assets/trash-C7I2dG4w.js">
+    <link rel="modulepreload" crossorigin href="./assets/regenerate-97udZKe1.js">
+    <link rel="modulepreload" crossorigin href="./assets/initial-route-atom-BxFANrH-.js">
+    <link rel="modulepreload" crossorigin href="./assets/plugins-page-DFHpEtCX.js">
+    <link rel="modulepreload" crossorigin href="./assets/onboarding-login-content-BBZW6Z_l.js">
+    <link rel="modulepreload" crossorigin href="./assets/worktree-C0NyLtpP.js">
+    <link rel="modulepreload" crossorigin href="./assets/skills-page-_-OfQVdy.js">
+    <link rel="modulepreload" crossorigin href="./assets/use-personality-C4nk1JyA.js">
+    <link rel="modulepreload" crossorigin href="./assets/settings-sections-BI9AAAl_.js">
+    <link rel="modulepreload" crossorigin href="./assets/diff-view-mode-Dl4BwX_n.js">
+    <link rel="modulepreload" crossorigin href="./assets/use-hotkey-MwwLaJ0L.js">
+    <link rel="modulepreload" crossorigin href="./assets/use-usage-settings-access-vY_N51s3.js">
+    <link rel="modulepreload" crossorigin href="./assets/get-project-name-DLb3AELg.js">
+    <link rel="modulepreload" crossorigin href="./assets/use-navigate-to-local-conversation-Dho-1-Cv.js">
+    <link rel="stylesheet" crossorigin href="./assets/dialog-layout-CyrLYBi9.css">
+    <link rel="stylesheet" crossorigin href="./assets/markdown-Ccsg96TP.css">
+    <link rel="stylesheet" crossorigin href="./assets/plugins-page-e7LodWnf.css">
+    <link rel="stylesheet" crossorigin href="./assets/index-Ct6OMwRl.css">
+  <meta http-equiv="Content-Security-Policy" content="default-src &#39;none&#39;; img-src &#39;self&#39; app: blob: data: https:; child-src &#39;self&#39; blob:; frame-src &#39;self&#39; blob:; worker-src &#39;self&#39; blob:; script-src &#39;self&#39; &#39;sha256-Z2/iFzh9VMlVkEOar1f/oSHWwQk3ve1qk/C2WdsC4Xk=&#39; &#39;wasm-unsafe-eval&#39;; style-src &#39;self&#39; &#39;unsafe-inline&#39;; font-src &#39;self&#39; data:; media-src &#39;self&#39; blob:; connect-src &#39;self&#39; https://ab.chatgpt.com https://cdn.openai.com;">
+</head>
+  <body tabindex="0" style="outline: none">
+    <div id="root">
+      <div class="startup-loader" aria-hidden="true">
+        <div class="startup-loader__logo">
+          <svg
+            class="startup-loader__base"
+            viewBox="0 0 500 500"
+            fill="currentColor"
+            xmlns="http://www.w3.org/2000/svg"
+          >
+            <path
+              d="M330.34 313.62h-67.84c-7.65 0-13.85-6.2-13.85-13.85s6.2-13.85 13.85-13.85h67.84c7.65 0 13.85 6.2 13.85 13.85s-6.2 13.85-13.85 13.85Z"
+            />
+            <path
+              d="M169.65 313.38c-2.36 0-4.74-.6-6.93-1.87-6.62-3.83-8.88-12.31-5.05-18.93l23.78-41.08-23.91-43.21c-3.7-6.69-1.28-15.12 5.41-18.82 6.69-3.71 15.12-1.28 18.82 5.41l31.51 56.94-31.64 54.65c-2.57 4.43-7.22 6.91-12 6.91Z"
+            />
+            <path
+              d="M144.61 144.5c1.42-41.82 35.79-75.27 77.95-75.25 27.89.02 52.35 14.68 66.11 36.71 10.93-5.82 23.41-9.12 36.65-9.11 43.05.02 77.94 34.94 77.91 78 0 13.24-3.32 25.72-9.16 36.64 22.02 13.79 36.66 38.26 36.64 66.15-.02 42.16-33.52 76.48-75.34 77.86-1.42 41.82-35.78 75.28-77.94 75.25-27.89-.02-52.35-14.68-66.11-36.72-10.93 5.82-23.4 9.13-36.65 9.12-43.05-.02-77.94-34.94-77.91-78 0-13.24 3.32-25.72 9.16-36.64-22.02-13.79-36.65-38.26-36.64-66.15.02-42.16 33.51-76.48 75.33-77.86ZM297.77 71.99c-19.24-19.26-45.83-31.17-75.2-31.19-49.23-.03-90.67 33.39-102.84 78.79-45.41 12.12-78.87 53.52-78.9 102.76-.02 29.37 11.87 55.97 31.1 75.23-2.35 8.79-3.62 18.03-3.63 27.56-.03 58.77 47.58 106.44 106.35 106.47 9.53 0 18.77-1.25 27.55-3.6 19.24 19.26 45.84 31.18 75.21 31.2 49.24.03 90.67-33.39 102.84-78.8 45.42-12.11 78.88-53.51 78.91-102.75.02-29.37-11.87-55.98-31.11-75.24 2.35-8.78 3.62-18.02 3.63-27.55.03-58.77-47.58-106.44-106.35-106.47-9.53 0-18.77 1.25-27.56 3.59Z"
+            />
+          </svg>
+          <div class="startup-loader__overlay"></div>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>
