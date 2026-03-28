@@ -29,6 +29,13 @@
  *    defaults to off when there is no network.  We bypass the gate so the
  *    entry is always visible in offline builds.
  *
+ * 5. Enable Automations entry for offline builds
+ *    The Automations sidebar item is gated behind Statsig experiment
+ *    3075919032.  In offline mode Statsig cannot reach its servers, so the
+ *    gate defaults to false and the entry is hidden even though all
+ *    Automations UI is fully bundled.  We bypass the gate so the sidebar
+ *    item is always visible in offline builds.
+ *
  * Usage:
  *   node scripts/patch-app-asar.mjs --app-dir <path-to-app-dir>
  *
@@ -236,10 +243,22 @@ try {
   const SETTINGS_GATE_RE =
     /(`4166894088`[^;]*;let\s+)(\w+)\s*=\s*\w+\((\w+)\)/;
 
+  // ── Patch 5: Enable Automations sidebar entry for offline builds ────
+  //
+  // The Automations nav item in the sidebar is gated behind Statsig
+  // experiment 3075919032.  Offline builds cannot reach Statsig servers,
+  // so the gate defaults to false and the Automations entry disappears
+  // even though the full Automations UI is bundled.  We bypass the gate
+  // so the sidebar item is always visible in offline builds.
+
+  const AUTOMATIONS_GATE_RE =
+    /(`3075919032`[^;]*;let\s+)(\w+)\s*=\s*\w+\((\w+)\)/;
+
   const assetsDir = path.join(tmpDir, 'webview', 'assets');
   if (fs.existsSync(assetsDir)) {
     let i18nCount = 0;
     let gatePatched = false;
+    let automationsGatePatched = false;
 
     for (const file of fs.readdirSync(assetsDir)) {
       if (!file.endsWith('.js')) continue;
@@ -260,6 +279,12 @@ try {
         modified = true;
       }
 
+      if (AUTOMATIONS_GATE_RE.test(content)) {
+        content = content.replace(AUTOMATIONS_GATE_RE, '$1$2=!0');
+        automationsGatePatched = true;
+        modified = true;
+      }
+
       if (modified) {
         fs.writeFileSync(filePath, content, 'utf8');
       }
@@ -277,6 +302,13 @@ try {
     } else {
       warn('Could not locate settings gate 4166894088. ' +
            'Settings entry patch skipped (the app version may have changed).');
+    }
+
+    if (automationsGatePatched) {
+      log('Automations entry gate bypassed for offline mode.');
+    } else {
+      warn('Could not locate Automations gate 3075919032. ' +
+           'Automations entry patch skipped (the app version may have changed).');
     }
   } else {
     warn('webview/assets directory not found. Webview patches skipped.');

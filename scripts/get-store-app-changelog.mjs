@@ -67,7 +67,7 @@ function searchForReleaseNotes(obj, depth = 0) {
  */
 async function extractChangelogFromDom(page) {
   return page.evaluate(() => {
-    const headingPattern = /what.?s new|release notes|change.?log/i;
+    const headingPattern = /what[\u2019']?s new|release notes|change[-\s]?log/i;
     const headingTags = ['h1', 'h2', 'h3', 'h4', 'strong'];
 
     for (const tag of headingTags) {
