@@ -132,6 +132,43 @@ jobs:
           "generated_at=$($metadata.generatedAt)" >> $env:GITHUB_OUTPUT
           "source_mode=$($metadata.appSource.mode)" >> $env:GITHUB_OUTPUT
 
+      - name: Build release notes
+        if: ${{ steps.release_check.outputs.skip_build != 'true' }}
+        shell: pwsh
+        run: |
+          $lines = [System.Collections.Generic.List[string]]::new()
+          $lines.Add("Source package: `` ${{ steps.build.outputs.package_id }} ``")
+          $lines.Add("Store version: `` ${{ steps.build.outputs.version }} ``")
+          $lines.Add("Source mode: `` ${{ steps.build.outputs.source_mode }} ``")
+          $lines.Add("Built at: `` ${{ steps.build.outputs.generated_at }} ``")
+
+          $pfn = '${{ steps.source.outputs.package_family_name }}'
+          if ($pfn) {
+            try {
+              $changelogJson = node ./scripts/get-store-app-changelog.mjs --package-family-name $pfn
+              $changelog = $changelogJson | ConvertFrom-Json
+              if ($changelog.releaseNotes) {
+                $lines.Add("")
+                $lines.Add("## What's new in this version")
+                $lines.Add("")
+                $lines.Add($changelog.releaseNotes)
+              }
+            } catch {
+              Write-Warning "Could not fetch app changelog: $_"
+            }
+          }
+
+          $lines.Add("")
+          $lines.Add("## Assets")
+          $lines.Add("")
+          $lines.Add("- portable zip")
+          $lines.Add("- setup exe")
+          $lines.Add("- bundled skills zip")
+          $lines.Add("- exported store snapshot zip")
+          $lines.Add("- SHA256SUMS.txt")
+
+          ($lines -join "`n") | Set-Content -Path 'release-notes.md' -Encoding UTF8 -NoNewline
+
       - name: Upload workflow artifacts
         if: ${{ steps.release_check.outputs.skip_build != 'true' }}
         uses: actions/upload-artifact@v4
@@ -148,15 +185,4 @@ jobs:
           name: ${{ steps.build.outputs.release_name }}
           files: ${{ steps.build.outputs.artifact_dir }}/*
           overwrite_files: true
-          body: |
-            Source package: `${{ steps.build.outputs.package_id }}`
-            Store version: `${{ steps.build.outputs.version }}`
-            Source mode: `${{ steps.build.outputs.source_mode }}`
-            Built at: `${{ steps.build.outputs.generated_at }}`
-
-            Assets:
-            - portable zip
-            - setup exe
-            - bundled skills zip
-            - exported store snapshot zip
-            - SHA256SUMS.txt
+          body_path: release-notes.md
