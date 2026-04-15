@@ -36,6 +36,16 @@
  *    Automations UI is fully bundled.  We bypass the gate so the sidebar
  *    item is always visible in offline builds.
  *
+ * 6. Enable pull requests sidebar entry for offline builds
+ *    The pull requests nav link is also gated behind a Statsig experiment in
+ *    newer builds.  We bypass that gate so the offline build does not hide
+ *    the bundled route when Statsig cannot resolve experiments.
+ *
+ * 7. Enable scratchpad sidebar entry for offline builds
+ *    Scratchpad is bundled in newer builds but hidden behind a separate
+ *    Statsig gate.  We bypass that gate so the offline build exposes the
+ *    same route and sidebar nav entry as the official package.
+ *
  * Usage:
  *   node scripts/patch-app-asar.mjs --app-dir <path-to-app-dir>
  *
@@ -125,6 +135,22 @@ function patchFile(filePath) {
   fs.writeFileSync(filePath, PATCH_SNIPPET + original, 'utf8');
 }
 
+function listJavaScriptFiles(dirPath) {
+  if (!fs.existsSync(dirPath)) return [];
+
+  const files = [];
+  for (const entry of fs.readdirSync(dirPath, { withFileTypes: true })) {
+    const entryPath = path.join(dirPath, entry.name);
+    if (entry.isDirectory()) {
+      files.push(...listJavaScriptFiles(entryPath));
+    } else if (entry.isFile() && entry.name.endsWith('.js')) {
+      files.push(entryPath);
+    }
+  }
+
+  return files;
+}
+
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 const asarPath = path.resolve(appDir, 'resources', 'app.asar');
@@ -154,12 +180,11 @@ try {
   log(`Main entry: ${path.relative(tmpDir, mainEntry)}`);
 
   if (isAlreadyPatched(mainEntry)) {
-    log('Already patched – nothing to do.');
-    process.exit(0);
+    log('Main entry already patched.');
+  } else {
+    patchFile(mainEntry);
+    log('windowsStore patch applied.');
   }
-
-  patchFile(mainEntry);
-  log('windowsStore patch applied.');
 
   // ── Patch 2: implement settings-related IPC handlers ──────────────────
   //
@@ -174,11 +199,16 @@ try {
   //
   // The remaining cases (open-vscode-command, etc.) keep throwing.
 
-  const NOT_IMPLEMENTED_NEEDLE =
+  const NOT_IMPLEMENTED_NEEDLE_V1 =
     'case`navigate-in-new-editor-tab`:case`open-vscode-command`:' +
     'case`open-extension-settings`:case`open-keyboard-shortcuts`:' +
     'case`open-config-toml`:case`show-settings`:case`install-wsl`:' +
     'throw Error(`"${t.type}" is not implemented in Electron.`)';
+  const NOT_IMPLEMENTED_NEEDLE_V2 =
+    'case`navigate-in-new-editor-tab`:case`open-vscode-command`:' +
+    'case`open-extension-settings`:case`open-keyboard-shortcuts`:' +
+    'case`open-config-toml`:case`show-settings`:case`install-wsl`:' +
+    'throw Error(`"${r.type}" is not implemented in Electron.`)';
 
   // Helper: reload the renderer at a given settings route.
   const NAV_HELPER =
@@ -187,7 +217,7 @@ try {
       '_u.searchParams.set("initialRoute",r);' +
       'e.loadURL(_u.toString())}';
 
-  const SETTINGS_REPLACEMENT =
+  const SETTINGS_REPLACEMENT_V1 =
     // show-settings: reload the renderer with the desired settings route
     'case`show-settings`:{' +
       NAV_HELPER + ';' +
@@ -210,12 +240,65 @@ try {
     'case`navigate-in-new-editor-tab`:case`open-vscode-command`:' +
     'case`install-wsl`:' +
     'throw Error(`"${t.type}" is not implemented in Electron.`)';
+  const SETTINGS_REPLACEMENT_V2 =
+    'case`show-settings`:{' +
+      'let e=t.BrowserWindow.fromWebContents(n);' +
+      'if(e){let i=new URL(e.getURL());' +
+      'i.searchParams.set("initialRoute","/settings/"+(r.section||"agent"));' +
+      'e.loadURL(i.toString())}' +
+      'break}' +
+    'case`open-extension-settings`:{' +
+      'let e=t.BrowserWindow.fromWebContents(n);' +
+      'if(e){let i=new URL(e.getURL());' +
+      'i.searchParams.set("initialRoute","/settings/general-settings");' +
+      'e.loadURL(i.toString())}' +
+      'break}' +
+    'case`open-keyboard-shortcuts`:{' +
+      'let e=t.BrowserWindow.fromWebContents(n);' +
+      'if(e){let i=new URL(e.getURL());' +
+      'i.searchParams.set("initialRoute","/settings/general-settings");' +
+      'e.loadURL(i.toString())}' +
+      'break}' +
+    'case`open-config-toml`:{' +
+      'let e=require("path").join(require("os").homedir(),".codex","config.toml");' +
+      'require("fs").mkdirSync(require("path").dirname(e),{recursive:true});' +
+      'if(!require("fs").existsSync(e))require("fs").writeFileSync(e,"# Codex config\\n",{encoding:"utf8"});' +
+      't.shell.openPath(e);break}' +
+    'case`navigate-in-new-editor-tab`:case`open-vscode-command`:' +
+    'case`install-wsl`:' +
+    'throw Error(`"${r.type}" is not implemented in Electron.`)';
 
-  let mainContent = fs.readFileSync(mainEntry, 'utf8');
-  if (mainContent.includes(NOT_IMPLEMENTED_NEEDLE)) {
-    mainContent = mainContent.replace(NOT_IMPLEMENTED_NEEDLE, SETTINGS_REPLACEMENT);
-    fs.writeFileSync(mainEntry, mainContent, 'utf8');
-    log('Settings IPC handlers patched.');
+  const mainBuildDir = path.join(tmpDir, '.vite', 'build');
+  const mainBundleFiles = Array.from(new Set([
+    mainEntry,
+    ...listJavaScriptFiles(mainBuildDir),
+  ]));
+  const settingsPatchedFiles = [];
+
+  for (const filePath of mainBundleFiles) {
+    const content = fs.readFileSync(filePath, 'utf8');
+    let patchedContent = null;
+
+    if (content.includes(NOT_IMPLEMENTED_NEEDLE_V1)) {
+      patchedContent = content.replace(
+        NOT_IMPLEMENTED_NEEDLE_V1,
+        SETTINGS_REPLACEMENT_V1,
+      );
+    } else if (content.includes(NOT_IMPLEMENTED_NEEDLE_V2)) {
+      patchedContent = content.replace(
+        NOT_IMPLEMENTED_NEEDLE_V2,
+        SETTINGS_REPLACEMENT_V2,
+      );
+    }
+
+    if (patchedContent == null) continue;
+
+    fs.writeFileSync(filePath, patchedContent, 'utf8');
+    settingsPatchedFiles.push(path.relative(tmpDir, filePath));
+  }
+
+  if (settingsPatchedFiles.length > 0) {
+    log(`Settings IPC handlers patched in ${settingsPatchedFiles.join(', ')}.`);
   } else {
     warn('Could not locate the "not implemented" throw for show-settings. ' +
          'Settings patch skipped (the app version may have changed).');
@@ -253,12 +336,25 @@ try {
 
   const AUTOMATIONS_GATE_RE =
     /(`3075919032`[^;]*;let\s+)(\w+)\s*=\s*\w+\((\w+)\)/;
+  const AUTOMATIONS_GATE_INLINE_RE =
+    /([,;]\s*\w+\s*=)\s*\w+\(`3075919032`\)/;
+  const PULL_REQUESTS_GATE_RE =
+    /(`3789238711`[^;]*;let\s+)(\w+)\s*=\s*\w+\((\w+)\)/;
+  const PULL_REQUESTS_GATE_INLINE_RE =
+    /([,;]\s*\w+\s*=)\s*\w+\(`3789238711`\)/;
+  const PULL_REQUESTS_ROUTE_GATE_FUNCTION_RE =
+    /function\s+(\w+)\(\)\{let\s+e=\(0,Q\.c\)\(3\),t;if\(e\[0\]===Symbol\.for\(`react\.memo_cache_sentinel`\)\?\(t=`3789238711`,e\[0\]=t\):t=e\[0\],!xu\(t\)\)\{let\s+t;return\s+e\[1\]===Symbol\.for\(`react\.memo_cache_sentinel`\)\?\(t=\(0,\$\.jsx\)\(b,\{to:`\/`,replace:!0\}\),e\[1\]=t\):t=e\[1\],t\}let\s+n;return\s+e\[2\]===Symbol\.for\(`react\.memo_cache_sentinel`\)\?\(n=\(0,\$\.jsx\)\((\w+),\{\}\),e\[2\]=n\):n=e\[2\],n\}/;
+  const SCRATCHPAD_GATE_FUNCTION_RE =
+    /function\s+(\w+)\(\)\{let\s+\w+=\(0,\w+\.c\)\(1\),\w+;return\s+\w+\[0\]===Symbol\.for\(`react\.memo_cache_sentinel`\)\?\(\w+=`2302560359`,\w+\[0\]=\w+\):\w+=\w+\[0\],\w+\(\w+\)\}/;
 
   const assetsDir = path.join(tmpDir, 'webview', 'assets');
   if (fs.existsSync(assetsDir)) {
     let i18nCount = 0;
     let gatePatched = false;
     let automationsGatePatched = false;
+    let pullRequestsGatePatched = false;
+    let pullRequestsRouteGatePatched = false;
+    let scratchpadGatePatched = false;
 
     for (const file of fs.readdirSync(assetsDir)) {
       if (!file.endsWith('.js')) continue;
@@ -283,6 +379,35 @@ try {
         content = content.replace(AUTOMATIONS_GATE_RE, '$1$2=!0');
         automationsGatePatched = true;
         modified = true;
+      } else if (AUTOMATIONS_GATE_INLINE_RE.test(content)) {
+        content = content.replace(AUTOMATIONS_GATE_INLINE_RE, '$1!0');
+        automationsGatePatched = true;
+        modified = true;
+      }
+
+      if (PULL_REQUESTS_GATE_RE.test(content)) {
+        content = content.replace(PULL_REQUESTS_GATE_RE, '$1$2=!0');
+        pullRequestsGatePatched = true;
+        modified = true;
+      } else if (PULL_REQUESTS_GATE_INLINE_RE.test(content)) {
+        content = content.replace(PULL_REQUESTS_GATE_INLINE_RE, '$1!0');
+        pullRequestsGatePatched = true;
+        modified = true;
+      }
+
+      if (PULL_REQUESTS_ROUTE_GATE_FUNCTION_RE.test(content)) {
+        content = content.replace(
+          PULL_REQUESTS_ROUTE_GATE_FUNCTION_RE,
+          'function $1(){return(0,$.jsx)($2,{})}',
+        );
+        pullRequestsRouteGatePatched = true;
+        modified = true;
+      }
+
+      if (SCRATCHPAD_GATE_FUNCTION_RE.test(content)) {
+        content = content.replace(SCRATCHPAD_GATE_FUNCTION_RE, 'function $1(){return!0}');
+        scratchpadGatePatched = true;
+        modified = true;
       }
 
       if (modified) {
@@ -305,10 +430,31 @@ try {
     }
 
     if (automationsGatePatched) {
-      log('Automations entry gate bypassed for offline mode.');
+      log('Automation sidebar gate bypassed for offline mode.');
     } else {
-      warn('Could not locate Automations gate 3075919032. ' +
-           'Automations entry patch skipped (the app version may have changed).');
+      warn('Could not locate automation gate 3075919032. ' +
+           'Automation sidebar patch skipped (the app version may have changed).');
+    }
+
+    if (pullRequestsGatePatched) {
+      log('Pull requests sidebar gate bypassed for offline mode.');
+    } else {
+      warn('Could not locate pull requests gate 3789238711. ' +
+           'Pull requests sidebar patch skipped (the app version may have changed).');
+    }
+
+    if (pullRequestsRouteGatePatched) {
+      log('Pull requests route gate bypassed for offline mode.');
+    } else {
+      warn('Could not locate pull requests route gate 3789238711. ' +
+           'Pull requests route patch skipped (the app version may have changed).');
+    }
+
+    if (scratchpadGatePatched) {
+      log('Scratchpad gate bypassed for offline mode.');
+    } else {
+      warn('Could not locate scratchpad gate 2302560359. ' +
+           'Scratchpad patch skipped (the app version may have changed).');
     }
   } else {
     warn('webview/assets directory not found. Webview patches skipped.');
