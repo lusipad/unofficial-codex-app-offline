@@ -159,6 +159,15 @@ function listJavaScriptFiles(dirPath) {
   return files;
 }
 
+function matchesPattern(content, pattern) {
+  if (typeof pattern === 'string') {
+    return content.includes(pattern);
+  }
+
+  pattern.lastIndex = 0;
+  return pattern.test(content);
+}
+
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 const asarPath = path.resolve(appDir, 'resources', 'app.asar');
@@ -275,12 +284,14 @@ try {
     'case`navigate-in-new-editor-tab`:case`open-vscode-command`:' +
     'case`install-wsl`:' +
     'throw Error(`"${r.type}" is not implemented in Electron.`)';
+  const AUTOMATION_CWD_NORMALIZER_INLINE =
+    'e=>typeof e==`string`&&e.startsWith(`\\\\\\\\?\\\\`)&&/^[A-Za-z]:/.test(e.slice(4))?e.slice(4):e';
   const AUTOMATION_RUNTIME_CWD_RE =
     /let (\w+)=(\w+)\.cwds;if\(\1\.length===0\)/;
   const AUTOMATION_RUNTIME_CWD_REPLACEMENT =
-    'let $1=$2.cwds.map(e=>typeof e==`string`&&e.startsWith(`\\\\\\\\?\\\\`)&&/^[A-Za-z]:/.test(e.slice(4))?e.slice(4):e);if($1.length===0)';
+    `let $1=$2.cwds.map(${AUTOMATION_CWD_NORMALIZER_INLINE});if($1.length===0)`;
   const AUTOMATION_RUNTIME_CWD_PATCH_MARKER =
-    '.cwds.map(e=>typeof e==`string`&&e.startsWith(`\\\\\\\\?\\\\`)&&/^[A-Za-z]:/.test(e.slice(4))?e.slice(4):e)';
+    `.cwds.map(${AUTOMATION_CWD_NORMALIZER_INLINE})`;
 
   const mainBuildDir = path.join(tmpDir, '.vite', 'build');
   const mainBundleFiles = Array.from(new Set([
@@ -326,24 +337,35 @@ try {
   // `C:\...` project key and picks the wrong sandbox/approval settings.
 
   const automationRuntimePatchedFiles = [];
+  const automationRuntimeUnpatchedFiles = [];
 
   for (const filePath of mainBundleFiles) {
-    const content = fs.readFileSync(filePath, 'utf8');
+    let content = fs.readFileSync(filePath, 'utf8');
     if (content.includes(AUTOMATION_RUNTIME_CWD_PATCH_MARKER)) {
       automationRuntimePatchedFiles.push(path.relative(tmpDir, filePath));
-      continue;
+    } else if (AUTOMATION_RUNTIME_CWD_RE.test(content)) {
+      const patchedContent = content.replace(
+        AUTOMATION_RUNTIME_CWD_RE,
+        AUTOMATION_RUNTIME_CWD_REPLACEMENT,
+      );
+      if (patchedContent !== content) {
+        content = patchedContent;
+        fs.writeFileSync(filePath, content, 'utf8');
+        automationRuntimePatchedFiles.push(path.relative(tmpDir, filePath));
+      }
     }
 
-    if (!AUTOMATION_RUNTIME_CWD_RE.test(content)) continue;
+    if (!content.includes(AUTOMATION_RUNTIME_CWD_PATCH_MARKER) &&
+        AUTOMATION_RUNTIME_CWD_RE.test(content)) {
+      automationRuntimeUnpatchedFiles.push(path.relative(tmpDir, filePath));
+    }
+  }
 
-    const patchedContent = content.replace(
-      AUTOMATION_RUNTIME_CWD_RE,
-      AUTOMATION_RUNTIME_CWD_REPLACEMENT,
+  if (automationRuntimeUnpatchedFiles.length > 0) {
+    throw new Error(
+      'Known automation runtime cwd handling remained unpatched in ' +
+      `${automationRuntimeUnpatchedFiles.join(', ')}.`,
     );
-    if (patchedContent === content) continue;
-
-    fs.writeFileSync(filePath, patchedContent, 'utf8');
-    automationRuntimePatchedFiles.push(path.relative(tmpDir, filePath));
   }
 
   if (automationRuntimePatchedFiles.length > 0) {
@@ -400,17 +422,32 @@ try {
     {
       needle: 'function qd(e){return m(e.value)}',
       replacement:
-        'function qd(e){let t=m(e.value);return typeof t==`string`&&t.startsWith(`\\\\\\\\?\\\\`)&&/^[A-Za-z]:/.test(t.slice(4))?t.slice(4):t}',
+        `function qd(e){let t=m(e.value);return typeof t==\`string\`&&t.startsWith(\`\\\\\\\\?\\\\\`)&&/^[A-Za-z]:/.test(t.slice(4))?t.slice(4):t}`,
       patchMarker:
-        'function qd(e){let t=m(e.value);return typeof t==`string`&&t.startsWith(`\\\\\\\\?\\\\`)&&/^[A-Za-z]:/.test(t.slice(4))?t.slice(4):t}',
+        `function qd(e){let t=m(e.value);return typeof t==\`string\`&&t.startsWith(\`\\\\\\\\?\\\\\`)&&/^[A-Za-z]:/.test(t.slice(4))?t.slice(4):t}`,
     },
     {
       needle: 'e.cwds.map(ve)',
       replacement:
-        'e.cwds.map(ve).map(e=>typeof e==`string`&&e.startsWith(`\\\\\\\\?\\\\`)&&/^[A-Za-z]:/.test(e.slice(4))?e.slice(4):e)',
+        `e.cwds.map(ve).map(${AUTOMATION_CWD_NORMALIZER_INLINE})`,
       patchMarker:
-        '.cwds.map(ve).map(e=>typeof e==`string`&&e.startsWith(`\\\\\\\\?\\\\`)&&/^[A-Za-z]:/.test(e.slice(4))?e.slice(4):e)',
+        `.cwds.map(ve).map(${AUTOMATION_CWD_NORMALIZER_INLINE})`,
     },
+  ];
+  const AUTOMATION_DIALOG_CWD_REGEX_PATCHES = [
+    {
+      test:
+        /cwds:[A-Za-z_$][\w$]*\.cwds\?\.map\([A-Za-z_$][\w$]*\)\?\?\[\]/,
+      pattern:
+        /cwds:([A-Za-z_$][\w$]*\.cwds\?\.map\([A-Za-z_$][\w$]*\)\?\?\[\])/g,
+      replacement:
+        `cwds:($1).map(${AUTOMATION_CWD_NORMALIZER_INLINE})`,
+    },
+  ];
+  const AUTOMATION_DIALOG_CWD_UNPATCHED_PATTERNS = [
+    'function qd(e){return m(e.value)}',
+    /e\.cwds\.map\(ve\)(?!\.map\()/,
+    /cwds:[A-Za-z_$][\w$]*\.cwds\?\.map\([A-Za-z_$][\w$]*\)\?\?\[\]/,
   ];
 
   const assetsDir = path.join(tmpDir, 'webview', 'assets');
@@ -422,6 +459,7 @@ try {
     let pullRequestsRouteGatePatched = false;
     let scratchpadGatePatched = false;
     let automationDialogCwdPatched = false;
+    const automationDialogCwdUnpatchedFiles = [];
 
     for (const file of fs.readdirSync(assetsDir)) {
       if (!file.endsWith('.js')) continue;
@@ -480,23 +518,50 @@ try {
       for (const patch of AUTOMATION_DIALOG_CWD_PATCHES) {
         if (content.includes(patch.patchMarker)) {
           automationDialogCwdPatched = true;
-          break;
+          continue;
         }
 
         if (!content.includes(patch.needle)) continue;
 
-        content = content.replace(
+        const patchedContent = content.replaceAll(
           patch.needle,
           patch.replacement,
         );
+        if (patchedContent === content) continue;
+
+        content = patchedContent;
         automationDialogCwdPatched = true;
         modified = true;
-        break;
+      }
+
+      for (const patch of AUTOMATION_DIALOG_CWD_REGEX_PATCHES) {
+        if (!patch.test.test(content)) continue;
+
+        const patchedContent = content.replace(
+          patch.pattern,
+          patch.replacement,
+        );
+        if (patchedContent === content) continue;
+
+        content = patchedContent;
+        automationDialogCwdPatched = true;
+        modified = true;
       }
 
       if (modified) {
         fs.writeFileSync(filePath, content, 'utf8');
       }
+
+      if (AUTOMATION_DIALOG_CWD_UNPATCHED_PATTERNS.some(pattern => matchesPattern(content, pattern))) {
+        automationDialogCwdUnpatchedFiles.push(file);
+      }
+    }
+
+    if (automationDialogCwdUnpatchedFiles.length > 0) {
+      throw new Error(
+        'Known automation dialog cwd serialization remained unpatched in ' +
+        `${automationDialogCwdUnpatchedFiles.join(', ')}.`,
+      );
     }
 
     if (i18nCount > 0) {
