@@ -95,6 +95,20 @@ jobs:
             choco install innosetup --no-progress -y
           }
 
+      - name: Download existing build metadata
+        if: ${{ steps.release_check.outputs.skip_build == 'true' }}
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $cacheDir = '.release-cache'
+          New-Item -ItemType Directory -Force -Path $cacheDir | Out-Null
+          try {
+            gh release download '${{ steps.source.outputs.release_tag }}' --repo '${{ github.repository }}' --pattern 'build-metadata.json' --dir $cacheDir --clobber
+          } catch {
+            Write-Warning "Could not download existing build metadata: $_"
+          }
+
       - name: Build offline bundle
         if: ${{ steps.release_check.outputs.skip_build != 'true' }}
         shell: pwsh
@@ -133,25 +147,45 @@ jobs:
           "source_mode=$($metadata.appSource.mode)" >> $env:GITHUB_OUTPUT
 
       - name: Build release notes
-        if: ${{ steps.release_check.outputs.skip_build != 'true' }}
         shell: pwsh
         run: |
-          $lines = [System.Collections.Generic.List[string]]::new()
-          $lines.Add("Source package: `` ${{ steps.build.outputs.package_id }} ``")
-          $lines.Add("Store version: `` ${{ steps.build.outputs.version }} ``")
-          $lines.Add("Source mode: `` ${{ steps.build.outputs.source_mode }} ``")
-          $lines.Add("Built at: `` ${{ steps.build.outputs.generated_at }} ``")
+          $skipBuild = '${{ steps.release_check.outputs.skip_build }}' -eq 'true'
+          $packageId = '${{ steps.source.outputs.package_id }}'
+          $version = '${{ steps.source.outputs.version }}'
+          $sourceMode = '${{ steps.source.outputs.source_mode }}'
+          $generatedAt = ''
 
-          $pfn = '${{ steps.source.outputs.package_family_name }}'
-          if ($pfn) {
+          if (-not $skipBuild) {
+            $packageId = '${{ steps.build.outputs.package_id }}'
+            $version = '${{ steps.build.outputs.version }}'
+            $sourceMode = '${{ steps.build.outputs.source_mode }}'
+            $generatedAt = '${{ steps.build.outputs.generated_at }}'
+          }
+          elseif (Test-Path '.release-cache/build-metadata.json') {
+            $existingMetadata = Get-Content '.release-cache/build-metadata.json' -Raw | ConvertFrom-Json
+            $packageId = $existingMetadata.packageId
+            $version = $existingMetadata.version
+            $sourceMode = $existingMetadata.appSource.mode
+            $generatedAt = $existingMetadata.generatedAt
+          }
+
+          $lines = [System.Collections.Generic.List[string]]::new()
+          $lines.Add("Source package: `` $packageId ``")
+          $lines.Add("Store version: `` $version ``")
+          $lines.Add("Source mode: `` $sourceMode ``")
+          if ($generatedAt) {
+            $lines.Add("Built at: `` $generatedAt ``")
+          }
+
+          if ($version) {
             try {
-              $changelogJson = node ./scripts/get-store-app-changelog.mjs --package-family-name $pfn
+              $changelogJson = node ./scripts/get-store-app-changelog.mjs --version $version
               $changelog = $changelogJson | ConvertFrom-Json
-              if ($changelog.releaseNotes) {
+              if ($changelog.releaseNotesMarkdown) {
                 $lines.Add("")
-                $lines.Add("## What's new in this version")
+                $lines.Add("## Official Codex app release notes")
                 $lines.Add("")
-                $lines.Add($changelog.releaseNotes)
+                $lines.Add($changelog.releaseNotesMarkdown)
               }
             } catch {
               Write-Warning "Could not fetch app changelog: $_"
@@ -186,3 +220,11 @@ jobs:
           files: ${{ steps.build.outputs.artifact_dir }}/*
           overwrite_files: true
           body_path: release-notes.md
+
+      - name: Update existing release notes
+        if: ${{ steps.release_check.outputs.skip_build == 'true' }}
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release edit '${{ steps.source.outputs.release_tag }}' --repo '${{ github.repository }}' --notes-file 'release-notes.md'

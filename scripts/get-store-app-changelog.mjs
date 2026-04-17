@@ -1,6 +1,8 @@
 import process from 'node:process';
 import { chromium } from 'playwright';
 
+const CHANGELOG_URL = 'https://developers.openai.com/codex/changelog';
+
 function parseArgs(argv) {
   const args = {};
 
@@ -26,154 +28,210 @@ function parseArgs(argv) {
   return args;
 }
 
-/**
- * Recursively searches a JSON object for a release-notes-like field.
- * @param {unknown} obj
- * @param {number} depth
- * @returns {string | null}
- */
-function searchForReleaseNotes(obj, depth = 0) {
-  if (depth > 8 || obj === null || typeof obj !== 'object') {
+function normalizeVersion(version) {
+  if (typeof version !== 'string') {
     return null;
   }
 
-  const releaseNotesKeys = new Set(['releasenotes', 'whatsnew', 'changenotes', 'releasenote']);
+  const segments = version.trim().match(/\d+/g);
 
-  if (!Array.isArray(obj)) {
-    for (const [key, value] of Object.entries(obj)) {
-      if (releaseNotesKeys.has(key.toLowerCase()) && typeof value === 'string' && value.trim().length > 0) {
-        return value.trim();
-      }
-    }
+  if (!segments || segments.length < 2) {
+    return version.trim() || null;
   }
 
-  for (const value of Array.isArray(obj) ? obj : Object.values(obj)) {
-    if (typeof value === 'object' && value !== null) {
-      const result = searchForReleaseNotes(value, depth + 1);
-      if (result) {
-        return result;
-      }
-    }
-  }
-
-  return null;
-}
-
-/**
- * Falls back to DOM scraping: looks for a "What's new" heading and returns the text
- * of the following sibling element.
- * @param {import('playwright').Page} page
- * @returns {Promise<string | null>}
- */
-async function extractChangelogFromDom(page) {
-  return page.evaluate(() => {
-    const headingPattern = /what[\u2019']?s new|release notes|change[-\s]?log/i;
-    const headingTags = ['h1', 'h2', 'h3', 'h4', 'strong'];
-
-    for (const tag of headingTags) {
-      for (const el of document.querySelectorAll(tag)) {
-        if (!headingPattern.test(el.textContent || '')) {
-          continue;
-        }
-
-        // Try immediate next sibling first, then parent's next sibling
-        let candidate = el.nextElementSibling ?? el.parentElement?.nextElementSibling ?? null;
-
-        if (candidate) {
-          const text = /** @type {HTMLElement} */ (candidate).innerText?.trim();
-
-          if (text && text.length > 10 && !headingPattern.test(text)) {
-            return text;
-          }
-        }
-      }
-    }
-
-    return null;
-  });
+  return `${segments[0]}.${segments[1]}`;
 }
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
-  const packageFamilyName = args['package-family-name'] || process.env.CODEX_PACKAGE_FAMILY_NAME;
+  const fullVersion = args.version || process.env.CODEX_APP_VERSION;
+  const targetVersion = normalizeVersion(fullVersion);
 
-  if (!packageFamilyName) {
-    throw new Error('Missing --package-family-name');
+  if (!targetVersion) {
+    throw new Error('Missing --version');
   }
 
   const browser = await chromium.launch({ headless: true });
-  let releaseNotes = null;
 
   try {
-    const context = await browser.newContext({
+    const page = await browser.newPage({
       locale: 'en-US',
       extraHTTPHeaders: { 'Accept-Language': 'en-US,en;q=0.9' },
     });
 
-    const page = await context.newPage();
+    await page.goto(CHANGELOG_URL, { waitUntil: 'networkidle', timeout: 120000 });
 
-    // Block ad/tracker requests (same pattern as resolve-store-bundle-url.mjs)
-    await page.route('**/*', async (route) => {
-      const requestUrl = route.request().url();
-
-      if (/doubleclick|googlesyndication|googleads|google-analytics|yandex|top100|mail\.ru|rambler/i.test(requestUrl)) {
-        await route.abort();
-        return;
+    const changelog = await page.evaluate(({ changeLogUrl, versionLabel }) => {
+      function normalizeWhitespace(text) {
+        return text
+          .replace(/\u00a0/g, ' ')
+          .replace(/\r\n?/g, '\n')
+          .replace(/[ \t]+\n/g, '\n')
+          .replace(/\n[ \t]+/g, '\n')
+          .replace(/[ \t]{2,}/g, ' ')
+          .replace(/\n{3,}/g, '\n\n')
+          .trim();
       }
 
-      await route.continue();
-    });
-
-    // Intercept JSON API responses that may carry release notes
-    page.on('response', async (response) => {
-      if (releaseNotes !== null) {
-        return;
-      }
-
-      if (response.status() !== 200) {
-        return;
-      }
-
-      const url = response.url();
-
-      if (!url.includes('microsoft.com')) {
-        return;
-      }
-
-      const contentType = (response.headers()['content-type'] || '').toLowerCase();
-
-      if (!contentType.includes('json')) {
-        return;
-      }
-
-      try {
-        const json = await response.json();
-        const found = searchForReleaseNotes(json);
-
-        if (found) {
-          releaseNotes = found;
+      function makeAbsoluteUrl(path) {
+        try {
+          return new URL(path, changeLogUrl).toString();
+        } catch {
+          return changeLogUrl;
         }
-      } catch {
-        // Ignore JSON parse errors
       }
+
+      function serializeList(list, ordered) {
+        return [...list.children]
+          .filter((node) => node.tagName === 'LI')
+          .map((node, index) => {
+            const prefix = ordered ? `${index + 1}. ` : '- ';
+            const text = normalizeWhitespace(node.innerText || node.textContent || '');
+            return text ? `${prefix}${text}` : null;
+          })
+          .filter(Boolean)
+          .join('\n');
+      }
+
+      function serializeArticle(article) {
+        const blocks = [];
+
+        for (const node of article.children) {
+          if (node.tagName === 'SCRIPT' || node.tagName === 'STYLE') {
+            continue;
+          }
+
+          if (node.tagName === 'UL') {
+            const list = serializeList(node, false);
+
+            if (list) {
+              blocks.push(list);
+            }
+
+            continue;
+          }
+
+          if (node.tagName === 'OL') {
+            const list = serializeList(node, true);
+
+            if (list) {
+              blocks.push(list);
+            }
+
+            continue;
+          }
+
+          if (node.tagName === 'PRE') {
+            const text = node.textContent?.trim();
+
+            if (text) {
+              blocks.push(`\`\`\`\n${text}\n\`\`\``);
+            }
+
+            continue;
+          }
+
+          if (node.tagName === 'H4') {
+            const text = normalizeWhitespace(node.textContent || '');
+
+            if (text) {
+              blocks.push(`#### ${text}`);
+            }
+
+            continue;
+          }
+
+          if (node.tagName === 'H5') {
+            const text = normalizeWhitespace(node.textContent || '');
+
+            if (text) {
+              blocks.push(`##### ${text}`);
+            }
+
+            continue;
+          }
+
+          if (node.tagName === 'H6') {
+            const text = normalizeWhitespace(node.textContent || '');
+
+            if (text) {
+              blocks.push(`###### ${text}`);
+            }
+
+            continue;
+          }
+
+          const text = normalizeWhitespace(node.innerText || node.textContent || '');
+
+          if (text) {
+            blocks.push(text);
+          }
+        }
+
+        return blocks.join('\n\n').trim();
+      }
+
+      const headings = [...document.querySelectorAll('h1, h2, h3, h4, h5, h6')];
+      const versionPattern = new RegExp(`(^|\\s)${versionLabel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\s|$)`);
+      const targetHeading = headings.find((node) => versionPattern.test((node.textContent || '').replace(/\s+/g, ' ').trim()));
+
+      if (!targetHeading) {
+        return null;
+      }
+
+      const entry = targetHeading.closest('li');
+      const article = entry?.querySelector('article');
+      const title = normalizeWhitespace(targetHeading.textContent || '');
+      const publishedAt = normalizeWhitespace(entry?.querySelector('time')?.textContent || '');
+      const anchorId = targetHeading.querySelector('[data-anchor-id]')?.getAttribute('data-anchor-id') || '';
+      const sourceUrl = anchorId ? `${changeLogUrl}#${anchorId}` : changeLogUrl;
+      const body = article ? serializeArticle(article) : '';
+      const markdown = [
+        `### ${title}`,
+        publishedAt ? `Published: ${publishedAt}` : '',
+        `Source: ${sourceUrl}`,
+        '',
+        body,
+      ]
+        .filter((line) => line !== '')
+        .join('\n\n')
+        .trim();
+
+      return {
+        matchedVersion: versionLabel,
+        title,
+        publishedAt: publishedAt || null,
+        sourceUrl: makeAbsoluteUrl(sourceUrl),
+        releaseNotes: body || null,
+        releaseNotesMarkdown: markdown || null,
+      };
+    }, {
+      changeLogUrl: CHANGELOG_URL,
+      versionLabel: targetVersion,
     });
 
-    const storeUrl = `https://apps.microsoft.com/detail/${encodeURIComponent(packageFamilyName)}?hl=en-us&gl=US`;
-    await page.goto(storeUrl, { waitUntil: 'networkidle', timeout: 120000 });
-
-    // DOM-based fallback if API interception found nothing
-    if (releaseNotes === null) {
-      releaseNotes = await extractChangelogFromDom(page);
-    }
+    process.stdout.write(`${JSON.stringify(changelog ?? {
+      matchedVersion: targetVersion,
+      title: null,
+      publishedAt: null,
+      sourceUrl: CHANGELOG_URL,
+      releaseNotes: null,
+      releaseNotesMarkdown: null,
+    }, null, 2)}\n`);
   } finally {
     await browser.close();
   }
-
-  process.stdout.write(`${JSON.stringify({ releaseNotes }, null, 2)}\n`);
 }
 
 main().catch((error) => {
-  process.stderr.write(`Warning: Failed to fetch app changelog: ${error instanceof Error ? error.message : String(error)}\n`);
-  process.stdout.write(`${JSON.stringify({ releaseNotes: null }, null, 2)}\n`);
+  process.stderr.write(`Warning: Failed to fetch Codex app changelog: ${error instanceof Error ? error.message : String(error)}\n`);
+  process.stdout.write(`${JSON.stringify({
+    matchedVersion: null,
+    title: null,
+    publishedAt: null,
+    sourceUrl: CHANGELOG_URL,
+    releaseNotes: null,
+    releaseNotesMarkdown: null,
+  }, null, 2)}\n`);
   process.exit(0);
 });
