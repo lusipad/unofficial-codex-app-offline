@@ -47,7 +47,31 @@ function Get-RelativePath {
         [Parameter(Mandatory = $true)][string]$PathValue
     )
 
-    return [System.IO.Path]::GetRelativePath($BasePath, $PathValue).Replace('\\', '/').Replace('\', '/')
+    $resolvedBasePath = [System.IO.Path]::GetFullPath($BasePath)
+    $resolvedTargetPath = [System.IO.Path]::GetFullPath($PathValue)
+    $baseRoot = [System.IO.Path]::GetPathRoot($resolvedBasePath)
+    $targetRoot = [System.IO.Path]::GetPathRoot($resolvedTargetPath)
+
+    if (-not [string]::Equals($baseRoot, $targetRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+        return $resolvedTargetPath.Replace('\\', '/').Replace('\', '/')
+    }
+
+    if ($resolvedBasePath -eq $resolvedTargetPath) {
+        return '.'
+    }
+
+    if (-not $resolvedBasePath.EndsWith([string][System.IO.Path]::DirectorySeparatorChar) -and
+        -not $resolvedBasePath.EndsWith([string][System.IO.Path]::AltDirectorySeparatorChar)) {
+        $resolvedBasePath += [System.IO.Path]::DirectorySeparatorChar
+    }
+
+    $baseUri = [System.Uri]$resolvedBasePath
+    $targetUri = [System.Uri]$resolvedTargetPath
+    $relativePath = [System.Uri]::UnescapeDataString(
+        $baseUri.MakeRelativeUri($targetUri).ToString()
+    ).Replace('/', [System.IO.Path]::DirectorySeparatorChar)
+
+    return $relativePath.Replace('\\', '/').Replace('\', '/')
 }
 
 function Get-FileSha256 {

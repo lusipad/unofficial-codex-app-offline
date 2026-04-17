@@ -38,6 +38,39 @@ function Get-GitHubJson {
     return Invoke-RestMethod -Uri $Uri -Headers $resolvedHeaders
 }
 
+function Get-RelativePath {
+    param(
+        [Parameter(Mandatory = $true)][string]$BasePath,
+        [Parameter(Mandatory = $true)][string]$PathValue
+    )
+
+    $resolvedBasePath = [System.IO.Path]::GetFullPath($BasePath)
+    $resolvedTargetPath = [System.IO.Path]::GetFullPath($PathValue)
+    $baseRoot = [System.IO.Path]::GetPathRoot($resolvedBasePath)
+    $targetRoot = [System.IO.Path]::GetPathRoot($resolvedTargetPath)
+
+    if (-not [string]::Equals($baseRoot, $targetRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+        return $resolvedTargetPath.Replace('\\', '/').Replace('\', '/')
+    }
+
+    if ($resolvedBasePath -eq $resolvedTargetPath) {
+        return '.'
+    }
+
+    if (-not $resolvedBasePath.EndsWith([string][System.IO.Path]::DirectorySeparatorChar) -and
+        -not $resolvedBasePath.EndsWith([string][System.IO.Path]::AltDirectorySeparatorChar)) {
+        $resolvedBasePath += [System.IO.Path]::DirectorySeparatorChar
+    }
+
+    $baseUri = [System.Uri]$resolvedBasePath
+    $targetUri = [System.Uri]$resolvedTargetPath
+    $relativePath = [System.Uri]::UnescapeDataString(
+        $baseUri.MakeRelativeUri($targetUri).ToString()
+    ).Replace('/', [System.IO.Path]::DirectorySeparatorChar)
+
+    return $relativePath.Replace('\\', '/').Replace('\', '/')
+}
+
 $repoRoot = (Get-Location).Path
 $configFile = Resolve-AbsolutePath -BasePath $repoRoot -PathValue $ConfigPath
 $config = Get-Content -Path $configFile -Raw | ConvertFrom-Json
@@ -121,7 +154,7 @@ try {
         commit = $commitInfo.sha
         syncedAt = (Get-Date).ToString('o')
         archiveUri = $archiveUri
-        destination = [System.IO.Path]::GetRelativePath($repoRoot, $destinationRoot).Replace('\\', '/').Replace('\', '/')
+        destination = Get-RelativePath -BasePath $repoRoot -PathValue $destinationRoot
         topLevelEntries = @((Get-ChildItem -Path $destinationRoot -Directory -Force | Sort-Object Name | Select-Object -ExpandProperty Name))
     }
 

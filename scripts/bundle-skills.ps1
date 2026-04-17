@@ -33,11 +33,44 @@ function Get-ContentHash {
     }
 }
 
+function Get-RelativePath {
+    param(
+        [Parameter(Mandatory = $true)][string]$BasePath,
+        [Parameter(Mandatory = $true)][string]$PathValue
+    )
+
+    $resolvedBasePath = [System.IO.Path]::GetFullPath($BasePath)
+    $resolvedTargetPath = [System.IO.Path]::GetFullPath($PathValue)
+    $baseRoot = [System.IO.Path]::GetPathRoot($resolvedBasePath)
+    $targetRoot = [System.IO.Path]::GetPathRoot($resolvedTargetPath)
+
+    if (-not [string]::Equals($baseRoot, $targetRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+        return $resolvedTargetPath.Replace('\\', '/').Replace('\', '/')
+    }
+
+    if ($resolvedBasePath -eq $resolvedTargetPath) {
+        return '.'
+    }
+
+    if (-not $resolvedBasePath.EndsWith([string][System.IO.Path]::DirectorySeparatorChar) -and
+        -not $resolvedBasePath.EndsWith([string][System.IO.Path]::AltDirectorySeparatorChar)) {
+        $resolvedBasePath += [System.IO.Path]::DirectorySeparatorChar
+    }
+
+    $baseUri = [System.Uri]$resolvedBasePath
+    $targetUri = [System.Uri]$resolvedTargetPath
+    $relativePath = [System.Uri]::UnescapeDataString(
+        $baseUri.MakeRelativeUri($targetUri).ToString()
+    ).Replace('/', [System.IO.Path]::DirectorySeparatorChar)
+
+    return $relativePath.Replace('\\', '/').Replace('\', '/')
+}
+
 function Get-DirectoryHash {
     param([Parameter(Mandatory = $true)][string]$DirectoryPath)
 
     $material = (Get-ChildItem -Path $DirectoryPath -Recurse -File -Force | Sort-Object FullName | ForEach-Object {
-        $relativePath = [System.IO.Path]::GetRelativePath($DirectoryPath, $_.FullName).Replace('\\', '/').Replace('\', '/')
+        $relativePath = Get-RelativePath -BasePath $DirectoryPath -PathValue $_.FullName
         $hash = (Get-FileHash -Algorithm SHA256 -Path $_.FullName).Hash.ToLowerInvariant()
         '{0}:{1}' -f $relativePath, $hash
     }) -join "`n"
@@ -95,7 +128,7 @@ $manifest = [ordered]@{
     packageVersion = $PackageVersion
     generatedAt = (Get-Date).ToString('o')
     contentHash = Get-ContentHash -Value $hashMaterial
-    sources = @($resolvedSources | ForEach-Object { [System.IO.Path]::GetRelativePath((Get-Location).Path, $_).Replace('\\', '/').Replace('\', '/') })
+    sources = @($resolvedSources | ForEach-Object { Get-RelativePath -BasePath (Get-Location).Path -PathValue $_ })
     skills = $skillEntries
 }
 
