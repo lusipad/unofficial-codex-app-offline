@@ -46,6 +46,14 @@
  *    Statsig gate.  We bypass that gate so the offline build exposes the
  *    same route and sidebar nav entry as the official package.
  *
+ * 8. Normalize Windows automation cwd paths
+ *    The packaged Automations UI can persist selected project paths in
+ *    `\\?\C:\...` form on Windows.  Automation execution later compares that
+ *    string against per-project config entries that use normal drive-letter
+ *    paths, so approvals/sandbox settings fail to match and runs fall back to
+ *    the wrong permissions.  We normalize those paths during execution, and
+ *    strip the namespace prefix when the automation dialog saves selections.
+ *
  * Usage:
  *   node scripts/patch-app-asar.mjs --app-dir <path-to-app-dir>
  *
@@ -267,6 +275,12 @@ try {
     'case`navigate-in-new-editor-tab`:case`open-vscode-command`:' +
     'case`install-wsl`:' +
     'throw Error(`"${r.type}" is not implemented in Electron.`)';
+  const AUTOMATION_RUNTIME_CWD_RE =
+    /let (\w+)=(\w+)\.cwds;if\(\1\.length===0\)/;
+  const AUTOMATION_RUNTIME_CWD_REPLACEMENT =
+    'let $1=$2.cwds.map(e=>typeof e==`string`&&e.startsWith(`\\\\\\\\?\\\\`)&&/^[A-Za-z]:/.test(e.slice(4))?e.slice(4):e);if($1.length===0)';
+  const AUTOMATION_RUNTIME_CWD_PATCH_MARKER =
+    '.cwds.map(e=>typeof e==`string`&&e.startsWith(`\\\\\\\\?\\\\`)&&/^[A-Za-z]:/.test(e.slice(4))?e.slice(4):e)';
 
   const mainBuildDir = path.join(tmpDir, '.vite', 'build');
   const mainBundleFiles = Array.from(new Set([
@@ -302,6 +316,42 @@ try {
   } else {
     warn('Could not locate the "not implemented" throw for show-settings. ' +
          'Settings patch skipped (the app version may have changed).');
+  }
+
+  // ── Patch 8: Normalize Windows automation cwd paths at runtime ───────
+  //
+  // Automation configs can be saved with a Windows namespace prefix
+  // (`\\?\C:\...`).  The runtime later uses the raw cwd string to resolve the
+  // matching project configuration, so a namespaced path misses the normal
+  // `C:\...` project key and picks the wrong sandbox/approval settings.
+
+  const automationRuntimePatchedFiles = [];
+
+  for (const filePath of mainBundleFiles) {
+    const content = fs.readFileSync(filePath, 'utf8');
+    if (content.includes(AUTOMATION_RUNTIME_CWD_PATCH_MARKER)) {
+      automationRuntimePatchedFiles.push(path.relative(tmpDir, filePath));
+      continue;
+    }
+
+    if (!AUTOMATION_RUNTIME_CWD_RE.test(content)) continue;
+
+    const patchedContent = content.replace(
+      AUTOMATION_RUNTIME_CWD_RE,
+      AUTOMATION_RUNTIME_CWD_REPLACEMENT,
+    );
+    if (patchedContent === content) continue;
+
+    fs.writeFileSync(filePath, patchedContent, 'utf8');
+    automationRuntimePatchedFiles.push(path.relative(tmpDir, filePath));
+  }
+
+  if (automationRuntimePatchedFiles.length > 0) {
+    log('Automation runtime cwd normalization patched in ' +
+        `${automationRuntimePatchedFiles.join(', ')}.`);
+  } else {
+    warn('Could not locate automation runtime cwd handling. ' +
+         'Automation permission patch skipped (the app version may have changed).');
   }
 
   // ── Patch 3: Fix enable_i18n default value inconsistency ─────────────
@@ -346,6 +396,22 @@ try {
     /function\s+(\w+)\(\)\{let\s+e=\(0,Q\.c\)\(3\),t;if\(e\[0\]===Symbol\.for\(`react\.memo_cache_sentinel`\)\?\(t=`3789238711`,e\[0\]=t\):t=e\[0\],!xu\(t\)\)\{let\s+t;return\s+e\[1\]===Symbol\.for\(`react\.memo_cache_sentinel`\)\?\(t=\(0,\$\.jsx\)\(b,\{to:`\/`,replace:!0\}\),e\[1\]=t\):t=e\[1\],t\}let\s+n;return\s+e\[2\]===Symbol\.for\(`react\.memo_cache_sentinel`\)\?\(n=\(0,\$\.jsx\)\((\w+),\{\}\),e\[2\]=n\):n=e\[2\],n\}/;
   const SCRATCHPAD_GATE_FUNCTION_RE =
     /function\s+(\w+)\(\)\{let\s+\w+=\(0,\w+\.c\)\(1\),\w+;return\s+\w+\[0\]===Symbol\.for\(`react\.memo_cache_sentinel`\)\?\(\w+=`2302560359`,\w+\[0\]=\w+\):\w+=\w+\[0\],\w+\(\w+\)\}/;
+  const AUTOMATION_DIALOG_CWD_PATCHES = [
+    {
+      needle: 'function qd(e){return m(e.value)}',
+      replacement:
+        'function qd(e){let t=m(e.value);return typeof t==`string`&&t.startsWith(`\\\\\\\\?\\\\`)&&/^[A-Za-z]:/.test(t.slice(4))?t.slice(4):t}',
+      patchMarker:
+        'function qd(e){let t=m(e.value);return typeof t==`string`&&t.startsWith(`\\\\\\\\?\\\\`)&&/^[A-Za-z]:/.test(t.slice(4))?t.slice(4):t}',
+    },
+    {
+      needle: 'e.cwds.map(ve)',
+      replacement:
+        'e.cwds.map(ve).map(e=>typeof e==`string`&&e.startsWith(`\\\\\\\\?\\\\`)&&/^[A-Za-z]:/.test(e.slice(4))?e.slice(4):e)',
+      patchMarker:
+        '.cwds.map(ve).map(e=>typeof e==`string`&&e.startsWith(`\\\\\\\\?\\\\`)&&/^[A-Za-z]:/.test(e.slice(4))?e.slice(4):e)',
+    },
+  ];
 
   const assetsDir = path.join(tmpDir, 'webview', 'assets');
   if (fs.existsSync(assetsDir)) {
@@ -355,6 +421,7 @@ try {
     let pullRequestsGatePatched = false;
     let pullRequestsRouteGatePatched = false;
     let scratchpadGatePatched = false;
+    let automationDialogCwdPatched = false;
 
     for (const file of fs.readdirSync(assetsDir)) {
       if (!file.endsWith('.js')) continue;
@@ -410,6 +477,23 @@ try {
         modified = true;
       }
 
+      for (const patch of AUTOMATION_DIALOG_CWD_PATCHES) {
+        if (content.includes(patch.patchMarker)) {
+          automationDialogCwdPatched = true;
+          break;
+        }
+
+        if (!content.includes(patch.needle)) continue;
+
+        content = content.replace(
+          patch.needle,
+          patch.replacement,
+        );
+        automationDialogCwdPatched = true;
+        modified = true;
+        break;
+      }
+
       if (modified) {
         fs.writeFileSync(filePath, content, 'utf8');
       }
@@ -455,6 +539,13 @@ try {
     } else {
       warn('Could not locate scratchpad gate 2302560359. ' +
            'Scratchpad patch skipped (the app version may have changed).');
+    }
+
+    if (automationDialogCwdPatched) {
+      log('Automation dialog cwd normalization patched for Windows.');
+    } else {
+      warn('Could not locate automation dialog cwd serialization. ' +
+           'Future automation saves may still keep Windows namespace paths.');
     }
   } else {
     warn('webview/assets directory not found. Webview patches skipped.');
