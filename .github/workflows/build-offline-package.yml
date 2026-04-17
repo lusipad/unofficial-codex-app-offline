@@ -8,6 +8,11 @@ on:
         required: false
         default: true
         type: boolean
+      force_rebuild:
+        description: Rebuild and republish even when the same release tag already exists
+        required: false
+        default: false
+        type: boolean
   schedule:
     - cron: '15 3 * * *'
   push:
@@ -69,19 +74,44 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
+          WORKFLOW_EVENT_NAME: ${{ github.event_name }}
+          WORKFLOW_FORCE_REBUILD: ${{ inputs.force_rebuild }}
+          HEAD_COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
         run: |
           $tag = '${{ steps.source.outputs.release_tag }}'
           $repo = '${{ github.repository }}'
           $existingReleaseUrl = gh release view $tag --repo $repo --json url --jq '.url' 2>$null
+          $forceRebuild = $false
+
+          if ($env:WORKFLOW_EVENT_NAME -eq 'workflow_dispatch' -and $env:WORKFLOW_FORCE_REBUILD -eq 'true') {
+            $forceRebuild = $true
+          }
+
+          if (-not $forceRebuild -and $env:WORKFLOW_EVENT_NAME -eq 'push' -and $env:HEAD_COMMIT_MESSAGE -match '\[force-rebuild\]') {
+            $forceRebuild = $true
+          }
+
+          "force_rebuild=$($forceRebuild.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
 
           if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($existingReleaseUrl)) {
-            "skip_build=true" >> $env:GITHUB_OUTPUT
             "existing_release_url=$existingReleaseUrl" >> $env:GITHUB_OUTPUT
-            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "Version $tag is already published at $existingReleaseUrl. Build and publish steps were skipped."
+            if ($forceRebuild) {
+              "skip_build=false" >> $env:GITHUB_OUTPUT
+              Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "Version $tag already exists at $existingReleaseUrl, but force rebuild is enabled. Build and publish steps will continue and overwrite assets."
+            }
+            else {
+              "skip_build=true" >> $env:GITHUB_OUTPUT
+              Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "Version $tag is already published at $existingReleaseUrl. Build and publish steps were skipped."
+            }
           }
           else {
             "skip_build=false" >> $env:GITHUB_OUTPUT
-            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "Version $tag is new. Build and publish steps will continue."
+            if ($forceRebuild) {
+              Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "Force rebuild is enabled. Version $tag is not currently published, so build and publish steps will continue."
+            }
+            else {
+              Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "Version $tag is new. Build and publish steps will continue."
+            }
           }
 
           $global:LASTEXITCODE = 0
