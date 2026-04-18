@@ -54,6 +54,14 @@
  *    the wrong permissions.  We normalize those paths during execution, and
  *    strip the namespace prefix when the automation dialog saves selections.
  *
+ * 9. Force offline Windows app-server launches onto the unelevated sandbox
+ *    backend
+ *    The packaged Windows build still reads the user's local ~/.codex
+ *    config.toml, but `windows.sandbox = "elevated"` fails during the helper
+ *    ACL refresh step for portable/offline runs.  We keep using the user's
+ *    config and only inject a CLI override for the desktop app's internal
+ *    `codex app-server` launch.
+ *
  * Usage:
  *   node scripts/patch-app-asar.mjs --app-dir <path-to-app-dir>
  *
@@ -166,6 +174,19 @@ function matchesPattern(content, pattern) {
 
   pattern.lastIndex = 0;
   return pattern.test(content);
+}
+
+function countOccurrences(content, needle) {
+  if (!needle) return 0;
+
+  let count = 0;
+  let start = 0;
+  while (true) {
+    const index = content.indexOf(needle, start);
+    if (index === -1) return count;
+    count += 1;
+    start = index + needle.length;
+  }
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────────
@@ -292,6 +313,10 @@ try {
     `let $1=$2.cwds.map(${AUTOMATION_CWD_NORMALIZER_INLINE});if($1.length===0)`;
   const AUTOMATION_RUNTIME_CWD_PATCH_MARKER =
     `.cwds.map(${AUTOMATION_CWD_NORMALIZER_INLINE})`;
+  const APP_SERVER_SANDBOX_OVERRIDE_NEEDLE =
+    'args:[`app-server`,`--analytics-default-enabled`]';
+  const APP_SERVER_SANDBOX_OVERRIDE_REPLACEMENT =
+    'args:[`-c`,`windows.sandbox=\'unelevated\'`,`app-server`,`--analytics-default-enabled`]';
 
   const mainBuildDir = path.join(tmpDir, '.vite', 'build');
   const mainBundleFiles = Array.from(new Set([
@@ -374,6 +399,52 @@ try {
   } else {
     warn('Could not locate automation runtime cwd handling. ' +
          'Automation permission patch skipped (the app version may have changed).');
+  }
+
+  // ── Patch 9: Force packaged app-server launches onto unelevated sandbox ─
+  //
+  // Keep loading the user's ~/.codex config, but override just the
+  // windows.sandbox backend for the desktop app's internal app-server launch.
+
+  const appServerSandboxOverridePatchedFiles = [];
+  let appServerSandboxOverrideCount = 0;
+  let appServerSandboxOverrideDetected = 0;
+
+  for (const filePath of mainBundleFiles) {
+    let content = fs.readFileSync(filePath, 'utf8');
+    const alreadyPatchedCount = countOccurrences(
+      content,
+      APP_SERVER_SANDBOX_OVERRIDE_REPLACEMENT,
+    );
+    if (alreadyPatchedCount > 0) {
+      appServerSandboxOverrideDetected += alreadyPatchedCount;
+      appServerSandboxOverridePatchedFiles.push(path.relative(tmpDir, filePath));
+      continue;
+    }
+
+    const needleCount = countOccurrences(content, APP_SERVER_SANDBOX_OVERRIDE_NEEDLE);
+    if (needleCount === 0) continue;
+
+    content = content.split(APP_SERVER_SANDBOX_OVERRIDE_NEEDLE)
+      .join(APP_SERVER_SANDBOX_OVERRIDE_REPLACEMENT);
+    fs.writeFileSync(filePath, content, 'utf8');
+    appServerSandboxOverrideCount += needleCount;
+    appServerSandboxOverrideDetected += needleCount;
+    appServerSandboxOverridePatchedFiles.push(path.relative(tmpDir, filePath));
+  }
+
+  if (appServerSandboxOverrideDetected === 0) {
+    throw new Error(
+      'Could not locate the desktop app-server launch arguments to force ' +
+      'windows.sandbox=\'unelevated\'.',
+    );
+  }
+
+  if (appServerSandboxOverrideCount > 0) {
+    log('Desktop app-server sandbox override patched in ' +
+        `${appServerSandboxOverridePatchedFiles.join(', ')}.`);
+  } else {
+    log('Desktop app-server sandbox override already patched.');
   }
 
   // ── Patch 3: Fix enable_i18n default value inconsistency ─────────────
