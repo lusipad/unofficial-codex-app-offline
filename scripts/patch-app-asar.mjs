@@ -17,7 +17,8 @@
  *    The Electron build throws "not implemented" for these messages.  We
  *    replace the throw with real handlers: show-settings reloads the window
  *    with the appropriate initialRoute, and open-config-toml opens the TOML
- *    config file in the system editor.
+ *    config file in the system editor.  Three variable-naming variants are
+ *    handled (V1: message=t/wc=e, V2: message=r/wc=n, V3: message=i/wc=r).
  *
  * 3. Fix enable_i18n default value inconsistency
  *    The settings page defaults enable_i18n to true (so the language selector
@@ -27,14 +28,17 @@
  * 4. Enable settings page entry for offline builds
  *    The settings menu item is gated behind a Statsig experiment that
  *    defaults to off when there is no network.  We bypass the gate so the
- *    entry is always visible in offline builds.
+ *    entry is always visible in offline builds.  Older builds use the pattern
+ *    `4166894088`...;let X=func(Y); newer builds call $f(`4166894088`)
+ *    directly.
  *
  * 5. Enable Automations entry for offline builds
  *    The Automations sidebar item is gated behind Statsig experiment
  *    3075919032.  In offline mode Statsig cannot reach its servers, so the
  *    gate defaults to false and the entry is hidden even though all
  *    Automations UI is fully bundled.  We bypass the gate so the sidebar
- *    item is always visible in offline builds.
+ *    item is always visible in offline builds.  Newer builds use the
+ *    $f(`3075919032`) inline call pattern.
  *
  * 6. Enable pull requests sidebar entry for offline builds
  *    The pull requests nav link is also gated behind a Statsig experiment in
@@ -247,6 +251,13 @@ try {
     'case`open-extension-settings`:case`open-keyboard-shortcuts`:' +
     'case`open-config-toml`:case`show-settings`:case`install-wsl`:' +
     'throw Error(`"${r.type}" is not implemented in Electron.`)';
+  // V3: message variable renamed to `i`, webContents to `r`, electron module to `n`
+  // (seen in builds ≥ 26.422.8496.0)
+  const NOT_IMPLEMENTED_NEEDLE_V3 =
+    'case`navigate-in-new-editor-tab`:case`open-vscode-command`:' +
+    'case`open-extension-settings`:case`open-keyboard-shortcuts`:' +
+    'case`open-config-toml`:case`show-settings`:case`install-wsl`:' +
+    'throw Error(`"${i.type}" is not implemented in Electron.`)';
 
   // Helper: reload the renderer at a given settings route.
   const NAV_HELPER =
@@ -305,6 +316,34 @@ try {
     'case`navigate-in-new-editor-tab`:case`open-vscode-command`:' +
     'case`install-wsl`:' +
     'throw Error(`"${r.type}" is not implemented in Electron.`)';
+  // V3: electron=n, webContents=r, message=i
+  const SETTINGS_REPLACEMENT_V3 =
+    'case`show-settings`:{' +
+      'let e=n.BrowserWindow.fromWebContents(r);' +
+      'if(e){let t=new URL(e.getURL());' +
+      't.searchParams.set("initialRoute","/settings/"+(i.section||"agent"));' +
+      'e.loadURL(t.toString())}' +
+      'break}' +
+    'case`open-extension-settings`:{' +
+      'let e=n.BrowserWindow.fromWebContents(r);' +
+      'if(e){let t=new URL(e.getURL());' +
+      't.searchParams.set("initialRoute","/settings/general-settings");' +
+      'e.loadURL(t.toString())}' +
+      'break}' +
+    'case`open-keyboard-shortcuts`:{' +
+      'let e=n.BrowserWindow.fromWebContents(r);' +
+      'if(e){let t=new URL(e.getURL());' +
+      't.searchParams.set("initialRoute","/settings/general-settings");' +
+      'e.loadURL(t.toString())}' +
+      'break}' +
+    'case`open-config-toml`:{' +
+      'let e=require("path").join(require("os").homedir(),".codex","config.toml");' +
+      'require("fs").mkdirSync(require("path").dirname(e),{recursive:true});' +
+      'if(!require("fs").existsSync(e))require("fs").writeFileSync(e,"# Codex config\\n",{encoding:"utf8"});' +
+      'n.shell.openPath(e);break}' +
+    'case`navigate-in-new-editor-tab`:case`open-vscode-command`:' +
+    'case`install-wsl`:' +
+    'throw Error(`"${i.type}" is not implemented in Electron.`)';
   const AUTOMATION_CWD_NORMALIZER_INLINE =
     'e=>typeof e==`string`&&e.startsWith(`\\\\\\\\?\\\\`)&&/^[A-Za-z]:/.test(e.slice(4))?e.slice(4):e';
   const AUTOMATION_RUNTIME_CWD_RE =
@@ -338,6 +377,11 @@ try {
       patchedContent = content.replace(
         NOT_IMPLEMENTED_NEEDLE_V2,
         SETTINGS_REPLACEMENT_V2,
+      );
+    } else if (content.includes(NOT_IMPLEMENTED_NEEDLE_V3)) {
+      patchedContent = content.replace(
+        NOT_IMPLEMENTED_NEEDLE_V3,
+        SETTINGS_REPLACEMENT_V3,
       );
     }
 
@@ -468,6 +512,10 @@ try {
 
   const SETTINGS_GATE_RE =
     /(`4166894088`[^;]*;let\s+)(\w+)\s*=\s*\w+\((\w+)\)/;
+  // ≥ 26.422.8496.0: gate is called inline as $f(`4166894088`) with no
+  // surrounding let-statement pattern.  Replace the call directly with !0.
+  const SETTINGS_GATE_INLINE_RE =
+    /\$f\(`4166894088`\)/;
 
   // ── Patch 5: Enable Automations sidebar entry for offline builds ────
   //
@@ -479,16 +527,24 @@ try {
 
   const AUTOMATIONS_GATE_RE =
     /(`3075919032`[^;]*;let\s+)(\w+)\s*=\s*\w+\((\w+)\)/;
+  // [$\w]+ instead of \w+ so that minified names like $f are also matched.
   const AUTOMATIONS_GATE_INLINE_RE =
-    /([,;]\s*\w+\s*=)\s*\w+\(`3075919032`\)/;
+    /([,;]\s*\w+\s*=)\s*[$\w]+\(`3075919032`\)/;
   const PULL_REQUESTS_GATE_RE =
     /(`3789238711`[^;]*;let\s+)(\w+)\s*=\s*\w+\((\w+)\)/;
   const PULL_REQUESTS_GATE_INLINE_RE =
-    /([,;]\s*\w+\s*=)\s*\w+\(`3789238711`\)/;
+    /([,;]\s*\w+\s*=)\s*[$\w]+\(`3789238711`\)/;
   const PULL_REQUESTS_ROUTE_GATE_FUNCTION_RE =
     /function\s+(\w+)\(\)\{let\s+e=\(0,Q\.c\)\(3\),t;if\(e\[0\]===Symbol\.for\(`react\.memo_cache_sentinel`\)\?\(t=`3789238711`,e\[0\]=t\):t=e\[0\],!xu\(t\)\)\{let\s+t;return\s+e\[1\]===Symbol\.for\(`react\.memo_cache_sentinel`\)\?\(t=\(0,\$\.jsx\)\(b,\{to:`\/`,replace:!0\}\),e\[1\]=t\):t=e\[1\],t\}let\s+n;return\s+e\[2\]===Symbol\.for\(`react\.memo_cache_sentinel`\)\?\(n=\(0,\$\.jsx\)\((\w+),\{\}\),e\[2\]=n\):n=e\[2\],n\}/;
+  // ≥ 26.422.8496.0: 2-slot memo cache and direct $f() call.
+  const PULL_REQUESTS_ROUTE_GATE_FUNCTION_RE_V2 =
+    /function\s+(\w+)\(\)\{let\s+\w+=\(0,Q\.c\)\(2\);if\(!\$f\(`3789238711`\)\)\{let\s+\w+;return\s+\w+\[0\]===Symbol\.for\(`react\.memo_cache_sentinel`\)\?\(\w+=\(0,\$\.jsx\)\(\w+,\{to:`\/`,replace:!0\}\),\w+\[0\]=\w+\):\w+=\w+\[0\],\w+\}let\s+\w+;return\s+\w+\[1\]===Symbol\.for\(`react\.memo_cache_sentinel`\)\?\(\w+=\(0,\$\.jsx\)\((\w+),\{\}\),\w+\[1\]=\w+\):\w+=\w+\[1\],\w+\}/;
   const SCRATCHPAD_GATE_FUNCTION_RE =
     /function\s+(\w+)\(\)\{let\s+\w+=\(0,\w+\.c\)\(1\),\w+;return\s+\w+\[0\]===Symbol\.for\(`react\.memo_cache_sentinel`\)\?\(\w+=`2302560359`,\w+\[0\]=\w+\):\w+=\w+\[0\],\w+\(\w+\)\}/;
+  // ≥ 26.422.8496.0: gate function reduced to a direct call, possibly in a
+  // separate chunk (e.g. use-navigate-to-local-conversation-*.js).
+  const SCRATCHPAD_GATE_FUNCTION_RE_V2 =
+    /function\s+(\w+)\(\)\{return\s+[$\w]+\(`2302560359`\)\}/;
   const AUTOMATION_DIALOG_CWD_PATCHES = [
     {
       needle: 'function qd(e){return m(e.value)}',
@@ -549,6 +605,10 @@ try {
         content = content.replace(SETTINGS_GATE_RE, '$1$2=!0');
         gatePatched = true;
         modified = true;
+      } else if (SETTINGS_GATE_INLINE_RE.test(content)) {
+        content = content.replace(SETTINGS_GATE_INLINE_RE, '!0');
+        gatePatched = true;
+        modified = true;
       }
 
       if (AUTOMATIONS_GATE_RE.test(content)) {
@@ -578,10 +638,21 @@ try {
         );
         pullRequestsRouteGatePatched = true;
         modified = true;
+      } else if (PULL_REQUESTS_ROUTE_GATE_FUNCTION_RE_V2.test(content)) {
+        content = content.replace(
+          PULL_REQUESTS_ROUTE_GATE_FUNCTION_RE_V2,
+          'function $1(){return(0,$.jsx)($2,{})}',
+        );
+        pullRequestsRouteGatePatched = true;
+        modified = true;
       }
 
       if (SCRATCHPAD_GATE_FUNCTION_RE.test(content)) {
         content = content.replace(SCRATCHPAD_GATE_FUNCTION_RE, 'function $1(){return!0}');
+        scratchpadGatePatched = true;
+        modified = true;
+      } else if (SCRATCHPAD_GATE_FUNCTION_RE_V2.test(content)) {
+        content = content.replace(SCRATCHPAD_GATE_FUNCTION_RE_V2, 'function $1(){return!0}');
         scratchpadGatePatched = true;
         modified = true;
       }
@@ -617,6 +688,13 @@ try {
         content = patchedContent;
         automationDialogCwdPatched = true;
         modified = true;
+      }
+
+      // If the upstream code already contains the CWD normalizer (built in by
+      // OpenAI), treat this file as already correctly handled so we don't emit
+      // a spurious warning about missing normalization.
+      if (!automationDialogCwdPatched && content.includes(AUTOMATION_CWD_NORMALIZER_INLINE)) {
+        automationDialogCwdPatched = true;
       }
 
       if (modified) {
