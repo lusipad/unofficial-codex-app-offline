@@ -498,9 +498,14 @@ try {
   // provider that actually loads translations defaults the same flag to
   // false, meaning selected translations never load.  Unify to true so
   // language selection works end-to-end.
+  //
+  // ≥ 26.422.8496.0: the upstream code was fixed and now defaults to !0,
+  // so the old !1 pattern no longer exists and no patch is needed.
 
   const I18N_NEEDLE = '.get(`enable_i18n`,!1)';
   const I18N_REPLACEMENT = '.get(`enable_i18n`,!0)';
+  // Marker present when the upstream code already has the correct default.
+  const I18N_ALREADY_CORRECT_MARKER = '.get(`enable_i18n`,!0)';
 
   // ── Patch 4: Enable settings page entry for offline builds ─────────
   //
@@ -545,6 +550,53 @@ try {
   // separate chunk (e.g. use-navigate-to-local-conversation-*.js).
   const SCRATCHPAD_GATE_FUNCTION_RE_V2 =
     /function\s+(\w+)\(\)\{return\s+[$\w]+\(`2302560359`\)\}/;
+
+  // ── Patch 10: Enable Avatar Overlay for offline builds ─────────────────
+  //
+  // The avatar/mascot overlay component is wrapped in a gate function that
+  // returns an empty React Fragment when gate 2679188970 is false.  Bypass
+  // the gate so the overlay is always rendered in offline builds.
+  const AVATAR_OVERLAY_GATE_FUNCTION_RE =
+    /function\s+(\w+)\(\)\{let\s+\w+=\(0,Q\.c\)\(2\);if\(!\$f\(`2679188970`\)\)\{let\s+\w+;return\s+\w+\[0\]===Symbol\.for\(`react\.memo_cache_sentinel`\)\?\(\w+=\(0,\$\.jsx\)\(\$\.Fragment,\{\}\),\w+\[0\]=\w+\):\w+=\w+\[0\],\w+\}let\s+\w+;return\s+\w+\[1\]===Symbol\.for\(`react\.memo_cache_sentinel`\)\?\(\w+=\(0,\$\.jsx\)\((\w+),\{\}\),\w+\[1\]=\w+\):\w+=\w+\[1\],\w+\}/;
+
+  // ── Patch 11: Enable Heartbeat Automations for offline builds ──────────
+  //
+  // Gate 1488233300 controls whether the "heartbeat" schedule type is
+  // available when creating automations.  When false only "cron" is
+  // offered.  Replace all gate calls with !0 so heartbeat triggers are
+  // always available.
+  const HEARTBEAT_GATE_NEEDLE = '$f(`1488233300`)';
+  const HEARTBEAT_GATE_REPLACEMENT = '!0';
+
+  // ── Patch 12: Enable Ambient Suggestions for offline builds ────────────
+  //
+  // Gate 2425897452 controls the ambient suggestions feature.  Replace all
+  // gate calls with !0 so the feature is always active.
+  const AMBIENT_SUGGESTIONS_GATE_NEEDLE = '$f(`2425897452`)';
+  const AMBIENT_SUGGESTIONS_GATE_REPLACEMENT = '!0';
+
+  // ── Patch 13: Enable Artifacts Pane for offline builds ─────────────────
+  //
+  // Gate 3903742690 controls the artifacts side pane feature.  Replace all
+  // gate calls with !0.
+  const ARTIFACTS_PANE_GATE_NEEDLE = '$f(`3903742690`)';
+  const ARTIFACTS_PANE_GATE_REPLACEMENT = '!0';
+
+  // ── Patch 14: Enable PR Badge Icons for offline builds ─────────────────
+  //
+  // Gate 2553306736 controls PR status badge icons shown on conversation
+  // list items.  Enabling it complements the already-unlocked PR sidebar
+  // entry.  Replace all gate calls with !0.
+  const PR_ICONS_GATE_NEEDLE = '$f(`2553306736`)';
+  const PR_ICONS_GATE_REPLACEMENT = '!0';
+
+  // ── Patch 15: Enable Memories for offline builds ────────────────────────
+  //
+  // Gate 875176429 controls the memories feature in the conversation
+  // composer.  Replace the inline gate assignment with !0.
+  const MEMORIES_GATE_INLINE_RE =
+    /([,;]\s*\w+\s*=)\s*[$\w]+\(`875176429`\)/;
+
   const AUTOMATION_DIALOG_CWD_PATCHES = [
     {
       needle: 'function qd(e){return m(e.value)}',
@@ -580,11 +632,18 @@ try {
   const assetsDir = path.join(tmpDir, 'webview', 'assets');
   if (fs.existsSync(assetsDir)) {
     let i18nCount = 0;
+    let i18nAlreadyCorrect = false;
     let gatePatched = false;
     let automationsGatePatched = false;
     let pullRequestsGatePatched = false;
     let pullRequestsRouteGatePatched = false;
     let scratchpadGatePatched = false;
+    let avatarOverlayGatePatched = false;
+    let heartbeatGateCount = 0;
+    let ambientSuggestionsGateCount = 0;
+    let artifactsPaneGateCount = 0;
+    let prIconsGateCount = 0;
+    let memoriesGatePatched = false;
     let automationDialogCwdPatched = false;
     const automationDialogCwdUnpatchedFiles = [];
 
@@ -599,6 +658,8 @@ try {
         content = content.replaceAll(I18N_NEEDLE, I18N_REPLACEMENT);
         i18nCount += count;
         modified = true;
+      } else if (content.includes(I18N_ALREADY_CORRECT_MARKER)) {
+        i18nAlreadyCorrect = true;
       }
 
       if (SETTINGS_GATE_RE.test(content)) {
@@ -654,6 +715,55 @@ try {
       } else if (SCRATCHPAD_GATE_FUNCTION_RE_V2.test(content)) {
         content = content.replace(SCRATCHPAD_GATE_FUNCTION_RE_V2, 'function $1(){return!0}');
         scratchpadGatePatched = true;
+        modified = true;
+      }
+
+      if (AVATAR_OVERLAY_GATE_FUNCTION_RE.test(content)) {
+        content = content.replace(
+          AVATAR_OVERLAY_GATE_FUNCTION_RE,
+          'function $1(){return(0,$.jsx)($2,{})}',
+        );
+        avatarOverlayGatePatched = true;
+        modified = true;
+      }
+
+      if (content.includes(HEARTBEAT_GATE_NEEDLE)) {
+        const count = content.split(HEARTBEAT_GATE_NEEDLE).length - 1;
+        content = content.replaceAll(HEARTBEAT_GATE_NEEDLE, HEARTBEAT_GATE_REPLACEMENT);
+        heartbeatGateCount += count;
+        modified = true;
+      }
+
+      if (content.includes(AMBIENT_SUGGESTIONS_GATE_NEEDLE)) {
+        const count = content.split(AMBIENT_SUGGESTIONS_GATE_NEEDLE).length - 1;
+        content = content.replaceAll(
+          AMBIENT_SUGGESTIONS_GATE_NEEDLE,
+          AMBIENT_SUGGESTIONS_GATE_REPLACEMENT,
+        );
+        ambientSuggestionsGateCount += count;
+        modified = true;
+      }
+
+      if (content.includes(ARTIFACTS_PANE_GATE_NEEDLE)) {
+        const count = content.split(ARTIFACTS_PANE_GATE_NEEDLE).length - 1;
+        content = content.replaceAll(
+          ARTIFACTS_PANE_GATE_NEEDLE,
+          ARTIFACTS_PANE_GATE_REPLACEMENT,
+        );
+        artifactsPaneGateCount += count;
+        modified = true;
+      }
+
+      if (content.includes(PR_ICONS_GATE_NEEDLE)) {
+        const count = content.split(PR_ICONS_GATE_NEEDLE).length - 1;
+        content = content.replaceAll(PR_ICONS_GATE_NEEDLE, PR_ICONS_GATE_REPLACEMENT);
+        prIconsGateCount += count;
+        modified = true;
+      }
+
+      if (MEMORIES_GATE_INLINE_RE.test(content)) {
+        content = content.replace(MEMORIES_GATE_INLINE_RE, '$1!0');
+        memoriesGatePatched = true;
         modified = true;
       }
 
@@ -715,6 +825,8 @@ try {
 
     if (i18nCount > 0) {
       log(`enable_i18n default unified (${i18nCount} occurrence(s)).`);
+    } else if (i18nAlreadyCorrect) {
+      log('enable_i18n default already correct (!0) in this app version. No patch needed.');
     } else {
       warn('Could not locate enable_i18n default-false pattern. ' +
            'i18n patch skipped (the app version may have changed).');
@@ -753,6 +865,48 @@ try {
     } else {
       warn('Could not locate scratchpad gate 2302560359. ' +
            'Scratchpad patch skipped (the app version may have changed).');
+    }
+
+    if (avatarOverlayGatePatched) {
+      log('Avatar overlay gate bypassed for offline mode.');
+    } else {
+      warn('Could not locate avatar overlay gate 2679188970. ' +
+           'Avatar overlay patch skipped (the app version may have changed).');
+    }
+
+    if (heartbeatGateCount > 0) {
+      log(`Heartbeat automations gate bypassed for offline mode (${heartbeatGateCount} occurrence(s)).`);
+    } else {
+      warn('Could not locate heartbeat automations gate 1488233300. ' +
+           'Heartbeat automations patch skipped (the app version may have changed).');
+    }
+
+    if (ambientSuggestionsGateCount > 0) {
+      log(`Ambient suggestions gate bypassed for offline mode (${ambientSuggestionsGateCount} occurrence(s)).`);
+    } else {
+      warn('Could not locate ambient suggestions gate 2425897452. ' +
+           'Ambient suggestions patch skipped (the app version may have changed).');
+    }
+
+    if (artifactsPaneGateCount > 0) {
+      log(`Artifacts pane gate bypassed for offline mode (${artifactsPaneGateCount} occurrence(s)).`);
+    } else {
+      warn('Could not locate artifacts pane gate 3903742690. ' +
+           'Artifacts pane patch skipped (the app version may have changed).');
+    }
+
+    if (prIconsGateCount > 0) {
+      log(`PR badge icons gate bypassed for offline mode (${prIconsGateCount} occurrence(s)).`);
+    } else {
+      warn('Could not locate PR badge icons gate 2553306736. ' +
+           'PR badge icons patch skipped (the app version may have changed).');
+    }
+
+    if (memoriesGatePatched) {
+      log('Memories gate bypassed for offline mode.');
+    } else {
+      warn('Could not locate memories gate 875176429. ' +
+           'Memories patch skipped (the app version may have changed).');
     }
 
     if (automationDialogCwdPatched) {
