@@ -594,6 +594,7 @@ try {
   //
   // Gate 875176429 controls the memories feature in the conversation
   // composer.  Replace the inline gate assignment with !0.
+  // [$\w]+ instead of \w+ so that minified names like $f are also matched.
   const MEMORIES_GATE_INLINE_RE =
     /([,;]\s*\w+\s*=)\s*[$\w]+\(`875176429`\)/;
 
