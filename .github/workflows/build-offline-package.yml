@@ -81,7 +81,7 @@ jobs:
 
             if ($errors.Count -gt 0) {
               foreach ($error in $errors) {
-                Write-Error "$Path:$($error.Extent.StartLineNumber): $($error.Message)"
+                Write-Error "${Path}:$($error.Extent.StartLineNumber): $($error.Message)"
               }
               throw "PowerShell syntax validation failed for $Path."
             }
