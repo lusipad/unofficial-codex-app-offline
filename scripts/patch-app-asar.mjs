@@ -984,7 +984,9 @@ try {
         originalContent.includes(REMOTE_CONNECTIONS_GATE_ID_MARKER);
       remoteConnectionsFeatureGateSeen ||=
         originalContent.includes(REMOTE_CONNECTIONS_FEATURE_GATE_ID_MARKER);
-      artifactElectronGateSeen ||= ARTIFACT_ELECTRON_GATE_FUNCTION_RE.test(originalContent);
+      artifactElectronGateSeen ||=
+        ARTIFACT_ELECTRON_GATE_FUNCTION_RE.test(originalContent) ||
+        originalContent.includes(ARTIFACT_ELECTRON_GATE_ID_MARKER);
 
       if (content.includes(I18N_NEEDLE)) {
         const count = content.split(I18N_NEEDLE).length - 1;
