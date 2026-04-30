@@ -57,6 +57,15 @@
  *    the full slash command UI and built-in commands.  We bypass the gate
  *    so typing `/` shows the same menu as the official package.
  *
+ * 35. Enable Fast mode speed selector for offline builds
+ *    The "Fast / Standard" speed selector button in the model picker is
+ *    gated behind two run-time conditions inside the settings chunk:
+ *    (1) statsig_default_enable_features.fast_mode === true (dynamic
+ *    config that defaults to off when Statsig is unreachable) and
+ *    (2) authMethod === "chatgpt".  We replace the compound gate
+ *    expression `X?.fast_mode===!0&&authCheck(arg)` with !0 so the
+ *    button is always visible in offline builds.
+ *
  * 8. Normalize Windows automation cwd paths
  *    The packaged Automations UI can persist selected project paths in
  *    `\\?\C:\...` form on Windows.  Automation execution later compares that
@@ -833,6 +842,22 @@ try {
   const ARTIFACT_ELECTRON_GATE_FUNCTION_RE =
     /function\s+(\w+)\(\)\{return\s+[$\w]+\(`839469903`\)\}/;
 
+  // ── Patch 35: Enable Fast mode speed selector for offline builds ────────
+  //
+  // The "Fast / Standard" speed selector in the model picker is gated
+  // behind two run-time conditions inside the settings chunk:
+  //   1. statsig_default_enable_features.fast_mode === true (dynamic
+  //      config – defaults to false when Statsig is unreachable)
+  //   2. authMethod === "chatgpt"
+  // The visibility hook returns: `X?.fast_mode===!0&&authCheck(arg)`.
+  // We replace the entire compound gate expression with !0 so both
+  // conditions are satisfied and the button is always visible.
+  const FAST_MODE_STORE_KEY = 'statsig_default_enable_features';
+  const FAST_MODE_KEY = 'fast_mode';
+  // Matches: X?.fast_mode===!0&&Y(Z)  or  X.fast_mode===!0&&Y(Z)
+  const FAST_MODE_GATE_RE =
+    /[$\w]+(?:\?\.|\.)fast_mode===!0&&[$\w]+\([$\w]+\)/;
+
   const AUTOMATION_DIALOG_CWD_PATCHES = [
     {
       needle: 'function qd(e){return m(e.value)}',
@@ -934,6 +959,8 @@ try {
     let remoteConnectionsFeatureGateSeen = false;
     let artifactElectronGatePatched = false;
     let artifactElectronGateSeen = false;
+    let fastModeGatePatched = false;
+    let fastModeGateSeen = false;
 
     for (const file of fs.readdirSync(assetsDir)) {
       if (!file.endsWith('.js')) continue;
@@ -987,6 +1014,9 @@ try {
       artifactElectronGateSeen ||=
         ARTIFACT_ELECTRON_GATE_FUNCTION_RE.test(originalContent) ||
         originalContent.includes(ARTIFACT_ELECTRON_GATE_ID_MARKER);
+      fastModeGateSeen ||=
+        originalContent.includes(FAST_MODE_STORE_KEY) &&
+        originalContent.includes(FAST_MODE_KEY);
 
       if (content.includes(I18N_NEEDLE)) {
         const count = content.split(I18N_NEEDLE).length - 1;
@@ -1362,6 +1392,18 @@ try {
       if (ARTIFACT_ELECTRON_GATE_FUNCTION_RE.test(content)) {
         content = content.replace(ARTIFACT_ELECTRON_GATE_FUNCTION_RE, 'function $1(){return!0}');
         artifactElectronGatePatched = true;
+        modified = true;
+      }
+
+      // Patch 35: Fast mode speed selector
+      // Only process files that contain both marker strings (the settings chunk).
+      if (
+        content.includes(FAST_MODE_STORE_KEY) &&
+        content.includes(FAST_MODE_KEY) &&
+        FAST_MODE_GATE_RE.test(content)
+      ) {
+        content = content.replace(FAST_MODE_GATE_RE, '!0');
+        fastModeGatePatched = true;
         modified = true;
       }
 
@@ -1797,6 +1839,17 @@ try {
       warn(
         'Artifact Electron gate 839469903 is still present, but no supported ' +
         'patch pattern matched. Native artifact viewer may be unavailable.',
+      );
+    }
+
+    if (fastModeGatePatched) {
+      log('Fast mode speed selector gate bypassed for offline mode.');
+    } else if (!fastModeGateSeen) {
+      log('Fast mode gate (statsig_default_enable_features.fast_mode) is not present in this app version. No patch needed.');
+    } else {
+      warn(
+        'Fast mode gate (statsig_default_enable_features.fast_mode) is still present, but no supported ' +
+        'patch pattern matched. The Fast mode speed selector may be hidden in offline builds.',
       );
     }
 
