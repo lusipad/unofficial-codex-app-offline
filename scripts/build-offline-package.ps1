@@ -229,7 +229,12 @@ $launcherVbs = @'
 Set shell = CreateObject("WScript.Shell")
 scriptDir = CreateObject("Scripting.FileSystemObject").GetParentFolderName(WScript.ScriptFullName)
 psArgs = "-NoProfile -ExecutionPolicy Bypass -File """ & scriptDir & "\_internal\bootstrap-codex-skills.ps1"""
-shell.Run "powershell.exe " & psArgs, 0, False
+exitCode = shell.Run("powershell.exe " & psArgs, 0, True)
+If exitCode = 2 Then
+    MsgBox "Launch canceled before syncing bundled skills.", vbExclamation, "Codex Offline"
+ElseIf exitCode <> 0 Then
+    MsgBox "Codex Offline could not start. Please run the command-line launcher for details.", vbCritical, "Codex Offline"
+End If
 '@
 $launcherVbs | Set-Content -Path (Join-Path $packageRoot 'Launch Codex Offline.vbs') -Encoding ASCII
 
@@ -237,8 +242,14 @@ $syncVbs = @'
 Set shell = CreateObject("WScript.Shell")
 scriptDir = CreateObject("Scripting.FileSystemObject").GetParentFolderName(WScript.ScriptFullName)
 psArgs = "-NoProfile -ExecutionPolicy Bypass -File """ & scriptDir & "\_internal\bootstrap-codex-skills.ps1"" -NoLaunch"
-shell.Run "powershell.exe " & psArgs, 0, True
-MsgBox "Skills synced successfully.", vbInformation, "Codex Offline"
+exitCode = shell.Run("powershell.exe " & psArgs, 0, True)
+If exitCode = 0 Then
+    MsgBox "Official skills were synced to your local Codex skills directory. Open the Skills page in Codex to use them as needed.", vbInformation, "Codex Offline"
+ElseIf exitCode = 2 Then
+    MsgBox "Skill sync canceled.", vbExclamation, "Codex Offline"
+Else
+    MsgBox "Skill sync failed. Please run the command-line launcher for details.", vbCritical, "Codex Offline"
+End If
 '@
 $syncVbs | Set-Content -Path (Join-Path $packageRoot 'Sync Codex Skills.vbs') -Encoding ASCII
 
@@ -246,7 +257,7 @@ $syncVbs | Set-Content -Path (Join-Path $packageRoot 'Sync Codex Skills.vbs') -E
 $launchCmd = @(
     '@echo off',
     'setlocal',
-    'powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0_internal\bootstrap-codex-skills.ps1"'
+    'powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0_internal\bootstrap-codex-skills.ps1" -SkipSkillSync'
 )
 $launchCmd | Set-Content -Path (Join-Path $packageRoot 'Launch Codex Offline.cmd') -Encoding ASCII
 

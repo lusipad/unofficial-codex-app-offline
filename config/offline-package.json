@@ -24,7 +24,7 @@
     "portableZip": true,
     "setupExe": true,
     "skillArchive": true,
-    "sourceExportArchive": true
+    "sourceExportArchive": false
   },
   "github": {
     "runner": "windows-latest"
