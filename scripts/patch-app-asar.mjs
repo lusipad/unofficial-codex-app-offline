@@ -852,8 +852,8 @@ try {
   // The visibility hook returns: `X?.fast_mode===!0&&authCheck(arg)`.
   // We replace the entire compound gate expression with !0 so both
   // conditions are satisfied and the button is always visible.
-  const FAST_MODE_STORE_KEY = 'statsig_default_enable_features';
-  const FAST_MODE_KEY = 'fast_mode';
+  const FAST_MODE_STORE_MARKER = 'statsig_default_enable_features';
+  const FAST_MODE_KEY_MARKER = 'fast_mode';
   // Matches: X?.fast_mode===!0&&Y(Z)  or  X.fast_mode===!0&&Y(Z)
   const FAST_MODE_GATE_RE =
     /[$\w]+(?:\?\.|\.)fast_mode===!0&&[$\w]+\([$\w]+\)/;
@@ -1015,8 +1015,8 @@ try {
         ARTIFACT_ELECTRON_GATE_FUNCTION_RE.test(originalContent) ||
         originalContent.includes(ARTIFACT_ELECTRON_GATE_ID_MARKER);
       fastModeGateSeen ||=
-        originalContent.includes(FAST_MODE_STORE_KEY) &&
-        originalContent.includes(FAST_MODE_KEY);
+        originalContent.includes(FAST_MODE_STORE_MARKER) &&
+        originalContent.includes(FAST_MODE_KEY_MARKER);
 
       if (content.includes(I18N_NEEDLE)) {
         const count = content.split(I18N_NEEDLE).length - 1;
@@ -1398,8 +1398,8 @@ try {
       // Patch 35: Fast mode speed selector
       // Only process files that contain both marker strings (the settings chunk).
       if (
-        content.includes(FAST_MODE_STORE_KEY) &&
-        content.includes(FAST_MODE_KEY) &&
+        content.includes(FAST_MODE_STORE_MARKER) &&
+        content.includes(FAST_MODE_KEY_MARKER) &&
         FAST_MODE_GATE_RE.test(content)
       ) {
         content = content.replace(FAST_MODE_GATE_RE, '!0');
