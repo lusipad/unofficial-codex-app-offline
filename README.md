@@ -11,6 +11,17 @@
 Unofficial offline / portable repackaging of the **OpenAI Codex** Windows app.  
 All official skills from [`openai/skills`](https://github.com/openai/skills) are fetched at build time and bundled into the package for fully offline use.
 
+### What Changed In This Offline Build
+
+- Bundles the official `openai/skills` repository into the package so the app can be used without downloading skills from GitHub at runtime.
+- Adds packaged launchers for offline use:
+  `Launch Codex Offline.vbs` is the normal entry point, syncs bundled official skills when needed, and asks for confirmation before copying them into your local Codex skills directory.
+  `Launch Codex Offline.cmd` is a command-line fallback that launches directly without syncing skills.
+  `Sync Codex Skills.vbs/.cmd` re-sync bundled official skills without launching the app.
+- Patches the Microsoft Store desktop build so it can run as a normal standalone package outside the Store install flow, including bootstrap/runtime fixes, Electron fuse adjustments, and Windows-specific path handling fixes used by the offline repack.
+- Adds a compatibility patch layer for selected bundled features that may be hidden behind remote feature gates in some upstream app versions. When those gates are present, the offline build can unlock the already-bundled UI instead of silently hiding it.
+- Adds build-time verification so packaging fails when a known patch or gate bypass no longer matches the upstream app, instead of shipping a silently broken offline build.
+
 ### Quick Start
 
 #### Option A — Portable ZIP (no install required)
@@ -19,8 +30,8 @@ All official skills from [`openai/skills`](https://github.com/openai/skills) are
 2. Extract anywhere.
 3. Double-click **`Launch Codex Offline.vbs`**.
 
-On first launch the bundled skills are automatically copied to `~\.codex\skills`, then Codex opens.  
-No console window will appear — the app starts silently in the background.
+On first launch, Codex asks for confirmation before copying the bundled skills to `~\.codex\skills`, then opens after you approve.  
+No console window will appear — the launcher stays in the background unless it needs your confirmation.
 
 #### Option B — Installer
 
@@ -31,9 +42,10 @@ No console window will appear — the app starts silently in the background.
 #### Updating Skills
 
 Double-click **`Sync Codex Skills.vbs`** to re-sync bundled skills without launching the app.  
-A message box will confirm when the sync is complete.
+The launcher asks for confirmation before syncing and shows a message box when the sync completes, is canceled, or fails.
 
 > **Note:** Always use the provided launchers (`.vbs` or `.cmd` files). Do not run `Codex.exe` directly — it will skip skill syncing and may not work correctly on first use.
+> `Launch Codex Offline.vbs` is the normal entry point and will sync bundled skills when needed. `Launch Codex Offline.cmd` is a command-line fallback that launches directly without syncing skills.
 
 ### Package Contents
 
@@ -145,7 +157,7 @@ Artifacts are written to `dist/offline/<release-name>/`.
     "portableZip": true,
     "setupExe": true,
     "skillArchive": true,
-    "sourceExportArchive": true
+    "sourceExportArchive": false
   }
 }
 ```
@@ -168,7 +180,7 @@ Artifacts are written to `dist/offline/<release-name>/`.
 | `packaging.portableZip` | Generate portable ZIP |
 | `packaging.setupExe` | Generate Inno Setup EXE |
 | `packaging.skillArchive` | Generate separate skills ZIP |
-| `packaging.sourceExportArchive` | Generate Store app source export ZIP |
+| `packaging.sourceExportArchive` | Generate Store app source export ZIP (disabled by default) |
 
 </details>
 
@@ -238,6 +250,17 @@ Additionally, notifications for the conversation you are currently viewing are s
 非官方的 **OpenAI Codex** Windows 应用离线/便携版重打包。
 构建时从 [`openai/skills`](https://github.com/openai/skills) 拉取全部官方 skills 并打包，支持完全离线使用。
 
+### 这个离线版做了哪些改动
+
+- 将官方 `openai/skills` 仓库打进安装包，运行时不需要再从 GitHub 下载 skills 也能使用。
+- 增加了离线场景专用启动器：
+  `Launch Codex Offline.vbs` 是默认入口，必要时会先同步包内官方 skills，并在复制到本机 Codex skills 目录前提示确认。
+  `Launch Codex Offline.cmd` 是命令行备用入口，会直接启动，不执行 skills 同步。
+  `Sync Codex Skills.vbs/.cmd` 用于仅同步包内官方 skills，不启动应用。
+- 对微软商店版桌面应用做了离线重打包所需的运行时修补，使其可以脱离商店安装流程作为普通独立包运行，包括 bootstrap/runtime 修补、Electron fuse 调整，以及 Windows 路径处理修复。
+- 增加了一层兼容性 patch，用来处理上游某些版本里被远端 feature gate 隐藏、但实际上已经随包提供的功能界面；当这些 gate 在目标版本中存在时，离线版会解锁对应的已捆绑 UI，而不是静默隐藏。
+- 增加了构建期校验；如果某个已知 patch 或 gate bypass 与上游版本不再匹配，打包会直接失败，避免产出一个表面成功、实际失效的离线包。
+
 ### 快速开始
 
 #### 方式 A — 便携 ZIP（无需安装）
@@ -246,8 +269,8 @@ Additionally, notifications for the conversation you are currently viewing are s
 2. 解压到任意目录。
 3. 双击 **`Launch Codex Offline.vbs`**。
 
-首次启动时，内置 skills 会自动复制到 `~\.codex\skills`，然后打开 Codex。
-不会弹出任何控制台窗口，应用在后台静默启动。
+首次启动时，会先提示你确认是否将内置 skills 同步到 `~\.codex\skills`，确认后再打开 Codex。
+不会弹出任何控制台窗口；只有在需要你确认时才会显示提示。
 
 #### 方式 B — 安装器
 
@@ -257,10 +280,10 @@ Additionally, notifications for the conversation you are currently viewing are s
 
 #### 更新 Skills
 
-双击 **`Sync Codex Skills.vbs`** 即可重新同步内置 skills，不会启动应用。
-同步完成后会弹出提示框确认。
+双击 **`Sync Codex Skills.vbs`** 即可重新同步内置 skills，不会启动应用。同步前会先提示确认，完成、取消或失败后都会弹出结果提示。
 
 > **注意：** 请始终使用提供的启动器（`.vbs` 或 `.cmd` 文件）。不要直接运行 `Codex.exe` — 这样会跳过 skill 同步，首次使用时可能无法正常工作。
+> `Launch Codex Offline.vbs` 是默认启动入口，必要时会先同步内置 skills；`Launch Codex Offline.cmd` 是命令行备用入口，会直接启动，不执行 skills 同步。
 
 ### 包内结构
 
@@ -372,7 +395,7 @@ pwsh -NoProfile -File ./scripts/build-offline-package.ps1
     "portableZip": true,
     "setupExe": true,
     "skillArchive": true,
-    "sourceExportArchive": true
+    "sourceExportArchive": false
   }
 }
 ```
@@ -395,7 +418,7 @@ pwsh -NoProfile -File ./scripts/build-offline-package.ps1
 | `packaging.portableZip` | 生成便携 ZIP |
 | `packaging.setupExe` | 生成 Inno Setup EXE |
 | `packaging.skillArchive` | 单独生成 skills ZIP |
-| `packaging.sourceExportArchive` | 生成 Store 应用源码导出 ZIP |
+| `packaging.sourceExportArchive` | 生成 Store 应用源码导出 ZIP（默认关闭） |
 
 </details>
 

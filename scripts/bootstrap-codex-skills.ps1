@@ -2,7 +2,8 @@
 param(
     [string]$InstallRoot = '',
     [string]$CodexHome = '',
-    [switch]$NoLaunch
+    [switch]$NoLaunch,
+    [switch]$SkipSkillSync
 )
 
 Set-StrictMode -Version Latest
@@ -51,6 +52,36 @@ function Import-EnvFile {
     }
 }
 
+function Confirm-BundledSkillsSync {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$TargetPath,
+        [switch]$NoLaunch
+    )
+
+    $details = "This copies the bundled official skills into your local Codex skills directory. They will appear in the Skills page as installed and can be used as needed."
+    $message = if ($NoLaunch) {
+        "Codex Offline is about to sync bundled official skills to:`n$TargetPath`n`n$details`n`nDo you want to continue?"
+    }
+    else {
+        "Codex Offline needs to sync bundled official skills to:`n$TargetPath`n`nbefore launch.`n`n$details`n`nDo you want to continue?"
+    }
+
+    try {
+        $shell = New-Object -ComObject WScript.Shell
+        $result = $shell.Popup($message, 0, 'Codex Offline', 4 + 32 + 4096)
+        return $result -eq 6
+    }
+    catch {
+        $choices = [System.Management.Automation.Host.ChoiceDescription[]]@(
+            (New-Object System.Management.Automation.Host.ChoiceDescription '&Yes', 'Continue and sync bundled skills.'),
+            (New-Object System.Management.Automation.Host.ChoiceDescription '&No', 'Cancel without syncing.')
+        )
+        $selection = $Host.UI.PromptForChoice('Codex Offline', $message, $choices, 1)
+        return $selection -eq 0
+    }
+}
+
 # Check the package root (parent of _internal/) first so the user's config at
 # the root takes priority, then fall back to a file beside this script.
 Import-EnvFile -Path (Join-Path (Join-Path $PSScriptRoot '..') 'skill-installer.env')
@@ -81,30 +112,46 @@ $statePath = Join-Path $stateRoot 'skills-manifest.json'
 $targetSkillsRoot = Join-Path $resolvedCodexHome 'skills'
 $launcherPath = Join-Path $resolvedInstallRoot 'app/Codex.exe'
 
-if (-not (Test-Path $seedRoot)) {
-    throw "Bundled skill seed directory was not found: $seedRoot"
-}
-
-if (-not (Test-Path $manifestPath)) {
-    throw "Bundled skill manifest was not found: $manifestPath"
-}
-
 if (-not (Test-Path $launcherPath)) {
     throw "Codex executable was not found: $launcherPath"
 }
 
-$manifest = Get-Content -Path $manifestPath -Raw | ConvertFrom-Json
-$needSync = $true
+if ($SkipSkillSync) {
+    Write-Host 'Skipping bundled skills sync.' -ForegroundColor Yellow
+    $needSync = $false
+}
+else {
+    if (-not (Test-Path $seedRoot)) {
+        throw "Bundled skill seed directory was not found: $seedRoot"
+    }
 
-if (Test-Path $statePath) {
-    $currentState = Get-Content -Path $statePath -Raw | ConvertFrom-Json
+    if (-not (Test-Path $manifestPath)) {
+        throw "Bundled skill manifest was not found: $manifestPath"
+    }
 
-    if ($currentState.contentHash -eq $manifest.contentHash) {
-        $needSync = $false
+    $manifest = Get-Content -Path $manifestPath -Raw | ConvertFrom-Json
+    $needSync = $true
+
+    if (Test-Path $statePath) {
+        $currentState = Get-Content -Path $statePath -Raw | ConvertFrom-Json
+
+        if ($currentState.contentHash -eq $manifest.contentHash) {
+            $needSync = $false
+        }
     }
 }
 
 if ($needSync) {
+    if (-not (Confirm-BundledSkillsSync -TargetPath $targetSkillsRoot -NoLaunch:$NoLaunch)) {
+        if ($NoLaunch) {
+            Write-Warning 'Skill sync canceled by user.'
+        }
+        else {
+            Write-Warning 'Launch canceled before syncing bundled skills.'
+        }
+        exit 2
+    }
+
     Write-Host 'Syncing bundled skills...' -ForegroundColor Cyan
     New-Item -ItemType Directory -Force -Path $targetSkillsRoot | Out-Null
 

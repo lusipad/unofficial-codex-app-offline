@@ -27,6 +27,18 @@ on:
       - 'package-lock.json'
       - 'scripts/**'
       - 'vendor/**'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/build-offline-package.yml'
+      - '.github/workflows/build-offline-package-monitor.yml'
+      - 'config/**'
+      - 'installer/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'scripts/**'
+      - 'vendor/**'
 
 permissions:
   contents: write
@@ -48,6 +60,36 @@ jobs:
         with:
           node-version: 24
           cache: npm
+
+      - name: Validate patch scripts
+        shell: pwsh
+        run: |
+          function Test-PowerShellSyntax {
+            param(
+              [Parameter(Mandatory = $true)]
+              [string]$Path
+            )
+
+            $resolvedPath = (Resolve-Path $Path).Path
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              $resolvedPath,
+              [ref]$tokens,
+              [ref]$errors
+            ) | Out-Null
+
+            if ($errors.Count -gt 0) {
+              foreach ($error in $errors) {
+                Write-Error "$Path:$($error.Extent.StartLineNumber): $($error.Message)"
+              }
+              throw "PowerShell syntax validation failed for $Path."
+            }
+          }
+
+          node --check './scripts/patch-app-asar.mjs'
+          Test-PowerShellSyntax './scripts/build-offline-package.ps1'
+          Test-PowerShellSyntax './scripts/verify-offline-package.ps1'
 
       - name: Install resolver dependencies
         run: npm ci
@@ -78,6 +120,14 @@ jobs:
           WORKFLOW_FORCE_REBUILD: ${{ inputs.force_rebuild }}
           HEAD_COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
         run: |
+          if ($env:WORKFLOW_EVENT_NAME -eq 'pull_request') {
+            "force_rebuild=false" >> $env:GITHUB_OUTPUT
+            "skip_build=false" >> $env:GITHUB_OUTPUT
+            "skip_publish=true" >> $env:GITHUB_OUTPUT
+            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "Pull request build: verification build will run, but publish steps are disabled."
+            exit 0
+          }
+
           $tag = '${{ steps.source.outputs.release_tag }}'
           $repo = '${{ github.repository }}'
           $existingReleaseUrl = gh release view $tag --repo $repo --json url --jq '.url' 2>$null
@@ -97,15 +147,23 @@ jobs:
             "existing_release_url=$existingReleaseUrl" >> $env:GITHUB_OUTPUT
             if ($forceRebuild) {
               "skip_build=false" >> $env:GITHUB_OUTPUT
+              "skip_publish=false" >> $env:GITHUB_OUTPUT
               Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "Version $tag already exists at $existingReleaseUrl, but force rebuild is enabled. Build and publish steps will continue and overwrite assets."
+            }
+            elseif ($env:WORKFLOW_EVENT_NAME -eq 'push') {
+              "skip_build=false" >> $env:GITHUB_OUTPUT
+              "skip_publish=true" >> $env:GITHUB_OUTPUT
+              Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "Version $tag is already published at $existingReleaseUrl. A verification build will still run for this push, but publish steps will be skipped."
             }
             else {
               "skip_build=true" >> $env:GITHUB_OUTPUT
+              "skip_publish=true" >> $env:GITHUB_OUTPUT
               Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "Version $tag is already published at $existingReleaseUrl. Build and publish steps were skipped."
             }
           }
           else {
             "skip_build=false" >> $env:GITHUB_OUTPUT
+            "skip_publish=false" >> $env:GITHUB_OUTPUT
             if ($forceRebuild) {
               Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "Force rebuild is enabled. Version $tag is not currently published, so build and publish steps will continue."
             }
@@ -176,6 +234,29 @@ jobs:
           "generated_at=$($metadata.generatedAt)" >> $env:GITHUB_OUTPUT
           "source_mode=$($metadata.appSource.mode)" >> $env:GITHUB_OUTPUT
 
+      - name: Verify offline bundle
+        if: ${{ steps.release_check.outputs.skip_build != 'true' }}
+        shell: pwsh
+        run: |
+          $arguments = @(
+            '-NoProfile',
+            '-File',
+            './scripts/verify-offline-package.ps1',
+            '-BuildMetadataPath',
+            'build-metadata.json',
+            '-ConfigPath',
+            'config/offline-package.json'
+          )
+
+          if ('${{ github.event_name }}' -ne 'workflow_dispatch' -or '${{ inputs.build_installer }}' -ne 'false') {
+            $arguments += '-RequireInstallerAsset'
+          }
+
+          $process = Start-Process -FilePath 'pwsh' -ArgumentList $arguments -NoNewWindow -Wait -PassThru
+          if ($process.ExitCode -ne 0) {
+            throw "verify-offline-package.ps1 failed with exit code $($process.ExitCode)."
+          }
+
       - name: Build release notes
         shell: pwsh
         run: |
@@ -228,7 +309,6 @@ jobs:
           $lines.Add("- portable zip")
           $lines.Add("- setup exe")
           $lines.Add("- bundled skills zip")
-          $lines.Add("- exported store snapshot zip")
           $lines.Add("- SHA256SUMS.txt")
 
           ($lines -join "`n") | Set-Content -Path 'release-notes.md' -Encoding UTF8 -NoNewline
@@ -242,7 +322,7 @@ jobs:
           if-no-files-found: error
 
       - name: Publish release assets
-        if: ${{ steps.release_check.outputs.skip_build != 'true' }}
+        if: ${{ github.event_name != 'pull_request' && steps.release_check.outputs.skip_publish != 'true' }}
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.build.outputs.release_tag }}
@@ -252,7 +332,7 @@ jobs:
           body_path: release-notes.md
 
       - name: Update existing release notes
-        if: ${{ steps.release_check.outputs.skip_build == 'true' }}
+        if: ${{ steps.release_check.outputs.skip_build == 'true' && steps.release_check.outputs.skip_publish == 'true' }}
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
