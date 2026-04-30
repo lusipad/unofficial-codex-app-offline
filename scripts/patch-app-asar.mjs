@@ -704,6 +704,135 @@ try {
   const PLUGINS_BUNDLED_MARKETPLACE_GATE_INLINE_RE =
     /([,;]\s*\w+\s*=)\s*[$\w]+\(`588076040`\)/g;
 
+  // ── Patch 22: Enable Background Subagents for offline builds ───────────
+  //
+  // Gate 1221508807 controls whether background subagents are enabled.
+  // A standalone file exports a hook that returns this gate result.  When
+  // false the background agents panel in the composer is permanently hidden.
+  // Bypass so the panel is always available in offline builds.
+  const BACKGROUND_SUBAGENTS_GATE_ID_MARKER = '`1221508807`';
+  const BACKGROUND_SUBAGENTS_GATE_FUNCTION_RE =
+    /function\s+(\w+)\(\)\{return\s+[$\w]+\(`1221508807`\)\}/;
+  const BACKGROUND_SUBAGENTS_GATE_INLINE_RE =
+    /([,;]\s*\w+\s*=)\s*[$\w]+\(`1221508807`\)/g;
+
+  // ── Patch 23: Enable Thread Overlay for offline builds ─────────────────
+  //
+  // Gate 1060282072 (combined with gate 459748632) controls whether
+  // conversations can be opened in an overlay window.  Replace inline gate
+  // calls with !0 so the thread overlay is always available in Electron.
+  const THREAD_OVERLAY_GATE_ID_MARKER = '`1060282072`';
+  const THREAD_OVERLAY_GATE_INLINE_RE =
+    /([,;]\s*\w+\s*=)\s*[$\w]+\(`1060282072`\)/g;
+
+  // ── Patch 24: Enable Multi-Window for offline builds ───────────────────
+  //
+  // Gate 459748632 controls multi-window support and (together with
+  // 1060282072) the thread overlay feature.  Replace inline gate calls with
+  // !0 to enable both capabilities in offline builds.
+  const MULTI_WINDOW_GATE_ID_MARKER = '`459748632`';
+  const MULTI_WINDOW_GATE_INLINE_RE =
+    /([,;]\s*\w+\s*=)\s*[$\w]+\(`459748632`\)/g;
+
+  // ── Patch 25: Enable Computer Use for offline builds ───────────────────
+  //
+  // Gate 1506311413 controls the computer-use capability flag that is
+  // reported to the Electron main process via the
+  // electron-desktop-features-changed IPC message.  Replace inline gate
+  // calls with !0 so computer-use is always reported as available.
+  const COMPUTER_USE_GATE_ID_MARKER = '`1506311413`';
+  const COMPUTER_USE_GATE_INLINE_RE =
+    /([,;]\s*\w+\s*=)\s*[$\w]+\(`1506311413`\)/g;
+
+  // ── Patch 26: Enable Control desktop feature for offline builds ─────────
+  //
+  // Gate 2171042036 controls the "control" flag in the desktop features
+  // IPC message.  Replace inline gate calls with !0.
+  const CONTROL_GATE_ID_MARKER = '`2171042036`';
+  const CONTROL_GATE_INLINE_RE =
+    /([,;]\s*\w+\s*=)\s*[$\w]+\(`2171042036`\)/g;
+
+  // ── Patch 27: Enable Global Dictation for offline builds ───────────────
+  //
+  // Gates 1244621283 and 4100906017 together control the global dictation
+  // (voice input) feature.  Both must be true to enable dictation and its
+  // associated settings.  Replace all inline gate calls in every asset file
+  // (general-settings, use-model-settings, main index) with !0.
+  const DICTATION_GATE_1_ID_MARKER = '`1244621283`';
+  const DICTATION_GATE_1_INLINE_RE =
+    /([,;]\s*\w+\s*=)\s*[$\w]+\(`1244621283`\)/g;
+  const DICTATION_GATE_2_ID_MARKER = '`4100906017`';
+  const DICTATION_GATE_2_INLINE_RE =
+    /([,;]\s*\w+\s*=)\s*[$\w]+\(`4100906017`\)/g;
+
+  // ── Patch 28: Enable Browser non-local sites for offline builds ─────────
+  //
+  // Gate 3903563814 controls whether the browser agent is permitted to
+  // access non-local (internet) websites.  When false the browser agent is
+  // restricted to localhost/LAN only.  Replace inline gate calls with !0.
+  const BROWSER_NONLOCAL_GATE_ID_MARKER = '`3903563814`';
+  const BROWSER_NONLOCAL_GATE_INLINE_RE =
+    /([,;]\s*\w+\s*=)\s*[$\w]+\(`3903563814`\)/g;
+
+  // ── Patch 29: Enable Thread Hover Cards for offline builds ─────────────
+  //
+  // Gate 3032432888 controls whether the conversation list items in the
+  // sidebar show hover-card project labels.  Replace inline gate calls with
+  // !0 so hover cards always appear in Electron offline builds.
+  const THREAD_HOVER_CARDS_GATE_ID_MARKER = '`3032432888`';
+  const THREAD_HOVER_CARDS_GATE_INLINE_RE =
+    /([,;]\s*\w+\s*=)\s*[$\w]+\(`3032432888`\)/g;
+
+  // ── Patch 30: Enable Chronicle for offline builds ──────────────────────
+  //
+  // Gate 2574306096 controls the Chronicle feature (agent journal/history).
+  // A standalone function in the chronicle-setup-state chunk exports the
+  // gate result.  Replace that function to always return !0.
+  const CHRONICLE_GATE_ID_MARKER = '`2574306096`';
+  const CHRONICLE_GATE_FUNCTION_RE =
+    /function\s+(\w+)\(\)\{return\s+[$\w]+\(`2574306096`\)\}/;
+  const CHRONICLE_GATE_INLINE_RE =
+    /([,;]\s*\w+\s*=)\s*[$\w]+\(`2574306096`\)/g;
+
+  // ── Patch 31: Enable Agent Personality for offline builds ──────────────
+  //
+  // Gate 1444479692 controls the agent personality feature in the Chronicle
+  // chunk.  Replace inline gate calls with !0 so personality configuration
+  // is always available.
+  const PERSONALITY_GATE_ID_MARKER = '`1444479692`';
+  const PERSONALITY_GATE_INLINE_RE =
+    /([,;]\s*\w+\s*=)\s*[$\w]+\(`1444479692`\)/g;
+
+  // ── Patch 32: Enable Remote Connections for offline builds ─────────────
+  //
+  // Gate 1042620455 controls remote Codex instance connections.  A
+  // standalone function in the app-server-manager-hooks chunk exports the
+  // gate result.  Replace to always return !0.
+  const REMOTE_CONNECTIONS_GATE_ID_MARKER = '`1042620455`';
+  const REMOTE_CONNECTIONS_GATE_FUNCTION_RE =
+    /function\s+(\w+)\(\)\{return\s+[$\w]+\(`1042620455`\)\}/;
+  const REMOTE_CONNECTIONS_GATE_INLINE_RE =
+    /([,;]\s*\w+\s*=)\s*[$\w]+\(`1042620455`\)/g;
+
+  // ── Patch 33: Enable Remote Connections feature flag for offline ─────────
+  //
+  // Gate 4114442250 is used in the app-server-manager-hooks feature check
+  // function alongside the config check for features.remote_connections.
+  // Replace inline gate calls with !0.
+  const REMOTE_CONNECTIONS_FEATURE_GATE_ID_MARKER = '`4114442250`';
+  const REMOTE_CONNECTIONS_FEATURE_GATE_INLINE_RE =
+    /([,;]\s*\w+\s*=)\s*[$\w]+\(`4114442250`\)/g;
+
+  // ── Patch 34: Enable Artifact Electron native functionality ────────────
+  //
+  // Gate 839469903 controls the native Windows artifact viewer (Walnut
+  // WinRT assembly) in the artifact-tab-content.electron chunk.  The
+  // standalone function exports the gate result.  Replace to always return
+  // !0 so the native artifact viewer is always active in offline builds.
+  const ARTIFACT_ELECTRON_GATE_ID_MARKER = '`839469903`';
+  const ARTIFACT_ELECTRON_GATE_FUNCTION_RE =
+    /function\s+(\w+)\(\)\{return\s+[$\w]+\(`839469903`\)\}/;
+
   const AUTOMATION_DIALOG_CWD_PATCHES = [
     {
       needle: 'function qd(e){return m(e.value)}',
@@ -777,6 +906,34 @@ try {
     let pluginsBundledMarketplaceGateSeen = false;
     let automationDialogCwdPatched = false;
     const automationDialogCwdUnpatchedFiles = [];
+    let backgroundSubagentsGatePatched = false;
+    let backgroundSubagentsGateSeen = false;
+    let threadOverlayGateCount = 0;
+    let threadOverlayGateSeen = false;
+    let multiWindowGateCount = 0;
+    let multiWindowGateSeen = false;
+    let computerUseGateCount = 0;
+    let computerUseGateSeen = false;
+    let controlGateCount = 0;
+    let controlGateSeen = false;
+    let dictation1GateCount = 0;
+    let dictation1GateSeen = false;
+    let dictation2GateCount = 0;
+    let dictation2GateSeen = false;
+    let browserNonlocalGateCount = 0;
+    let browserNonlocalGateSeen = false;
+    let threadHoverCardsGateCount = 0;
+    let threadHoverCardsGateSeen = false;
+    let chronicleGatePatched = false;
+    let chronicleGateSeen = false;
+    let personalityGateCount = 0;
+    let personalityGateSeen = false;
+    let remoteConnectionsGatePatched = false;
+    let remoteConnectionsGateSeen = false;
+    let remoteConnectionsFeatureGateCount = 0;
+    let remoteConnectionsFeatureGateSeen = false;
+    let artifactElectronGatePatched = false;
+    let artifactElectronGateSeen = false;
 
     for (const file of fs.readdirSync(assetsDir)) {
       if (!file.endsWith('.js')) continue;
@@ -809,6 +966,25 @@ try {
       inAppBrowserGateSeen ||= originalContent.includes(IN_APP_BROWSER_GATE_ID_MARKER);
       pluginsBundledMarketplaceGateSeen ||=
         originalContent.includes(PLUGINS_BUNDLED_MARKETPLACE_GATE_ID_MARKER);
+      backgroundSubagentsGateSeen ||= originalContent.includes(BACKGROUND_SUBAGENTS_GATE_ID_MARKER);
+      threadOverlayGateSeen ||= originalContent.includes(THREAD_OVERLAY_GATE_ID_MARKER);
+      multiWindowGateSeen ||= originalContent.includes(MULTI_WINDOW_GATE_ID_MARKER);
+      computerUseGateSeen ||= originalContent.includes(COMPUTER_USE_GATE_ID_MARKER);
+      controlGateSeen ||= originalContent.includes(CONTROL_GATE_ID_MARKER);
+      dictation1GateSeen ||= originalContent.includes(DICTATION_GATE_1_ID_MARKER);
+      dictation2GateSeen ||= originalContent.includes(DICTATION_GATE_2_ID_MARKER);
+      browserNonlocalGateSeen ||= originalContent.includes(BROWSER_NONLOCAL_GATE_ID_MARKER);
+      threadHoverCardsGateSeen ||= originalContent.includes(THREAD_HOVER_CARDS_GATE_ID_MARKER);
+      chronicleGateSeen ||=
+        CHRONICLE_GATE_FUNCTION_RE.test(originalContent) ||
+        originalContent.includes(CHRONICLE_GATE_ID_MARKER);
+      personalityGateSeen ||= originalContent.includes(PERSONALITY_GATE_ID_MARKER);
+      remoteConnectionsGateSeen ||=
+        REMOTE_CONNECTIONS_GATE_FUNCTION_RE.test(originalContent) ||
+        originalContent.includes(REMOTE_CONNECTIONS_GATE_ID_MARKER);
+      remoteConnectionsFeatureGateSeen ||=
+        originalContent.includes(REMOTE_CONNECTIONS_FEATURE_GATE_ID_MARKER);
+      artifactElectronGateSeen ||= ARTIFACT_ELECTRON_GATE_FUNCTION_RE.test(originalContent);
 
       if (content.includes(I18N_NEEDLE)) {
         const count = content.split(I18N_NEEDLE).length - 1;
@@ -1038,6 +1214,153 @@ try {
           pluginsBundledMarketplaceGateCount += inlineMatches.length;
           modified = true;
         }
+      }
+
+      // Patch 22: Background Subagents
+      if (BACKGROUND_SUBAGENTS_GATE_FUNCTION_RE.test(content)) {
+        content = content.replace(BACKGROUND_SUBAGENTS_GATE_FUNCTION_RE, 'function $1(){return!0}');
+        backgroundSubagentsGatePatched = true;
+        modified = true;
+      } else {
+        const inlineMatches = content.match(BACKGROUND_SUBAGENTS_GATE_INLINE_RE);
+        if (inlineMatches) {
+          content = content.replaceAll(BACKGROUND_SUBAGENTS_GATE_INLINE_RE, '$1!0');
+          backgroundSubagentsGatePatched = true;
+          modified = true;
+        }
+      }
+
+      // Patch 23: Thread Overlay
+      {
+        const inlineMatches = content.match(THREAD_OVERLAY_GATE_INLINE_RE);
+        if (inlineMatches) {
+          content = content.replaceAll(THREAD_OVERLAY_GATE_INLINE_RE, '$1!0');
+          threadOverlayGateCount += inlineMatches.length;
+          modified = true;
+        }
+      }
+
+      // Patch 24: Multi-Window
+      {
+        const inlineMatches = content.match(MULTI_WINDOW_GATE_INLINE_RE);
+        if (inlineMatches) {
+          content = content.replaceAll(MULTI_WINDOW_GATE_INLINE_RE, '$1!0');
+          multiWindowGateCount += inlineMatches.length;
+          modified = true;
+        }
+      }
+
+      // Patch 25: Computer Use
+      {
+        const inlineMatches = content.match(COMPUTER_USE_GATE_INLINE_RE);
+        if (inlineMatches) {
+          content = content.replaceAll(COMPUTER_USE_GATE_INLINE_RE, '$1!0');
+          computerUseGateCount += inlineMatches.length;
+          modified = true;
+        }
+      }
+
+      // Patch 26: Control desktop feature
+      {
+        const inlineMatches = content.match(CONTROL_GATE_INLINE_RE);
+        if (inlineMatches) {
+          content = content.replaceAll(CONTROL_GATE_INLINE_RE, '$1!0');
+          controlGateCount += inlineMatches.length;
+          modified = true;
+        }
+      }
+
+      // Patch 27: Global Dictation (both gates)
+      {
+        const m1 = content.match(DICTATION_GATE_1_INLINE_RE);
+        if (m1) {
+          content = content.replaceAll(DICTATION_GATE_1_INLINE_RE, '$1!0');
+          dictation1GateCount += m1.length;
+          modified = true;
+        }
+      }
+      {
+        const m2 = content.match(DICTATION_GATE_2_INLINE_RE);
+        if (m2) {
+          content = content.replaceAll(DICTATION_GATE_2_INLINE_RE, '$1!0');
+          dictation2GateCount += m2.length;
+          modified = true;
+        }
+      }
+
+      // Patch 28: Browser non-local sites
+      {
+        const inlineMatches = content.match(BROWSER_NONLOCAL_GATE_INLINE_RE);
+        if (inlineMatches) {
+          content = content.replaceAll(BROWSER_NONLOCAL_GATE_INLINE_RE, '$1!0');
+          browserNonlocalGateCount += inlineMatches.length;
+          modified = true;
+        }
+      }
+
+      // Patch 29: Thread Hover Cards
+      {
+        const inlineMatches = content.match(THREAD_HOVER_CARDS_GATE_INLINE_RE);
+        if (inlineMatches) {
+          content = content.replaceAll(THREAD_HOVER_CARDS_GATE_INLINE_RE, '$1!0');
+          threadHoverCardsGateCount += inlineMatches.length;
+          modified = true;
+        }
+      }
+
+      // Patch 30: Chronicle
+      if (CHRONICLE_GATE_FUNCTION_RE.test(content)) {
+        content = content.replace(CHRONICLE_GATE_FUNCTION_RE, 'function $1(){return!0}');
+        chronicleGatePatched = true;
+        modified = true;
+      } else {
+        const inlineMatches = content.match(CHRONICLE_GATE_INLINE_RE);
+        if (inlineMatches) {
+          content = content.replaceAll(CHRONICLE_GATE_INLINE_RE, '$1!0');
+          chronicleGatePatched = true;
+          modified = true;
+        }
+      }
+
+      // Patch 31: Agent Personality
+      {
+        const inlineMatches = content.match(PERSONALITY_GATE_INLINE_RE);
+        if (inlineMatches) {
+          content = content.replaceAll(PERSONALITY_GATE_INLINE_RE, '$1!0');
+          personalityGateCount += inlineMatches.length;
+          modified = true;
+        }
+      }
+
+      // Patch 32: Remote Connections
+      if (REMOTE_CONNECTIONS_GATE_FUNCTION_RE.test(content)) {
+        content = content.replace(REMOTE_CONNECTIONS_GATE_FUNCTION_RE, 'function $1(){return!0}');
+        remoteConnectionsGatePatched = true;
+        modified = true;
+      } else {
+        const inlineMatches = content.match(REMOTE_CONNECTIONS_GATE_INLINE_RE);
+        if (inlineMatches) {
+          content = content.replaceAll(REMOTE_CONNECTIONS_GATE_INLINE_RE, '$1!0');
+          remoteConnectionsGatePatched = true;
+          modified = true;
+        }
+      }
+
+      // Patch 33: Remote Connections feature flag
+      {
+        const inlineMatches = content.match(REMOTE_CONNECTIONS_FEATURE_GATE_INLINE_RE);
+        if (inlineMatches) {
+          content = content.replaceAll(REMOTE_CONNECTIONS_FEATURE_GATE_INLINE_RE, '$1!0');
+          remoteConnectionsFeatureGateCount += inlineMatches.length;
+          modified = true;
+        }
+      }
+
+      // Patch 34: Artifact Electron native functionality
+      if (ARTIFACT_ELECTRON_GATE_FUNCTION_RE.test(content)) {
+        content = content.replace(ARTIFACT_ELECTRON_GATE_FUNCTION_RE, 'function $1(){return!0}');
+        artifactElectronGatePatched = true;
+        modified = true;
       }
 
       for (const patch of AUTOMATION_DIALOG_CWD_PATCHES) {
@@ -1308,6 +1631,170 @@ try {
         'Bundled plugins marketplace gate 588076040 is still present, but no ' +
         'supported patch pattern matched. Update the offline patch before ' +
         'shipping this build.',
+      );
+    }
+
+    if (backgroundSubagentsGatePatched) {
+      log('Background subagents gate bypassed for offline mode.');
+    } else if (!backgroundSubagentsGateSeen) {
+      log('Background subagents gate 1221508807 is not present in this app version. No patch needed.');
+    } else {
+      warn(
+        'Background subagents gate 1221508807 is still present, but no ' +
+        'supported patch pattern matched. The background agents panel may ' +
+        'be hidden in this build.',
+      );
+    }
+
+    if (threadOverlayGateCount > 0) {
+      log(`Thread overlay gate bypassed for offline mode (${threadOverlayGateCount} occurrence(s)).`);
+    } else if (!threadOverlayGateSeen) {
+      log('Thread overlay gate 1060282072 is not present in this app version. No patch needed.');
+    } else {
+      warn(
+        'Thread overlay gate 1060282072 is still present, but no supported ' +
+        'patch pattern matched. Thread overlay may be unavailable.',
+      );
+    }
+
+    if (multiWindowGateCount > 0) {
+      log(`Multi-window gate bypassed for offline mode (${multiWindowGateCount} occurrence(s)).`);
+    } else if (!multiWindowGateSeen) {
+      log('Multi-window gate 459748632 is not present in this app version. No patch needed.');
+    } else {
+      warn(
+        'Multi-window gate 459748632 is still present, but no supported ' +
+        'patch pattern matched. Multi-window support may be unavailable.',
+      );
+    }
+
+    if (computerUseGateCount > 0) {
+      log(`Computer Use capability gate bypassed for offline mode (${computerUseGateCount} occurrence(s)).`);
+    } else if (!computerUseGateSeen) {
+      log('Computer Use gate 1506311413 is not present in this app version. No patch needed.');
+    } else {
+      warn(
+        'Computer Use gate 1506311413 is still present, but no supported ' +
+        'patch pattern matched. Computer Use may be unavailable.',
+      );
+    }
+
+    if (controlGateCount > 0) {
+      log(`Control desktop feature gate bypassed for offline mode (${controlGateCount} occurrence(s)).`);
+    } else if (!controlGateSeen) {
+      log('Control gate 2171042036 is not present in this app version. No patch needed.');
+    } else {
+      warn(
+        'Control gate 2171042036 is still present, but no supported ' +
+        'patch pattern matched. Control feature may be unavailable.',
+      );
+    }
+
+    if (dictation1GateCount > 0) {
+      log(`Global dictation gate 1 bypassed for offline mode (${dictation1GateCount} occurrence(s)).`);
+    } else if (!dictation1GateSeen) {
+      log('Global dictation gate 1244621283 is not present in this app version. No patch needed.');
+    } else {
+      warn(
+        'Global dictation gate 1244621283 is still present, but no supported ' +
+        'patch pattern matched. Voice dictation may be unavailable.',
+      );
+    }
+
+    if (dictation2GateCount > 0) {
+      log(`Global dictation gate 2 bypassed for offline mode (${dictation2GateCount} occurrence(s)).`);
+    } else if (!dictation2GateSeen) {
+      log('Global dictation gate 4100906017 is not present in this app version. No patch needed.');
+    } else {
+      warn(
+        'Global dictation gate 4100906017 is still present, but no supported ' +
+        'patch pattern matched. Voice dictation may be unavailable.',
+      );
+    }
+
+    if (browserNonlocalGateCount > 0) {
+      log(
+        'Browser non-local sites gate bypassed for offline mode ' +
+        `(${browserNonlocalGateCount} occurrence(s)).`,
+      );
+    } else if (!browserNonlocalGateSeen) {
+      log('Browser non-local sites gate 3903563814 is not present in this app version. No patch needed.');
+    } else {
+      warn(
+        'Browser non-local sites gate 3903563814 is still present, but no ' +
+        'supported patch pattern matched.',
+      );
+    }
+
+    if (threadHoverCardsGateCount > 0) {
+      log(
+        'Thread hover cards gate bypassed for offline mode ' +
+        `(${threadHoverCardsGateCount} occurrence(s)).`,
+      );
+    } else if (!threadHoverCardsGateSeen) {
+      log('Thread hover cards gate 3032432888 is not present in this app version. No patch needed.');
+    } else {
+      warn(
+        'Thread hover cards gate 3032432888 is still present, but no ' +
+        'supported patch pattern matched.',
+      );
+    }
+
+    if (chronicleGatePatched) {
+      log('Chronicle gate bypassed for offline mode.');
+    } else if (!chronicleGateSeen) {
+      log('Chronicle gate 2574306096 is not present in this app version. No patch needed.');
+    } else {
+      warn(
+        'Chronicle gate 2574306096 is still present, but no supported ' +
+        'patch pattern matched. Chronicle feature may be unavailable.',
+      );
+    }
+
+    if (personalityGateCount > 0) {
+      log(`Agent personality gate bypassed for offline mode (${personalityGateCount} occurrence(s)).`);
+    } else if (!personalityGateSeen) {
+      log('Agent personality gate 1444479692 is not present in this app version. No patch needed.');
+    } else {
+      warn(
+        'Agent personality gate 1444479692 is still present, but no supported ' +
+        'patch pattern matched.',
+      );
+    }
+
+    if (remoteConnectionsGatePatched) {
+      log('Remote connections gate bypassed for offline mode.');
+    } else if (!remoteConnectionsGateSeen) {
+      log('Remote connections gate 1042620455 is not present in this app version. No patch needed.');
+    } else {
+      warn(
+        'Remote connections gate 1042620455 is still present, but no supported ' +
+        'patch pattern matched.',
+      );
+    }
+
+    if (remoteConnectionsFeatureGateCount > 0) {
+      log(
+        'Remote connections feature flag gate bypassed for offline mode ' +
+        `(${remoteConnectionsFeatureGateCount} occurrence(s)).`,
+      );
+    } else if (!remoteConnectionsFeatureGateSeen) {
+      log('Remote connections feature gate 4114442250 is not present in this app version. No patch needed.');
+    } else {
+      warn(
+        'Remote connections feature gate 4114442250 is still present, but no ' +
+        'supported patch pattern matched.',
+      );
+    }
+
+    if (artifactElectronGatePatched) {
+      log('Artifact Electron native functionality gate bypassed for offline mode.');
+    } else if (!artifactElectronGateSeen) {
+      log('Artifact Electron gate 839469903 is not present in this app version. No patch needed.');
+    } else {
+      warn(
+        'Artifact Electron gate 839469903 is still present, but no supported ' +
+        'patch pattern matched. Native artifact viewer may be unavailable.',
       );
     }
 
