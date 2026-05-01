@@ -610,6 +610,10 @@ try {
   const AVATAR_OVERLAY_GATE_ID_MARKER = '`2679188970`';
   const AVATAR_OVERLAY_GATE_FUNCTION_RE =
     /function\s+(\w+)\(\)\{let\s+\w+=\(0,Q\.c\)\(2\);if\(![$\w]+\(`2679188970`\)\)\{let\s+\w+;return\s+\w+\[0\]===Symbol\.for\(`react\.memo_cache_sentinel`\)\?\(\w+=\(0,\$\.jsx\)\(\$\.Fragment,\{\}\),\w+\[0\]=\w+\):\w+=\w+\[0\],\w+\}let\s+\w+;return\s+\w+\[1\]===Symbol\.for\(`react\.memo_cache_sentinel`\)\?\(\w+=\(0,\$\.jsx\)\((\w+),\{\}\),\w+\[1\]=\w+\):\w+=\w+\[1\],\w+\}/;
+  // ≥ 26.429.x: gate extracted to a standalone hook that directly returns the
+  // gate result (same pattern seen for background-subagents, chronicle, etc.).
+  const AVATAR_OVERLAY_GATE_FUNCTION_RE_V2 =
+    /function\s+(\w+)\(\)\{return\s+[$\w]+\(`2679188970`\)\}/;
   const AVATAR_OVERLAY_GATE_INLINE_RE =
     /([,;]\s*\w+\s*=)\s*[$\w]+\(`2679188970`\)/g;
 
@@ -687,6 +691,9 @@ try {
   const WORKTREE_MODE_GATE_ID_MARKER = '`505458`';
   const WORKTREE_MODE_GATE_INLINE_RE =
     /([,;]\s*\w+\s*=)\s*[$\w]+\(`505458`\)/g;
+  // ≥ 26.429.x: extracted to a standalone hook.
+  const WORKTREE_MODE_GATE_FUNCTION_RE =
+    /function\s+(\w+)\(\)\{return\s+[$\w]+\(`505458`\)\}/;
 
   // ── Patch 18: Enable local environments cloud onboarding for offline ─
   //
@@ -695,6 +702,9 @@ try {
   const CLOUD_ENVIRONMENT_GATE_ID_MARKER = '`1907601843`';
   const CLOUD_ENVIRONMENT_GATE_INLINE_RE =
     /([,;]\s*\w+\s*=)\s*[$\w]+\(`1907601843`\)/g;
+  // ≥ 26.429.x: extracted to a standalone hook.
+  const CLOUD_ENVIRONMENT_GATE_FUNCTION_RE =
+    /function\s+(\w+)\(\)\{return\s+[$\w]+\(`1907601843`\)\}/;
 
   // ── Patch 19: Enable Browser Use for offline builds ───────────────────
   //
@@ -703,6 +713,9 @@ try {
   const BROWSER_USE_GATE_ID_MARKER = '`410262010`';
   const BROWSER_USE_GATE_INLINE_RE =
     /([,;]\s*\w+\s*=)\s*[$\w]+\(`410262010`\)/g;
+  // ≥ 26.429.x: extracted to a standalone hook.
+  const BROWSER_USE_GATE_FUNCTION_RE =
+    /function\s+(\w+)\(\)\{return\s+[$\w]+\(`410262010`\)\}/;
 
   // ── Patch 20: Enable in-app browser for offline builds ────────────────
   //
@@ -711,6 +724,9 @@ try {
   const IN_APP_BROWSER_GATE_ID_MARKER = '`4250630194`';
   const IN_APP_BROWSER_GATE_INLINE_RE =
     /([,;]\s*\w+\s*=)\s*[$\w]+\(`4250630194`\)/g;
+  // ≥ 26.429.x: extracted to a standalone hook.
+  const IN_APP_BROWSER_GATE_FUNCTION_RE =
+    /function\s+(\w+)\(\)\{return\s+[$\w]+\(`4250630194`\)\}/;
 
   // ── Patch 21: Enable bundled plugins marketplace for offline builds ──
   //
@@ -719,6 +735,9 @@ try {
   const PLUGINS_BUNDLED_MARKETPLACE_GATE_ID_MARKER = '`588076040`';
   const PLUGINS_BUNDLED_MARKETPLACE_GATE_INLINE_RE =
     /([,;]\s*\w+\s*=)\s*[$\w]+\(`588076040`\)/g;
+  // ≥ 26.429.x: extracted to a standalone hook.
+  const PLUGINS_BUNDLED_MARKETPLACE_GATE_FUNCTION_RE =
+    /function\s+(\w+)\(\)\{return\s+[$\w]+\(`588076040`\)\}/;
 
   // ── Patch 22: Enable Background Subagents for offline builds ───────────
   //
@@ -988,7 +1007,11 @@ try {
       scratchpadGateSeen ||=
         SCRATCHPAD_GATE_FUNCTION_RE.test(originalContent) ||
         SCRATCHPAD_GATE_FUNCTION_RE_V2.test(originalContent);
-      avatarOverlayGateSeen ||= originalContent.includes(AVATAR_OVERLAY_GATE_ID_MARKER);
+      avatarOverlayGateSeen ||=
+        AVATAR_OVERLAY_GATE_FUNCTION_RE.test(originalContent) ||
+        AVATAR_OVERLAY_GATE_FUNCTION_RE_V2.test(originalContent) ||
+        AVATAR_OVERLAY_GATE_INLINE_RE.test(originalContent);
+      AVATAR_OVERLAY_GATE_INLINE_RE.lastIndex = 0;
       heartbeatGateSeen ||= originalContent.includes(HEARTBEAT_GATE_ID_MARKER);
       ambientSuggestionsGateSeen ||= originalContent.includes(AMBIENT_SUGGESTIONS_GATE_ID_MARKER);
       artifactsPaneGateSeen ||= originalContent.includes(ARTIFACTS_PANE_GATE_ID_MARKER);
@@ -997,12 +1020,21 @@ try {
         originalContent.includes(MEMORIES_GATE_CURRENT_PATTERN) ||
         MEMORIES_GATE_INLINE_RE.test(originalContent);
       slashCommandsGateSeen ||= originalContent.includes(SLASH_COMMANDS_GATE_ID_MARKER);
-      worktreeModeGateSeen ||= originalContent.includes(WORKTREE_MODE_GATE_ID_MARKER);
-      cloudEnvironmentGateSeen ||= originalContent.includes(CLOUD_ENVIRONMENT_GATE_ID_MARKER);
-      browserUseGateSeen ||= originalContent.includes(BROWSER_USE_GATE_ID_MARKER);
-      inAppBrowserGateSeen ||= originalContent.includes(IN_APP_BROWSER_GATE_ID_MARKER);
+      worktreeModeGateSeen ||=
+        originalContent.match(WORKTREE_MODE_GATE_INLINE_RE) !== null ||
+        WORKTREE_MODE_GATE_FUNCTION_RE.test(originalContent);
+      cloudEnvironmentGateSeen ||=
+        originalContent.match(CLOUD_ENVIRONMENT_GATE_INLINE_RE) !== null ||
+        CLOUD_ENVIRONMENT_GATE_FUNCTION_RE.test(originalContent);
+      browserUseGateSeen ||=
+        originalContent.match(BROWSER_USE_GATE_INLINE_RE) !== null ||
+        BROWSER_USE_GATE_FUNCTION_RE.test(originalContent);
+      inAppBrowserGateSeen ||=
+        originalContent.match(IN_APP_BROWSER_GATE_INLINE_RE) !== null ||
+        IN_APP_BROWSER_GATE_FUNCTION_RE.test(originalContent);
       pluginsBundledMarketplaceGateSeen ||=
-        originalContent.includes(PLUGINS_BUNDLED_MARKETPLACE_GATE_ID_MARKER);
+        originalContent.match(PLUGINS_BUNDLED_MARKETPLACE_GATE_INLINE_RE) !== null ||
+        PLUGINS_BUNDLED_MARKETPLACE_GATE_FUNCTION_RE.test(originalContent);
       backgroundSubagentsGateSeen ||= originalContent.includes(BACKGROUND_SUBAGENTS_GATE_ID_MARKER);
       threadOverlayGateSeen ||= originalContent.includes(THREAD_OVERLAY_GATE_ID_MARKER);
       multiWindowGateSeen ||= originalContent.includes(MULTI_WINDOW_GATE_ID_MARKER);
@@ -1102,6 +1134,10 @@ try {
           AVATAR_OVERLAY_GATE_FUNCTION_RE,
           'function $1(){return(0,$.jsx)($2,{})}',
         );
+        avatarOverlayGatePatched = true;
+        modified = true;
+      } else if (AVATAR_OVERLAY_GATE_FUNCTION_RE_V2.test(content)) {
+        content = content.replace(AVATAR_OVERLAY_GATE_FUNCTION_RE_V2, 'function $1(){return!0}');
         avatarOverlayGatePatched = true;
         modified = true;
       } else if (content.match(AVATAR_OVERLAY_GATE_INLINE_RE)) {
@@ -1220,6 +1256,10 @@ try {
           content = content.replaceAll(WORKTREE_MODE_GATE_INLINE_RE, '$1!0');
           worktreeModeGateCount += inlineMatches.length;
           modified = true;
+        } else if (WORKTREE_MODE_GATE_FUNCTION_RE.test(content)) {
+          content = content.replace(WORKTREE_MODE_GATE_FUNCTION_RE, 'function $1(){return!0}');
+          worktreeModeGateCount += 1;
+          modified = true;
         }
       }
 
@@ -1228,6 +1268,10 @@ try {
         if (inlineMatches) {
           content = content.replaceAll(CLOUD_ENVIRONMENT_GATE_INLINE_RE, '$1!0');
           cloudEnvironmentGateCount += inlineMatches.length;
+          modified = true;
+        } else if (CLOUD_ENVIRONMENT_GATE_FUNCTION_RE.test(content)) {
+          content = content.replace(CLOUD_ENVIRONMENT_GATE_FUNCTION_RE, 'function $1(){return!0}');
+          cloudEnvironmentGateCount += 1;
           modified = true;
         }
       }
@@ -1238,6 +1282,10 @@ try {
           content = content.replaceAll(BROWSER_USE_GATE_INLINE_RE, '$1!0');
           browserUseGateCount += inlineMatches.length;
           modified = true;
+        } else if (BROWSER_USE_GATE_FUNCTION_RE.test(content)) {
+          content = content.replace(BROWSER_USE_GATE_FUNCTION_RE, 'function $1(){return!0}');
+          browserUseGateCount += 1;
+          modified = true;
         }
       }
 
@@ -1246,6 +1294,10 @@ try {
         if (inlineMatches) {
           content = content.replaceAll(IN_APP_BROWSER_GATE_INLINE_RE, '$1!0');
           inAppBrowserGateCount += inlineMatches.length;
+          modified = true;
+        } else if (IN_APP_BROWSER_GATE_FUNCTION_RE.test(content)) {
+          content = content.replace(IN_APP_BROWSER_GATE_FUNCTION_RE, 'function $1(){return!0}');
+          inAppBrowserGateCount += 1;
           modified = true;
         }
       }
@@ -1258,6 +1310,13 @@ try {
             '$1!0',
           );
           pluginsBundledMarketplaceGateCount += inlineMatches.length;
+          modified = true;
+        } else if (PLUGINS_BUNDLED_MARKETPLACE_GATE_FUNCTION_RE.test(content)) {
+          content = content.replace(
+            PLUGINS_BUNDLED_MARKETPLACE_GATE_FUNCTION_RE,
+            'function $1(){return!0}',
+          );
+          pluginsBundledMarketplaceGateCount += 1;
           modified = true;
         }
       }
