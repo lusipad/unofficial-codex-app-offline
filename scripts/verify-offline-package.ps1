@@ -119,7 +119,11 @@ const path = require('path');
 const asarPath = process.argv[1];
 const PATCH_MARKER = '/* codex-offline:windowsStore-patch */';
 const SLASH_GATE_NEEDLE = '$f(`1609556872`)';
-const SLASH_ALREADY_PATCHED_MARKER = 'a=i.pathname===`/hotkey-window`,o=!0,s=wo()';
+const SLASH_UI_MARKERS = [
+  'composer.slashCommands.dialogTitle',
+  'composer.personalitySlashCommand.title',
+  'composer.planSlashCommand.title',
+];
 const KNOWN_RAW_GATE_IDS = [
   '4166894088',
   '3075919032',
@@ -173,9 +177,11 @@ if (!mainContent.includes(PATCH_MARKER)) {
 
 const javaScriptEntries = entries.filter(entry => entry.endsWith('.js'));
 const residualGateMatches = [];
+const allJavaScriptContent = [];
 
 for (const entry of javaScriptEntries) {
   const content = asar.extractFile(asarPath, entryMap.get(entry)).toString('utf8');
+  allJavaScriptContent.push(content);
   const matchedGateIds = KNOWN_RAW_GATE_IDS.filter(gateId => content.includes('`' + gateId + '`'));
   if (matchedGateIds.length > 0) {
     residualGateMatches.push(`${entry}: ${matchedGateIds.join(', ')}`);
@@ -198,12 +204,13 @@ if (!webviewEntry) {
 }
 
 const webviewContent = asar.extractFile(asarPath, entryMap.get(webviewEntry)).toString('utf8');
-if (!webviewContent.includes(SLASH_ALREADY_PATCHED_MARKER)) {
-  throw new Error('Slash command patched marker is missing from the webview bundle.');
-}
-
 if (webviewContent.includes(SLASH_GATE_NEEDLE)) {
   throw new Error('Slash command gate needle is still present in the webview bundle.');
+}
+
+const missingSlashUiMarkers = SLASH_UI_MARKERS.filter(marker => !allJavaScriptContent.some(content => content.includes(marker)));
+if (missingSlashUiMarkers.length > 0) {
+  throw new Error(`Slash command UI markers are missing from app.asar JavaScript bundles: ${missingSlashUiMarkers.join(', ')}`);
 }
 
 console.log(`[verify-offline-package] Verified app.asar patches in ${path.basename(asarPath)}`);

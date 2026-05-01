@@ -591,10 +591,14 @@ try {
   const PULL_REQUESTS_GATE_FUNCTION_RE =
     /function\s+(\w+)\(\)\{return\s+[$\w]+\(`3789238711`\)\}/;
   const PULL_REQUESTS_ROUTE_GATE_FUNCTION_RE =
-    /function\s+(\w+)\(\)\{let\s+e=\(0,Q\.c\)\(3\),t;if\(e\[0\]===Symbol\.for\(`react\.memo_cache_sentinel`\)\?\(t=`3789238711`,e\[0\]=t\):t=e\[0\],!xu\(t\)\)\{let\s+t;return\s+e\[1\]===Symbol\.for\(`react\.memo_cache_sentinel`\)\?\(t=\(0,\$\.jsx\)\(b,\{to:`\/`,replace:!0\}\),e\[1\]=t\):t=e\[1\],t\}let\s+n;return\s+e\[2\]===Symbol\.for\(`react\.memo_cache_sentinel`\)\?\(n=\(0,\$\.jsx\)\((\w+),\{\}\),e\[2\]=n\):n=e\[2\],n\}/;
+    /function\s+(\w+)\(\)\{let\s+e=\(0,Q\.c\)\(3\),t;if\(e\[0\]===Symbol\.for\(`react\.memo_cache_sentinel`\)\?\(t=`3789238711`,e\[0\]=t\):t=e\[0\],!xu\(t\)\)\{let\s+t;return\s+e\[1\]===Symbol\.for\(`react\.memo_cache_sentinel`\)\?\(t=\(0,([$\w]+)\.jsx\)\(b,\{to:`\/`,replace:!0\}\),e\[1\]=t\):t=e\[1\],t\}let\s+n;return\s+e\[2\]===Symbol\.for\(`react\.memo_cache_sentinel`\)\?\(n=\(0,\2\.jsx\)\((\w+),\{\}\),e\[2\]=n\):n=e\[2\],n\}/;
   // ≥ 26.422.8496.0: 2-slot memo cache and direct $f() call.
   const PULL_REQUESTS_ROUTE_GATE_FUNCTION_RE_V2 =
-    /function\s+(\w+)\(\)\{let\s+\w+=\(0,Q\.c\)\(2\);if\(![$\w]+\(`3789238711`\)\)\{let\s+\w+;return\s+\w+\[0\]===Symbol\.for\(`react\.memo_cache_sentinel`\)\?\(\w+=\(0,\$\.jsx\)\(\w+,\{to:`\/`,replace:!0\}\),\w+\[0\]=\w+\):\w+=\w+\[0\],\w+\}let\s+\w+;return\s+\w+\[1\]===Symbol\.for\(`react\.memo_cache_sentinel`\)\?\(\w+=\(0,\$\.jsx\)\((\w+),\{\}\),\w+\[1\]=\w+\):\w+=\w+\[1\],\w+\}/;
+    /function\s+(\w+)\(\)\{let\s+\w+=\(0,Q\.c\)\(2\);if\(![$\w]+\(`3789238711`\)\)\{let\s+\w+;return\s+\w+\[0\]===Symbol\.for\(`react\.memo_cache_sentinel`\)\?\(\w+=\(0,([$\w]+)\.jsx\)\(\w+,\{to:`\/`,replace:!0\}\),\w+\[0\]=\w+\):\w+=\w+\[0\],\w+\}let\s+\w+;return\s+\w+\[1\]===Symbol\.for\(`react\.memo_cache_sentinel`\)\?\(\w+=\(0,\2\.jsx\)\((\w+),\{\}\),\w+\[1\]=\w+\):\w+=\w+\[1\],\w+\}/;
+  // ≥ 26.429.2026.0: same route guard, but React compiler now emits
+  // Symbol.for(...) checks directly rather than comparing memo slots first.
+  const PULL_REQUESTS_ROUTE_GATE_FUNCTION_RE_V3 =
+    /function\s+(\w+)\(\)\{let\s+\w+=\(0,\w+\.c\)\(2\);if\(![$\w]+\(`3789238711`\)\)\{let\s+\w+;return\s+\w+\[0\]===Symbol\.for\(`react\.memo_cache_sentinel`\)\?\(\w+=\(0,([$\w]+)\.jsx\)\(\w+,\{to:`\/`,replace:!0\}\),\w+\[0\]=\w+\):\w+=\w+\[0\],\w+\}let\s+\w+;return\s+\w+\[1\]===Symbol\.for\(`react\.memo_cache_sentinel`\)\?\(\w+=\(0,\2\.jsx\)\((\w+),\{\}\),\w+\[1\]=\w+\):\w+=\w+\[1\],\w+\}/;
   const SCRATCHPAD_GATE_FUNCTION_RE =
     /function\s+(\w+)\(\)\{let\s+\w+=\(0,\w+\.c\)\(1\),\w+;return\s+\w+\[0\]===Symbol\.for\(`react\.memo_cache_sentinel`\)\?\(\w+=`2302560359`,\w+\[0\]=\w+\):\w+=\w+\[0\],\w+\(\w+\)\}/;
   // ≥ 26.422.8496.0: gate function reduced to a direct call, possibly in a
@@ -666,6 +670,10 @@ try {
   const PR_ICONS_GATE_NEEDLE = '$f(`2553306736`)';
   const PR_ICONS_GATE_INLINE_RE =
     /([,;]\s*\w+\s*=)\s*[$\w]+\(`2553306736`\)/;
+  const PR_ICONS_GATE_HOOK_RE =
+    /([,;]\s*\w+=)\s*[$\w]+\([$\w]+,`2553306736`\)/g;
+  const PR_ICONS_GATE_STORE_GET_RE =
+    /[$\w]+\([$\w]+\([$\w]+,`2553306736`\)\)/g;
   const PR_ICONS_GATE_REPLACEMENT = '!0';
   // ≥ 26.429.x: extracted to a standalone hook.
   const PR_ICONS_GATE_FUNCTION_RE =
@@ -1020,6 +1028,7 @@ try {
       pullRequestsRouteGateSeen ||=
         PULL_REQUESTS_ROUTE_GATE_FUNCTION_RE.test(originalContent) ||
         PULL_REQUESTS_ROUTE_GATE_FUNCTION_RE_V2.test(originalContent) ||
+        PULL_REQUESTS_ROUTE_GATE_FUNCTION_RE_V3.test(originalContent) ||
         originalContent.includes(PULL_REQUESTS_GATE_ID_MARKER);
       scratchpadGateSeen ||=
         SCRATCHPAD_GATE_FUNCTION_RE.test(originalContent) ||
@@ -1042,7 +1051,11 @@ try {
       prIconsGateSeen ||=
         originalContent.includes(PR_ICONS_GATE_ID_MARKER) ||
         PR_ICONS_GATE_INLINE_RE.test(originalContent) ||
+        PR_ICONS_GATE_HOOK_RE.test(originalContent) ||
+        PR_ICONS_GATE_STORE_GET_RE.test(originalContent) ||
         PR_ICONS_GATE_FUNCTION_RE.test(originalContent);
+      PR_ICONS_GATE_HOOK_RE.lastIndex = 0;
+      PR_ICONS_GATE_STORE_GET_RE.lastIndex = 0;
       memoriesGateSeen ||=
         originalContent.includes(MEMORIES_GATE_CURRENT_PATTERN) ||
         MEMORIES_GATE_INLINE_RE.test(originalContent) ||
@@ -1133,12 +1146,36 @@ try {
         pullRequestsGatePatched = true;
         modified = true;
       }
+
+      if (PULL_REQUESTS_ROUTE_GATE_FUNCTION_RE.test(content)) {
+        content = content.replace(
+          PULL_REQUESTS_ROUTE_GATE_FUNCTION_RE,
+          'function $1(){return(0,$2.jsx)($3,{})}',
+        );
+        pullRequestsRouteGatePatched = true;
+        modified = true;
+      } else if (PULL_REQUESTS_ROUTE_GATE_FUNCTION_RE_V2.test(content)) {
+        content = content.replace(
+          PULL_REQUESTS_ROUTE_GATE_FUNCTION_RE_V2,
+          'function $1(){return(0,$2.jsx)($3,{})}',
+        );
+        pullRequestsRouteGatePatched = true;
+        modified = true;
+      } else if (PULL_REQUESTS_ROUTE_GATE_FUNCTION_RE_V3.test(content)) {
+        content = content.replace(
+          PULL_REQUESTS_ROUTE_GATE_FUNCTION_RE_V3,
+          'function $1(){return(0,$2.jsx)($3,{})}',
+        );
+        pullRequestsRouteGatePatched = true;
+        modified = true;
+      }
+
       // IIFE-form fallback: handles (0,$f)(`3789238711`) which the patterns above miss.
       // Guard is content.includes(ID_MARKER) — primary patterns remove the literal when they
       // match, so this naturally fires only when the primary patterns left the ID intact.
       if (content.includes(PULL_REQUESTS_GATE_ID_MARKER)) {
         const nc = content.replace(
-          /(?:\(0,[$\w]+\)|[$\w]+)\(`3789238711`\)/g,
+          /(?<!!)(?:\(0,[$\w]+\)|[$\w]+)\(`3789238711`\)/g,
           '!0',
         );
         if (nc !== content) {
@@ -1148,25 +1185,10 @@ try {
         }
       }
 
-      if (PULL_REQUESTS_ROUTE_GATE_FUNCTION_RE.test(content)) {
-        content = content.replace(
-          PULL_REQUESTS_ROUTE_GATE_FUNCTION_RE,
-          'function $1(){return(0,$.jsx)($2,{})}',
-        );
-        pullRequestsRouteGatePatched = true;
-        modified = true;
-      } else if (PULL_REQUESTS_ROUTE_GATE_FUNCTION_RE_V2.test(content)) {
-        content = content.replace(
-          PULL_REQUESTS_ROUTE_GATE_FUNCTION_RE_V2,
-          'function $1(){return(0,$.jsx)($2,{})}',
-        );
-        pullRequestsRouteGatePatched = true;
-        modified = true;
-      }
       // IIFE-form fallback for route gate: same guard approach as sidebar.
       if (content.includes(PULL_REQUESTS_GATE_ID_MARKER)) {
         const nc = content.replace(
-          /(?:\(0,[$\w]+\)|[$\w]+)\(`3789238711`\)/g,
+          /(?<!!)(?:\(0,[$\w]+\)|[$\w]+)\(`3789238711`\)/g,
           '!0',
         );
         if (nc !== content) {
@@ -1302,6 +1324,20 @@ try {
         prIconsGateCount += 1;
         modified = true;
       }
+      if (PR_ICONS_GATE_HOOK_RE.test(content)) {
+        const count = content.match(PR_ICONS_GATE_HOOK_RE).length;
+        content = content.replace(PR_ICONS_GATE_HOOK_RE, '$1!0');
+        prIconsGateCount += count;
+        modified = true;
+      }
+      PR_ICONS_GATE_HOOK_RE.lastIndex = 0;
+      if (PR_ICONS_GATE_STORE_GET_RE.test(content)) {
+        const count = content.match(PR_ICONS_GATE_STORE_GET_RE).length;
+        content = content.replace(PR_ICONS_GATE_STORE_GET_RE, '!0');
+        prIconsGateCount += count;
+        modified = true;
+      }
+      PR_ICONS_GATE_STORE_GET_RE.lastIndex = 0;
       // IIFE-form fallback: handles (0,$f)(`2553306736`) in index / bridge chunks.
       // Uses content.includes(ID_MARKER) so it fires per-file, not guarded by a global count.
       if (content.includes(PR_ICONS_GATE_ID_MARKER)) {
