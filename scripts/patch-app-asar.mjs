@@ -1134,7 +1134,9 @@ try {
         modified = true;
       }
       // IIFE-form fallback: handles (0,$f)(`3789238711`) which the patterns above miss.
-      if (!pullRequestsGatePatched && content.includes(PULL_REQUESTS_GATE_ID_MARKER)) {
+      // Guard is content.includes(ID_MARKER) — primary patterns remove the literal when they
+      // match, so this naturally fires only when the primary patterns left the ID intact.
+      if (content.includes(PULL_REQUESTS_GATE_ID_MARKER)) {
         const nc = content.replace(
           /(?:\(0,[$\w]+\)|[$\w]+)\(`3789238711`\)/g,
           '!0',
@@ -1161,8 +1163,8 @@ try {
         pullRequestsRouteGatePatched = true;
         modified = true;
       }
-      // IIFE-form fallback for route gate.
-      if (!pullRequestsRouteGatePatched && content.includes(PULL_REQUESTS_GATE_ID_MARKER)) {
+      // IIFE-form fallback for route gate: same guard approach as sidebar.
+      if (content.includes(PULL_REQUESTS_GATE_ID_MARKER)) {
         const nc = content.replace(
           /(?:\(0,[$\w]+\)|[$\w]+)\(`3789238711`\)/g,
           '!0',
@@ -1200,8 +1202,9 @@ try {
         avatarOverlayGatePatched = true;
         modified = true;
       }
-      // IIFE-form fallback: handles (0,$f)(`2679188970`) and return(0,$f)(`2679188970`).
-      if (!avatarOverlayGatePatched && content.includes(AVATAR_OVERLAY_GATE_ID_MARKER)) {
+      // IIFE-form fallback: handles (0,$f)(`2679188970`).
+      // Primary patterns remove the literal when they match, so this fires only when needed.
+      if (content.includes(AVATAR_OVERLAY_GATE_ID_MARKER)) {
         const nc = content.replace(
           /(?:\(0,[$\w]+\)|[$\w]+)\(`2679188970`\)/g,
           '!0',
@@ -1300,7 +1303,8 @@ try {
         modified = true;
       }
       // IIFE-form fallback: handles (0,$f)(`2553306736`) in index / bridge chunks.
-      if (prIconsGateCount === 0 && content.includes(PR_ICONS_GATE_ID_MARKER)) {
+      // Uses content.includes(ID_MARKER) so it fires per-file, not guarded by a global count.
+      if (content.includes(PR_ICONS_GATE_ID_MARKER)) {
         const nc = content.replace(
           /(?:\(0,[$\w]+\)|[$\w]+)\(`2553306736`\)/g,
           '!0',
