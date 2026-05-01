@@ -628,6 +628,9 @@ try {
   const HEARTBEAT_GATE_INLINE_RE =
     /([,;]\s*\w+\s*=)\s*[$\w]+\(`1488233300`\)/g;
   const HEARTBEAT_GATE_REPLACEMENT = '!0';
+  // ≥ 26.429.x: extracted to a standalone hook.
+  const HEARTBEAT_GATE_FUNCTION_RE =
+    /function\s+(\w+)\(\)\{return\s+[$\w]+\(`1488233300`\)\}/;
 
   // ── Patch 12: Enable Ambient Suggestions for offline builds ────────────
   //
@@ -638,6 +641,9 @@ try {
   const AMBIENT_SUGGESTIONS_GATE_INLINE_RE =
     /([,;]\s*\w+\s*=)\s*[$\w]+\(`2425897452`\)/g;
   const AMBIENT_SUGGESTIONS_GATE_REPLACEMENT = '!0';
+  // ≥ 26.429.x: extracted to a standalone hook.
+  const AMBIENT_SUGGESTIONS_GATE_FUNCTION_RE =
+    /function\s+(\w+)\(\)\{return\s+[$\w]+\(`2425897452`\)\}/;
 
   // ── Patch 13: Enable Artifacts Pane for offline builds ─────────────────
   //
@@ -661,6 +667,9 @@ try {
   const PR_ICONS_GATE_INLINE_RE =
     /([,;]\s*\w+\s*=)\s*[$\w]+\(`2553306736`\)/;
   const PR_ICONS_GATE_REPLACEMENT = '!0';
+  // ≥ 26.429.x: extracted to a standalone hook.
+  const PR_ICONS_GATE_FUNCTION_RE =
+    /function\s+(\w+)\(\)\{return\s+[$\w]+\(`2553306736`\)\}/;
 
   // ── Patch 15: Enable Memories for offline builds ────────────────────────
   //
@@ -671,6 +680,9 @@ try {
   // [$\w]+ instead of \w+ so that minified names like $f are also matched.
   const MEMORIES_GATE_INLINE_RE =
     /([,;]\s*\w+\s*=)\s*[$\w]+\(`875176429`\)/;
+  // ≥ 26.429.x: extracted to a standalone hook.
+  const MEMORIES_GATE_FUNCTION_RE =
+    /function\s+(\w+)\(\)\{return\s+[$\w]+\(`875176429`\)\}/;
 
   // ── Patch 16: Enable slash commands menu for offline builds ───────────
   //
@@ -683,6 +695,9 @@ try {
   const SLASH_COMMANDS_GATE_REPLACEMENT = '!0';
   const SLASH_COMMANDS_GATE_ALREADY_CORRECT_MARKER =
     'a=i.pathname===`/hotkey-window`,o=!0,s=wo()';
+  // ≥ 26.429.x: extracted to a standalone hook.
+  const SLASH_COMMANDS_GATE_FUNCTION_RE =
+    /function\s+(\w+)\(\)\{return\s+[$\w]+\(`1609556872`\)\}/;
 
   // ── Patch 17: Enable Worktree mode for offline builds ────────────────
   //
@@ -1012,14 +1027,27 @@ try {
         AVATAR_OVERLAY_GATE_FUNCTION_RE_V2.test(originalContent) ||
         AVATAR_OVERLAY_GATE_INLINE_RE.test(originalContent);
       AVATAR_OVERLAY_GATE_INLINE_RE.lastIndex = 0;
-      heartbeatGateSeen ||= originalContent.includes(HEARTBEAT_GATE_ID_MARKER);
-      ambientSuggestionsGateSeen ||= originalContent.includes(AMBIENT_SUGGESTIONS_GATE_ID_MARKER);
+      heartbeatGateSeen ||=
+        originalContent.includes(HEARTBEAT_GATE_NEEDLE) ||
+        HEARTBEAT_GATE_INLINE_RE.test(originalContent) ||
+        HEARTBEAT_GATE_FUNCTION_RE.test(originalContent);
+      ambientSuggestionsGateSeen ||=
+        originalContent.includes(AMBIENT_SUGGESTIONS_GATE_NEEDLE) ||
+        AMBIENT_SUGGESTIONS_GATE_INLINE_RE.test(originalContent) ||
+        AMBIENT_SUGGESTIONS_GATE_FUNCTION_RE.test(originalContent);
       artifactsPaneGateSeen ||= originalContent.includes(ARTIFACTS_PANE_GATE_ID_MARKER);
-      prIconsGateSeen ||= originalContent.includes(PR_ICONS_GATE_ID_MARKER);
+      prIconsGateSeen ||=
+        content.includes(PR_ICONS_GATE_NEEDLE) ||
+        PR_ICONS_GATE_INLINE_RE.test(originalContent) ||
+        PR_ICONS_GATE_FUNCTION_RE.test(originalContent);
       memoriesGateSeen ||=
         originalContent.includes(MEMORIES_GATE_CURRENT_PATTERN) ||
-        MEMORIES_GATE_INLINE_RE.test(originalContent);
-      slashCommandsGateSeen ||= originalContent.includes(SLASH_COMMANDS_GATE_ID_MARKER);
+        MEMORIES_GATE_INLINE_RE.test(originalContent) ||
+        MEMORIES_GATE_FUNCTION_RE.test(originalContent);
+      slashCommandsGateSeen ||=
+        originalContent.includes(SLASH_COMMANDS_GATE_NEEDLE) ||
+        SLASH_COMMANDS_GATE_INLINE_RE.test(originalContent) ||
+        SLASH_COMMANDS_GATE_FUNCTION_RE.test(originalContent);
       worktreeModeGateSeen ||=
         originalContent.match(WORKTREE_MODE_GATE_INLINE_RE) !== null ||
         WORKTREE_MODE_GATE_FUNCTION_RE.test(originalContent);
@@ -1160,6 +1188,10 @@ try {
           );
           heartbeatGateCount += inlineMatches.length;
           modified = true;
+        } else if (HEARTBEAT_GATE_FUNCTION_RE.test(content)) {
+          content = content.replace(HEARTBEAT_GATE_FUNCTION_RE, 'function $1(){return!0}');
+          heartbeatGateCount += 1;
+          modified = true;
         }
       }
 
@@ -1179,6 +1211,13 @@ try {
             '$1!0',
           );
           ambientSuggestionsGateCount += inlineMatches.length;
+          modified = true;
+        } else if (AMBIENT_SUGGESTIONS_GATE_FUNCTION_RE.test(content)) {
+          content = content.replace(
+            AMBIENT_SUGGESTIONS_GATE_FUNCTION_RE,
+            'function $1(){return!0}',
+          );
+          ambientSuggestionsGateCount += 1;
           modified = true;
         }
       }
@@ -1216,6 +1255,10 @@ try {
         content = content.replace(PR_ICONS_GATE_INLINE_RE, '$1!0');
         prIconsGateCount += 1;
         modified = true;
+      } else if (PR_ICONS_GATE_FUNCTION_RE.test(content)) {
+        content = content.replace(PR_ICONS_GATE_FUNCTION_RE, 'function $1(){return!0}');
+        prIconsGateCount += 1;
+        modified = true;
       }
 
       if (MEMORIES_GATE_INLINE_RE.test(content)) {
@@ -1227,6 +1270,10 @@ try {
           MEMORIES_GATE_CURRENT_PATTERN,
           '[$s]:!0',
         );
+        memoriesGatePatched = true;
+        modified = true;
+      } else if (MEMORIES_GATE_FUNCTION_RE.test(content)) {
+        content = content.replace(MEMORIES_GATE_FUNCTION_RE, 'function $1(){return!0}');
         memoriesGatePatched = true;
         modified = true;
       }
@@ -1244,6 +1291,10 @@ try {
           SLASH_COMMANDS_GATE_INLINE_RE,
           '$1!0',
         );
+        slashCommandsGateCount += 1;
+        modified = true;
+      } else if (SLASH_COMMANDS_GATE_FUNCTION_RE.test(content)) {
+        content = content.replace(SLASH_COMMANDS_GATE_FUNCTION_RE, 'function $1(){return!0}');
         slashCommandsGateCount += 1;
         modified = true;
       } else if (content.includes(SLASH_COMMANDS_GATE_ALREADY_CORRECT_MARKER)) {
