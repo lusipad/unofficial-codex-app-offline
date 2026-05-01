@@ -43,7 +43,9 @@
  * 6. Enable pull requests sidebar entry for offline builds
  *    The pull requests nav link is also gated behind a Statsig experiment in
  *    newer builds.  We bypass that gate so the offline build does not hide
- *    the bundled route when Statsig cannot resolve experiments.
+ *    the bundled route when Statsig cannot resolve experiments.  Older builds
+ *    embed the gate check inline; ≥ 26.429.x extract it to a standalone hook
+ *    (function name(){return $f(`3789238711`)}) that we replace with !0.
  *
  * 7. Enable scratchpad sidebar entry for offline builds
  *    Scratchpad is bundled in newer builds but hidden behind a separate
@@ -583,6 +585,11 @@ try {
     /(`3789238711`[^;]*;let\s+)(\w+)\s*=\s*\w+\((\w+)\)/;
   const PULL_REQUESTS_GATE_INLINE_RE =
     /([,;]\s*\w+\s*=)\s*[$\w]+\(`3789238711`\)/;
+  // ≥ 26.429.x: sidebar gate extracted to a standalone hook that directly
+  // returns the gate result, matching the pattern of other recently-extracted
+  // gate hooks (e.g. background-subagents, chronicle, artifact-electron).
+  const PULL_REQUESTS_GATE_FUNCTION_RE =
+    /function\s+(\w+)\(\)\{return\s+[$\w]+\(`3789238711`\)\}/;
   const PULL_REQUESTS_ROUTE_GATE_FUNCTION_RE =
     /function\s+(\w+)\(\)\{let\s+e=\(0,Q\.c\)\(3\),t;if\(e\[0\]===Symbol\.for\(`react\.memo_cache_sentinel`\)\?\(t=`3789238711`,e\[0\]=t\):t=e\[0\],!xu\(t\)\)\{let\s+t;return\s+e\[1\]===Symbol\.for\(`react\.memo_cache_sentinel`\)\?\(t=\(0,\$\.jsx\)\(b,\{to:`\/`,replace:!0\}\),e\[1\]=t\):t=e\[1\],t\}let\s+n;return\s+e\[2\]===Symbol\.for\(`react\.memo_cache_sentinel`\)\?\(n=\(0,\$\.jsx\)\((\w+),\{\}\),e\[2\]=n\):n=e\[2\],n\}/;
   // ≥ 26.422.8496.0: 2-slot memo cache and direct $f() call.
@@ -603,6 +610,10 @@ try {
   const AVATAR_OVERLAY_GATE_ID_MARKER = '`2679188970`';
   const AVATAR_OVERLAY_GATE_FUNCTION_RE =
     /function\s+(\w+)\(\)\{let\s+\w+=\(0,Q\.c\)\(2\);if\(![$\w]+\(`2679188970`\)\)\{let\s+\w+;return\s+\w+\[0\]===Symbol\.for\(`react\.memo_cache_sentinel`\)\?\(\w+=\(0,\$\.jsx\)\(\$\.Fragment,\{\}\),\w+\[0\]=\w+\):\w+=\w+\[0\],\w+\}let\s+\w+;return\s+\w+\[1\]===Symbol\.for\(`react\.memo_cache_sentinel`\)\?\(\w+=\(0,\$\.jsx\)\((\w+),\{\}\),\w+\[1\]=\w+\):\w+=\w+\[1\],\w+\}/;
+  // ≥ 26.429.x: gate extracted to a standalone hook that directly returns the
+  // gate result (same pattern seen for background-subagents, chronicle, etc.).
+  const AVATAR_OVERLAY_GATE_FUNCTION_RE_V2 =
+    /function\s+(\w+)\(\)\{return\s+[$\w]+\(`2679188970`\)\}/;
   const AVATAR_OVERLAY_GATE_INLINE_RE =
     /([,;]\s*\w+\s*=)\s*[$\w]+\(`2679188970`\)/g;
 
@@ -617,6 +628,9 @@ try {
   const HEARTBEAT_GATE_INLINE_RE =
     /([,;]\s*\w+\s*=)\s*[$\w]+\(`1488233300`\)/g;
   const HEARTBEAT_GATE_REPLACEMENT = '!0';
+  // ≥ 26.429.x: extracted to a standalone hook.
+  const HEARTBEAT_GATE_FUNCTION_RE =
+    /function\s+(\w+)\(\)\{return\s+[$\w]+\(`1488233300`\)\}/;
 
   // ── Patch 12: Enable Ambient Suggestions for offline builds ────────────
   //
@@ -627,6 +641,9 @@ try {
   const AMBIENT_SUGGESTIONS_GATE_INLINE_RE =
     /([,;]\s*\w+\s*=)\s*[$\w]+\(`2425897452`\)/g;
   const AMBIENT_SUGGESTIONS_GATE_REPLACEMENT = '!0';
+  // ≥ 26.429.x: extracted to a standalone hook.
+  const AMBIENT_SUGGESTIONS_GATE_FUNCTION_RE =
+    /function\s+(\w+)\(\)\{return\s+[$\w]+\(`2425897452`\)\}/;
 
   // ── Patch 13: Enable Artifacts Pane for offline builds ─────────────────
   //
@@ -650,6 +667,9 @@ try {
   const PR_ICONS_GATE_INLINE_RE =
     /([,;]\s*\w+\s*=)\s*[$\w]+\(`2553306736`\)/;
   const PR_ICONS_GATE_REPLACEMENT = '!0';
+  // ≥ 26.429.x: extracted to a standalone hook.
+  const PR_ICONS_GATE_FUNCTION_RE =
+    /function\s+(\w+)\(\)\{return\s+[$\w]+\(`2553306736`\)\}/;
 
   // ── Patch 15: Enable Memories for offline builds ────────────────────────
   //
@@ -660,6 +680,9 @@ try {
   // [$\w]+ instead of \w+ so that minified names like $f are also matched.
   const MEMORIES_GATE_INLINE_RE =
     /([,;]\s*\w+\s*=)\s*[$\w]+\(`875176429`\)/;
+  // ≥ 26.429.x: extracted to a standalone hook.
+  const MEMORIES_GATE_FUNCTION_RE =
+    /function\s+(\w+)\(\)\{return\s+[$\w]+\(`875176429`\)\}/;
 
   // ── Patch 16: Enable slash commands menu for offline builds ───────────
   //
@@ -672,6 +695,9 @@ try {
   const SLASH_COMMANDS_GATE_REPLACEMENT = '!0';
   const SLASH_COMMANDS_GATE_ALREADY_CORRECT_MARKER =
     'a=i.pathname===`/hotkey-window`,o=!0,s=wo()';
+  // ≥ 26.429.x: extracted to a standalone hook.
+  const SLASH_COMMANDS_GATE_FUNCTION_RE =
+    /function\s+(\w+)\(\)\{return\s+[$\w]+\(`1609556872`\)\}/;
 
   // ── Patch 17: Enable Worktree mode for offline builds ────────────────
   //
@@ -680,6 +706,9 @@ try {
   const WORKTREE_MODE_GATE_ID_MARKER = '`505458`';
   const WORKTREE_MODE_GATE_INLINE_RE =
     /([,;]\s*\w+\s*=)\s*[$\w]+\(`505458`\)/g;
+  // ≥ 26.429.x: extracted to a standalone hook.
+  const WORKTREE_MODE_GATE_FUNCTION_RE =
+    /function\s+(\w+)\(\)\{return\s+[$\w]+\(`505458`\)\}/;
 
   // ── Patch 18: Enable local environments cloud onboarding for offline ─
   //
@@ -688,6 +717,9 @@ try {
   const CLOUD_ENVIRONMENT_GATE_ID_MARKER = '`1907601843`';
   const CLOUD_ENVIRONMENT_GATE_INLINE_RE =
     /([,;]\s*\w+\s*=)\s*[$\w]+\(`1907601843`\)/g;
+  // ≥ 26.429.x: extracted to a standalone hook.
+  const CLOUD_ENVIRONMENT_GATE_FUNCTION_RE =
+    /function\s+(\w+)\(\)\{return\s+[$\w]+\(`1907601843`\)\}/;
 
   // ── Patch 19: Enable Browser Use for offline builds ───────────────────
   //
@@ -696,6 +728,9 @@ try {
   const BROWSER_USE_GATE_ID_MARKER = '`410262010`';
   const BROWSER_USE_GATE_INLINE_RE =
     /([,;]\s*\w+\s*=)\s*[$\w]+\(`410262010`\)/g;
+  // ≥ 26.429.x: extracted to a standalone hook.
+  const BROWSER_USE_GATE_FUNCTION_RE =
+    /function\s+(\w+)\(\)\{return\s+[$\w]+\(`410262010`\)\}/;
 
   // ── Patch 20: Enable in-app browser for offline builds ────────────────
   //
@@ -704,6 +739,9 @@ try {
   const IN_APP_BROWSER_GATE_ID_MARKER = '`4250630194`';
   const IN_APP_BROWSER_GATE_INLINE_RE =
     /([,;]\s*\w+\s*=)\s*[$\w]+\(`4250630194`\)/g;
+  // ≥ 26.429.x: extracted to a standalone hook.
+  const IN_APP_BROWSER_GATE_FUNCTION_RE =
+    /function\s+(\w+)\(\)\{return\s+[$\w]+\(`4250630194`\)\}/;
 
   // ── Patch 21: Enable bundled plugins marketplace for offline builds ──
   //
@@ -712,6 +750,9 @@ try {
   const PLUGINS_BUNDLED_MARKETPLACE_GATE_ID_MARKER = '`588076040`';
   const PLUGINS_BUNDLED_MARKETPLACE_GATE_INLINE_RE =
     /([,;]\s*\w+\s*=)\s*[$\w]+\(`588076040`\)/g;
+  // ≥ 26.429.x: extracted to a standalone hook.
+  const PLUGINS_BUNDLED_MARKETPLACE_GATE_FUNCTION_RE =
+    /function\s+(\w+)\(\)\{return\s+[$\w]+\(`588076040`\)\}/;
 
   // ── Patch 22: Enable Background Subagents for offline builds ───────────
   //
@@ -971,28 +1012,60 @@ try {
 
       settingsGateSeen ||= originalContent.includes(SETTINGS_GATE_ID_MARKER);
       automationsGateSeen ||= originalContent.includes(AUTOMATIONS_GATE_ID_MARKER);
-      pullRequestsGateSeen ||= originalContent.includes(PULL_REQUESTS_GATE_ID_MARKER);
+      pullRequestsGateSeen ||=
+        PULL_REQUESTS_GATE_RE.test(originalContent) ||
+        PULL_REQUESTS_GATE_INLINE_RE.test(originalContent) ||
+        PULL_REQUESTS_GATE_FUNCTION_RE.test(originalContent) ||
+        originalContent.includes(PULL_REQUESTS_GATE_ID_MARKER);
       pullRequestsRouteGateSeen ||=
         PULL_REQUESTS_ROUTE_GATE_FUNCTION_RE.test(originalContent) ||
-        PULL_REQUESTS_ROUTE_GATE_FUNCTION_RE_V2.test(originalContent);
+        PULL_REQUESTS_ROUTE_GATE_FUNCTION_RE_V2.test(originalContent) ||
+        originalContent.includes(PULL_REQUESTS_GATE_ID_MARKER);
       scratchpadGateSeen ||=
         SCRATCHPAD_GATE_FUNCTION_RE.test(originalContent) ||
         SCRATCHPAD_GATE_FUNCTION_RE_V2.test(originalContent);
-      avatarOverlayGateSeen ||= originalContent.includes(AVATAR_OVERLAY_GATE_ID_MARKER);
-      heartbeatGateSeen ||= originalContent.includes(HEARTBEAT_GATE_ID_MARKER);
-      ambientSuggestionsGateSeen ||= originalContent.includes(AMBIENT_SUGGESTIONS_GATE_ID_MARKER);
+      avatarOverlayGateSeen ||=
+        AVATAR_OVERLAY_GATE_FUNCTION_RE.test(originalContent) ||
+        AVATAR_OVERLAY_GATE_FUNCTION_RE_V2.test(originalContent) ||
+        AVATAR_OVERLAY_GATE_INLINE_RE.test(originalContent) ||
+        originalContent.includes(AVATAR_OVERLAY_GATE_ID_MARKER);
+      AVATAR_OVERLAY_GATE_INLINE_RE.lastIndex = 0;
+      heartbeatGateSeen ||=
+        originalContent.includes(HEARTBEAT_GATE_ID_MARKER) ||
+        HEARTBEAT_GATE_INLINE_RE.test(originalContent) ||
+        HEARTBEAT_GATE_FUNCTION_RE.test(originalContent);
+      ambientSuggestionsGateSeen ||=
+        originalContent.includes(AMBIENT_SUGGESTIONS_GATE_ID_MARKER) ||
+        AMBIENT_SUGGESTIONS_GATE_INLINE_RE.test(originalContent) ||
+        AMBIENT_SUGGESTIONS_GATE_FUNCTION_RE.test(originalContent);
       artifactsPaneGateSeen ||= originalContent.includes(ARTIFACTS_PANE_GATE_ID_MARKER);
-      prIconsGateSeen ||= originalContent.includes(PR_ICONS_GATE_ID_MARKER);
+      prIconsGateSeen ||=
+        originalContent.includes(PR_ICONS_GATE_ID_MARKER) ||
+        PR_ICONS_GATE_INLINE_RE.test(originalContent) ||
+        PR_ICONS_GATE_FUNCTION_RE.test(originalContent);
       memoriesGateSeen ||=
         originalContent.includes(MEMORIES_GATE_CURRENT_PATTERN) ||
-        MEMORIES_GATE_INLINE_RE.test(originalContent);
-      slashCommandsGateSeen ||= originalContent.includes(SLASH_COMMANDS_GATE_ID_MARKER);
-      worktreeModeGateSeen ||= originalContent.includes(WORKTREE_MODE_GATE_ID_MARKER);
-      cloudEnvironmentGateSeen ||= originalContent.includes(CLOUD_ENVIRONMENT_GATE_ID_MARKER);
-      browserUseGateSeen ||= originalContent.includes(BROWSER_USE_GATE_ID_MARKER);
-      inAppBrowserGateSeen ||= originalContent.includes(IN_APP_BROWSER_GATE_ID_MARKER);
+        MEMORIES_GATE_INLINE_RE.test(originalContent) ||
+        MEMORIES_GATE_FUNCTION_RE.test(originalContent);
+      slashCommandsGateSeen ||=
+        originalContent.includes(SLASH_COMMANDS_GATE_ID_MARKER) ||
+        SLASH_COMMANDS_GATE_INLINE_RE.test(originalContent) ||
+        SLASH_COMMANDS_GATE_FUNCTION_RE.test(originalContent);
+      worktreeModeGateSeen ||=
+        originalContent.match(WORKTREE_MODE_GATE_INLINE_RE) !== null ||
+        WORKTREE_MODE_GATE_FUNCTION_RE.test(originalContent);
+      cloudEnvironmentGateSeen ||=
+        originalContent.match(CLOUD_ENVIRONMENT_GATE_INLINE_RE) !== null ||
+        CLOUD_ENVIRONMENT_GATE_FUNCTION_RE.test(originalContent);
+      browserUseGateSeen ||=
+        originalContent.match(BROWSER_USE_GATE_INLINE_RE) !== null ||
+        BROWSER_USE_GATE_FUNCTION_RE.test(originalContent);
+      inAppBrowserGateSeen ||=
+        originalContent.match(IN_APP_BROWSER_GATE_INLINE_RE) !== null ||
+        IN_APP_BROWSER_GATE_FUNCTION_RE.test(originalContent);
       pluginsBundledMarketplaceGateSeen ||=
-        originalContent.includes(PLUGINS_BUNDLED_MARKETPLACE_GATE_ID_MARKER);
+        originalContent.match(PLUGINS_BUNDLED_MARKETPLACE_GATE_INLINE_RE) !== null ||
+        PLUGINS_BUNDLED_MARKETPLACE_GATE_FUNCTION_RE.test(originalContent);
       backgroundSubagentsGateSeen ||= originalContent.includes(BACKGROUND_SUBAGENTS_GATE_ID_MARKER);
       threadOverlayGateSeen ||= originalContent.includes(THREAD_OVERLAY_GATE_ID_MARKER);
       multiWindowGateSeen ||= originalContent.includes(MULTI_WINDOW_GATE_ID_MARKER);
@@ -1055,6 +1128,24 @@ try {
         content = content.replace(PULL_REQUESTS_GATE_INLINE_RE, '$1!0');
         pullRequestsGatePatched = true;
         modified = true;
+      } else if (PULL_REQUESTS_GATE_FUNCTION_RE.test(content)) {
+        content = content.replace(PULL_REQUESTS_GATE_FUNCTION_RE, 'function $1(){return!0}');
+        pullRequestsGatePatched = true;
+        modified = true;
+      }
+      // IIFE-form fallback: handles (0,$f)(`3789238711`) which the patterns above miss.
+      // Guard is content.includes(ID_MARKER) — primary patterns remove the literal when they
+      // match, so this naturally fires only when the primary patterns left the ID intact.
+      if (content.includes(PULL_REQUESTS_GATE_ID_MARKER)) {
+        const nc = content.replace(
+          /(?:\(0,[$\w]+\)|[$\w]+)\(`3789238711`\)/g,
+          '!0',
+        );
+        if (nc !== content) {
+          pullRequestsGatePatched = true;
+          content = nc;
+          modified = true;
+        }
       }
 
       if (PULL_REQUESTS_ROUTE_GATE_FUNCTION_RE.test(content)) {
@@ -1071,6 +1162,18 @@ try {
         );
         pullRequestsRouteGatePatched = true;
         modified = true;
+      }
+      // IIFE-form fallback for route gate: same guard approach as sidebar.
+      if (content.includes(PULL_REQUESTS_GATE_ID_MARKER)) {
+        const nc = content.replace(
+          /(?:\(0,[$\w]+\)|[$\w]+)\(`3789238711`\)/g,
+          '!0',
+        );
+        if (nc !== content) {
+          pullRequestsRouteGatePatched = true;
+          content = nc;
+          modified = true;
+        }
       }
 
       if (SCRATCHPAD_GATE_FUNCTION_RE.test(content)) {
@@ -1090,10 +1193,27 @@ try {
         );
         avatarOverlayGatePatched = true;
         modified = true;
+      } else if (AVATAR_OVERLAY_GATE_FUNCTION_RE_V2.test(content)) {
+        content = content.replace(AVATAR_OVERLAY_GATE_FUNCTION_RE_V2, 'function $1(){return!0}');
+        avatarOverlayGatePatched = true;
+        modified = true;
       } else if (content.match(AVATAR_OVERLAY_GATE_INLINE_RE)) {
         content = content.replaceAll(AVATAR_OVERLAY_GATE_INLINE_RE, '$1!0');
         avatarOverlayGatePatched = true;
         modified = true;
+      }
+      // IIFE-form fallback: handles (0,$f)(`2679188970`).
+      // Primary patterns remove the literal when they match, so this fires only when needed.
+      if (content.includes(AVATAR_OVERLAY_GATE_ID_MARKER)) {
+        const nc = content.replace(
+          /(?:\(0,[$\w]+\)|[$\w]+)\(`2679188970`\)/g,
+          '!0',
+        );
+        if (nc !== content) {
+          avatarOverlayGatePatched = true;
+          content = nc;
+          modified = true;
+        }
       }
 
       if (content.includes(HEARTBEAT_GATE_NEEDLE)) {
@@ -1109,6 +1229,10 @@ try {
             '$1!0',
           );
           heartbeatGateCount += inlineMatches.length;
+          modified = true;
+        } else if (HEARTBEAT_GATE_FUNCTION_RE.test(content)) {
+          content = content.replace(HEARTBEAT_GATE_FUNCTION_RE, 'function $1(){return!0}');
+          heartbeatGateCount += 1;
           modified = true;
         }
       }
@@ -1129,6 +1253,13 @@ try {
             '$1!0',
           );
           ambientSuggestionsGateCount += inlineMatches.length;
+          modified = true;
+        } else if (AMBIENT_SUGGESTIONS_GATE_FUNCTION_RE.test(content)) {
+          content = content.replace(
+            AMBIENT_SUGGESTIONS_GATE_FUNCTION_RE,
+            'function $1(){return!0}',
+          );
+          ambientSuggestionsGateCount += 1;
           modified = true;
         }
       }
@@ -1166,6 +1297,23 @@ try {
         content = content.replace(PR_ICONS_GATE_INLINE_RE, '$1!0');
         prIconsGateCount += 1;
         modified = true;
+      } else if (PR_ICONS_GATE_FUNCTION_RE.test(content)) {
+        content = content.replace(PR_ICONS_GATE_FUNCTION_RE, 'function $1(){return!0}');
+        prIconsGateCount += 1;
+        modified = true;
+      }
+      // IIFE-form fallback: handles (0,$f)(`2553306736`) in index / bridge chunks.
+      // Uses content.includes(ID_MARKER) so it fires per-file, not guarded by a global count.
+      if (content.includes(PR_ICONS_GATE_ID_MARKER)) {
+        const nc = content.replace(
+          /(?:\(0,[$\w]+\)|[$\w]+)\(`2553306736`\)/g,
+          '!0',
+        );
+        if (nc !== content) {
+          prIconsGateCount += 1;
+          content = nc;
+          modified = true;
+        }
       }
 
       if (MEMORIES_GATE_INLINE_RE.test(content)) {
@@ -1177,6 +1325,10 @@ try {
           MEMORIES_GATE_CURRENT_PATTERN,
           '[$s]:!0',
         );
+        memoriesGatePatched = true;
+        modified = true;
+      } else if (MEMORIES_GATE_FUNCTION_RE.test(content)) {
+        content = content.replace(MEMORIES_GATE_FUNCTION_RE, 'function $1(){return!0}');
         memoriesGatePatched = true;
         modified = true;
       }
@@ -1196,6 +1348,10 @@ try {
         );
         slashCommandsGateCount += 1;
         modified = true;
+      } else if (SLASH_COMMANDS_GATE_FUNCTION_RE.test(content)) {
+        content = content.replace(SLASH_COMMANDS_GATE_FUNCTION_RE, 'function $1(){return!0}');
+        slashCommandsGateCount += 1;
+        modified = true;
       } else if (content.includes(SLASH_COMMANDS_GATE_ALREADY_CORRECT_MARKER)) {
         slashCommandsGateAlreadyCorrect = true;
       }
@@ -1206,6 +1362,10 @@ try {
           content = content.replaceAll(WORKTREE_MODE_GATE_INLINE_RE, '$1!0');
           worktreeModeGateCount += inlineMatches.length;
           modified = true;
+        } else if (WORKTREE_MODE_GATE_FUNCTION_RE.test(content)) {
+          content = content.replace(WORKTREE_MODE_GATE_FUNCTION_RE, 'function $1(){return!0}');
+          worktreeModeGateCount += 1;
+          modified = true;
         }
       }
 
@@ -1214,6 +1374,10 @@ try {
         if (inlineMatches) {
           content = content.replaceAll(CLOUD_ENVIRONMENT_GATE_INLINE_RE, '$1!0');
           cloudEnvironmentGateCount += inlineMatches.length;
+          modified = true;
+        } else if (CLOUD_ENVIRONMENT_GATE_FUNCTION_RE.test(content)) {
+          content = content.replace(CLOUD_ENVIRONMENT_GATE_FUNCTION_RE, 'function $1(){return!0}');
+          cloudEnvironmentGateCount += 1;
           modified = true;
         }
       }
@@ -1224,6 +1388,10 @@ try {
           content = content.replaceAll(BROWSER_USE_GATE_INLINE_RE, '$1!0');
           browserUseGateCount += inlineMatches.length;
           modified = true;
+        } else if (BROWSER_USE_GATE_FUNCTION_RE.test(content)) {
+          content = content.replace(BROWSER_USE_GATE_FUNCTION_RE, 'function $1(){return!0}');
+          browserUseGateCount += 1;
+          modified = true;
         }
       }
 
@@ -1232,6 +1400,10 @@ try {
         if (inlineMatches) {
           content = content.replaceAll(IN_APP_BROWSER_GATE_INLINE_RE, '$1!0');
           inAppBrowserGateCount += inlineMatches.length;
+          modified = true;
+        } else if (IN_APP_BROWSER_GATE_FUNCTION_RE.test(content)) {
+          content = content.replace(IN_APP_BROWSER_GATE_FUNCTION_RE, 'function $1(){return!0}');
+          inAppBrowserGateCount += 1;
           modified = true;
         }
       }
@@ -1244,6 +1416,13 @@ try {
             '$1!0',
           );
           pluginsBundledMarketplaceGateCount += inlineMatches.length;
+          modified = true;
+        } else if (PLUGINS_BUNDLED_MARKETPLACE_GATE_FUNCTION_RE.test(content)) {
+          content = content.replace(
+            PLUGINS_BUNDLED_MARKETPLACE_GATE_FUNCTION_RE,
+            'function $1(){return!0}',
+          );
+          pluginsBundledMarketplaceGateCount += 1;
           modified = true;
         }
       }
