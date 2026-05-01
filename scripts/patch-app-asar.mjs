@@ -1015,29 +1015,32 @@ try {
       pullRequestsGateSeen ||=
         PULL_REQUESTS_GATE_RE.test(originalContent) ||
         PULL_REQUESTS_GATE_INLINE_RE.test(originalContent) ||
-        PULL_REQUESTS_GATE_FUNCTION_RE.test(originalContent);
+        PULL_REQUESTS_GATE_FUNCTION_RE.test(originalContent) ||
+        originalContent.includes(PULL_REQUESTS_GATE_ID_MARKER);
       pullRequestsRouteGateSeen ||=
         PULL_REQUESTS_ROUTE_GATE_FUNCTION_RE.test(originalContent) ||
-        PULL_REQUESTS_ROUTE_GATE_FUNCTION_RE_V2.test(originalContent);
+        PULL_REQUESTS_ROUTE_GATE_FUNCTION_RE_V2.test(originalContent) ||
+        originalContent.includes(PULL_REQUESTS_GATE_ID_MARKER);
       scratchpadGateSeen ||=
         SCRATCHPAD_GATE_FUNCTION_RE.test(originalContent) ||
         SCRATCHPAD_GATE_FUNCTION_RE_V2.test(originalContent);
       avatarOverlayGateSeen ||=
         AVATAR_OVERLAY_GATE_FUNCTION_RE.test(originalContent) ||
         AVATAR_OVERLAY_GATE_FUNCTION_RE_V2.test(originalContent) ||
-        AVATAR_OVERLAY_GATE_INLINE_RE.test(originalContent);
+        AVATAR_OVERLAY_GATE_INLINE_RE.test(originalContent) ||
+        originalContent.includes(AVATAR_OVERLAY_GATE_ID_MARKER);
       AVATAR_OVERLAY_GATE_INLINE_RE.lastIndex = 0;
       heartbeatGateSeen ||=
-        originalContent.includes(HEARTBEAT_GATE_NEEDLE) ||
+        originalContent.includes(HEARTBEAT_GATE_ID_MARKER) ||
         HEARTBEAT_GATE_INLINE_RE.test(originalContent) ||
         HEARTBEAT_GATE_FUNCTION_RE.test(originalContent);
       ambientSuggestionsGateSeen ||=
-        originalContent.includes(AMBIENT_SUGGESTIONS_GATE_NEEDLE) ||
+        originalContent.includes(AMBIENT_SUGGESTIONS_GATE_ID_MARKER) ||
         AMBIENT_SUGGESTIONS_GATE_INLINE_RE.test(originalContent) ||
         AMBIENT_SUGGESTIONS_GATE_FUNCTION_RE.test(originalContent);
       artifactsPaneGateSeen ||= originalContent.includes(ARTIFACTS_PANE_GATE_ID_MARKER);
       prIconsGateSeen ||=
-        content.includes(PR_ICONS_GATE_NEEDLE) ||
+        originalContent.includes(PR_ICONS_GATE_ID_MARKER) ||
         PR_ICONS_GATE_INLINE_RE.test(originalContent) ||
         PR_ICONS_GATE_FUNCTION_RE.test(originalContent);
       memoriesGateSeen ||=
@@ -1045,7 +1048,7 @@ try {
         MEMORIES_GATE_INLINE_RE.test(originalContent) ||
         MEMORIES_GATE_FUNCTION_RE.test(originalContent);
       slashCommandsGateSeen ||=
-        originalContent.includes(SLASH_COMMANDS_GATE_NEEDLE) ||
+        originalContent.includes(SLASH_COMMANDS_GATE_ID_MARKER) ||
         SLASH_COMMANDS_GATE_INLINE_RE.test(originalContent) ||
         SLASH_COMMANDS_GATE_FUNCTION_RE.test(originalContent);
       worktreeModeGateSeen ||=
@@ -1130,6 +1133,18 @@ try {
         pullRequestsGatePatched = true;
         modified = true;
       }
+      // IIFE-form fallback: handles (0,$f)(`3789238711`) which the patterns above miss.
+      if (!pullRequestsGatePatched && content.includes(PULL_REQUESTS_GATE_ID_MARKER)) {
+        const nc = content.replace(
+          /(?:\(0,[$\w]+\)|[$\w]+)\(`3789238711`\)/g,
+          '!0',
+        );
+        if (nc !== content) {
+          pullRequestsGatePatched = true;
+          content = nc;
+          modified = true;
+        }
+      }
 
       if (PULL_REQUESTS_ROUTE_GATE_FUNCTION_RE.test(content)) {
         content = content.replace(
@@ -1145,6 +1160,18 @@ try {
         );
         pullRequestsRouteGatePatched = true;
         modified = true;
+      }
+      // IIFE-form fallback for route gate.
+      if (!pullRequestsRouteGatePatched && content.includes(PULL_REQUESTS_GATE_ID_MARKER)) {
+        const nc = content.replace(
+          /(?:\(0,[$\w]+\)|[$\w]+)\(`3789238711`\)/g,
+          '!0',
+        );
+        if (nc !== content) {
+          pullRequestsRouteGatePatched = true;
+          content = nc;
+          modified = true;
+        }
       }
 
       if (SCRATCHPAD_GATE_FUNCTION_RE.test(content)) {
@@ -1172,6 +1199,18 @@ try {
         content = content.replaceAll(AVATAR_OVERLAY_GATE_INLINE_RE, '$1!0');
         avatarOverlayGatePatched = true;
         modified = true;
+      }
+      // IIFE-form fallback: handles (0,$f)(`2679188970`) and return(0,$f)(`2679188970`).
+      if (!avatarOverlayGatePatched && content.includes(AVATAR_OVERLAY_GATE_ID_MARKER)) {
+        const nc = content.replace(
+          /(?:\(0,[$\w]+\)|[$\w]+)\(`2679188970`\)/g,
+          '!0',
+        );
+        if (nc !== content) {
+          avatarOverlayGatePatched = true;
+          content = nc;
+          modified = true;
+        }
       }
 
       if (content.includes(HEARTBEAT_GATE_NEEDLE)) {
@@ -1259,6 +1298,18 @@ try {
         content = content.replace(PR_ICONS_GATE_FUNCTION_RE, 'function $1(){return!0}');
         prIconsGateCount += 1;
         modified = true;
+      }
+      // IIFE-form fallback: handles (0,$f)(`2553306736`) in index / bridge chunks.
+      if (prIconsGateCount === 0 && content.includes(PR_ICONS_GATE_ID_MARKER)) {
+        const nc = content.replace(
+          /(?:\(0,[$\w]+\)|[$\w]+)\(`2553306736`\)/g,
+          '!0',
+        );
+        if (nc !== content) {
+          prIconsGateCount += 1;
+          content = nc;
+          modified = true;
+        }
       }
 
       if (MEMORIES_GATE_INLINE_RE.test(content)) {
