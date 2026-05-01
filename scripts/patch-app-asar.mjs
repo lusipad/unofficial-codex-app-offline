@@ -43,7 +43,9 @@
  * 6. Enable pull requests sidebar entry for offline builds
  *    The pull requests nav link is also gated behind a Statsig experiment in
  *    newer builds.  We bypass that gate so the offline build does not hide
- *    the bundled route when Statsig cannot resolve experiments.
+ *    the bundled route when Statsig cannot resolve experiments.  Older builds
+ *    embed the gate check inline; ≥ 26.429.x extract it to a standalone hook
+ *    (function name(){return $f(`3789238711`)}) that we replace with !0.
  *
  * 7. Enable scratchpad sidebar entry for offline builds
  *    Scratchpad is bundled in newer builds but hidden behind a separate
@@ -583,6 +585,11 @@ try {
     /(`3789238711`[^;]*;let\s+)(\w+)\s*=\s*\w+\((\w+)\)/;
   const PULL_REQUESTS_GATE_INLINE_RE =
     /([,;]\s*\w+\s*=)\s*[$\w]+\(`3789238711`\)/;
+  // ≥ 26.429.x: sidebar gate extracted to a standalone hook that directly
+  // returns the gate result, matching the pattern of other recently-extracted
+  // gate hooks (e.g. background-subagents, chronicle, artifact-electron).
+  const PULL_REQUESTS_GATE_FUNCTION_RE =
+    /function\s+(\w+)\(\)\{return\s+[$\w]+\(`3789238711`\)\}/;
   const PULL_REQUESTS_ROUTE_GATE_FUNCTION_RE =
     /function\s+(\w+)\(\)\{let\s+e=\(0,Q\.c\)\(3\),t;if\(e\[0\]===Symbol\.for\(`react\.memo_cache_sentinel`\)\?\(t=`3789238711`,e\[0\]=t\):t=e\[0\],!xu\(t\)\)\{let\s+t;return\s+e\[1\]===Symbol\.for\(`react\.memo_cache_sentinel`\)\?\(t=\(0,\$\.jsx\)\(b,\{to:`\/`,replace:!0\}\),e\[1\]=t\):t=e\[1\],t\}let\s+n;return\s+e\[2\]===Symbol\.for\(`react\.memo_cache_sentinel`\)\?\(n=\(0,\$\.jsx\)\((\w+),\{\}\),e\[2\]=n\):n=e\[2\],n\}/;
   // ≥ 26.422.8496.0: 2-slot memo cache and direct $f() call.
@@ -971,7 +978,10 @@ try {
 
       settingsGateSeen ||= originalContent.includes(SETTINGS_GATE_ID_MARKER);
       automationsGateSeen ||= originalContent.includes(AUTOMATIONS_GATE_ID_MARKER);
-      pullRequestsGateSeen ||= originalContent.includes(PULL_REQUESTS_GATE_ID_MARKER);
+      pullRequestsGateSeen ||=
+        PULL_REQUESTS_GATE_RE.test(originalContent) ||
+        PULL_REQUESTS_GATE_INLINE_RE.test(originalContent) ||
+        PULL_REQUESTS_GATE_FUNCTION_RE.test(originalContent);
       pullRequestsRouteGateSeen ||=
         PULL_REQUESTS_ROUTE_GATE_FUNCTION_RE.test(originalContent) ||
         PULL_REQUESTS_ROUTE_GATE_FUNCTION_RE_V2.test(originalContent);
@@ -1053,6 +1063,10 @@ try {
         modified = true;
       } else if (PULL_REQUESTS_GATE_INLINE_RE.test(content)) {
         content = content.replace(PULL_REQUESTS_GATE_INLINE_RE, '$1!0');
+        pullRequestsGatePatched = true;
+        modified = true;
+      } else if (PULL_REQUESTS_GATE_FUNCTION_RE.test(content)) {
+        content = content.replace(PULL_REQUESTS_GATE_FUNCTION_RE, 'function $1(){return!0}');
         pullRequestsGatePatched = true;
         modified = true;
       }
