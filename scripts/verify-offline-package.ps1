@@ -155,6 +155,7 @@ try {
         'Load Chrome extension',
         'chrome://extensions/',
         'Launch Codex now?',
+        'AssumeYes',
         'NonInteractive',
         'repair-chrome-host.ps1',
         'bootstrap-codex-skills.ps1',

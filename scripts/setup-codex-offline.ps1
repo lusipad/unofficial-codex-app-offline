@@ -6,6 +6,7 @@ param(
     [switch]$SkipSkillSync,
     [switch]$SkipChromeGuide,
     [switch]$NoLaunch,
+    [switch]$AssumeYes,
     [switch]$NonInteractive
 )
 
@@ -65,6 +66,10 @@ function Read-SetupYesNo {
         [bool]$DefaultYes = $true
     )
 
+    if ($AssumeYes) {
+        return $true
+    }
+
     if ($NonInteractive) {
         return $DefaultYes
     }
@@ -87,7 +92,7 @@ function Read-SetupYesNo {
 function Wait-SetupContinue {
     param([Parameter(Mandatory = $true)][string]$Prompt)
 
-    if (-not $NonInteractive) {
+    if (-not $AssumeYes -and -not $NonInteractive) {
         Read-Host $Prompt | Out-Null
     }
 }
@@ -130,16 +135,16 @@ if ($SkipSkillSync) {
     Write-Host 'Skipped by -SkipSkillSync.' -ForegroundColor Yellow
 }
 elseif (Read-SetupYesNo -Prompt 'Install the default offline skills profile now?' -DefaultYes $true) {
-    $bootstrapArgs = @(
-        '-InstallRoot', $internalRoot,
-        '-NoLaunch',
-        '-AssumeYes'
-    )
+    $bootstrapArgs = @{
+        InstallRoot = $internalRoot
+        NoLaunch = $true
+        AssumeYes = $true
+    }
     if (-not [string]::IsNullOrWhiteSpace($CodexHome)) {
-        $bootstrapArgs += @('-CodexHome', $CodexHome)
+        $bootstrapArgs.CodexHome = $CodexHome
     }
     if (-not [string]::IsNullOrWhiteSpace($SkillProfile)) {
-        $bootstrapArgs += @('-SkillProfile', $SkillProfile)
+        $bootstrapArgs.SkillProfile = $SkillProfile
     }
 
     & $bootstrapScript @bootstrapArgs
