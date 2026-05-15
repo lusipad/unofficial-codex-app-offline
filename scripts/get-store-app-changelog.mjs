@@ -46,6 +46,7 @@ async function main() {
   const args = parseArgs(process.argv.slice(2));
   const fullVersion = args.version || process.env.CODEX_APP_VERSION;
   const targetVersion = normalizeVersion(fullVersion);
+  const recentAppLimit = Number.parseInt(args['recent-app-limit'] || '5', 10);
 
   if (!targetVersion) {
     throw new Error('Missing --version');
@@ -61,7 +62,7 @@ async function main() {
 
     await page.goto(CHANGELOG_URL, { waitUntil: 'networkidle', timeout: 120000 });
 
-    const changelog = await page.evaluate(({ changeLogUrl, versionLabel }) => {
+    const changelog = await page.evaluate(({ changeLogUrl, versionLabel, recentLimit }) => {
       function normalizeWhitespace(text) {
         return text
           .replace(/\u00a0/g, ' ')
@@ -171,43 +172,80 @@ async function main() {
         return blocks.join('\n\n').trim();
       }
 
+      function getAnchorId(node) {
+        return (
+          node.querySelector('[data-anchor-id]')?.getAttribute('data-anchor-id') ||
+          node.getAttribute('data-anchor-id') ||
+          node.id ||
+          ''
+        );
+      }
+
+      function extractEntry(node) {
+        const entry = node.closest('li');
+        const article = entry?.querySelector('article');
+        const title = normalizeWhitespace(node.textContent || '');
+        const publishedAt = normalizeWhitespace(entry?.querySelector('time')?.textContent || '');
+        const anchorId = getAnchorId(node);
+        const sourceUrl = anchorId ? `${changeLogUrl}#${anchorId}` : changeLogUrl;
+        const body = article ? serializeArticle(article) : '';
+
+        return {
+          title,
+          publishedAt: publishedAt || null,
+          sourceUrl: makeAbsoluteUrl(sourceUrl),
+          releaseNotes: body || null,
+          releaseNotesMarkdown: [
+            `### ${title}`,
+            publishedAt ? `Published: ${publishedAt}` : '',
+            `Source: ${sourceUrl}`,
+            '',
+            body,
+          ]
+            .filter((line) => line !== '')
+            .join('\n\n')
+            .trim() || null,
+        };
+      }
+
       const headings = [...document.querySelectorAll('h1, h2, h3, h4, h5, h6')];
       const versionPattern = new RegExp(`(^|\\s)${versionLabel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\s|$)`);
       const targetHeading = headings.find((node) => versionPattern.test((node.textContent || '').replace(/\s+/g, ' ').trim()));
+      const recentAppReleases = headings
+        .map((node) => ({
+          node,
+          text: normalizeWhitespace(node.textContent || ''),
+        }))
+        .filter(({ text }) => /^Codex app\s+\d+\.\d+\b/.test(text))
+        .slice(0, Math.max(recentLimit, 0))
+        .map(({ node }) => extractEntry(node));
 
       if (!targetHeading) {
-        return null;
+        return {
+          matchedVersion: versionLabel,
+          title: null,
+          publishedAt: null,
+          sourceUrl: changeLogUrl,
+          releaseNotes: null,
+          releaseNotesMarkdown: null,
+          recentAppReleases,
+        };
       }
 
-      const entry = targetHeading.closest('li');
-      const article = entry?.querySelector('article');
-      const title = normalizeWhitespace(targetHeading.textContent || '');
-      const publishedAt = normalizeWhitespace(entry?.querySelector('time')?.textContent || '');
-      const anchorId = targetHeading.querySelector('[data-anchor-id]')?.getAttribute('data-anchor-id') || '';
-      const sourceUrl = anchorId ? `${changeLogUrl}#${anchorId}` : changeLogUrl;
-      const body = article ? serializeArticle(article) : '';
-      const markdown = [
-        `### ${title}`,
-        publishedAt ? `Published: ${publishedAt}` : '',
-        `Source: ${sourceUrl}`,
-        '',
-        body,
-      ]
-        .filter((line) => line !== '')
-        .join('\n\n')
-        .trim();
-
+      const matchedEntry = extractEntry(targetHeading);
       return {
         matchedVersion: versionLabel,
-        title,
-        publishedAt: publishedAt || null,
-        sourceUrl: makeAbsoluteUrl(sourceUrl),
-        releaseNotes: body || null,
-        releaseNotesMarkdown: markdown || null,
+        title: matchedEntry.title,
+        publishedAt: matchedEntry.publishedAt,
+        sourceUrl: matchedEntry.sourceUrl,
+        releaseNotes: matchedEntry.releaseNotes,
+        releaseNotesMarkdown: matchedEntry.releaseNotesMarkdown,
+        recentAppReleases,
       };
     }, {
       changeLogUrl: CHANGELOG_URL,
       versionLabel: targetVersion,
+      recentLimit: Number.isFinite(recentAppLimit) ? recentAppLimit : 5,
     });
 
     process.stdout.write(`${JSON.stringify(changelog ?? {
@@ -217,6 +255,7 @@ async function main() {
       sourceUrl: CHANGELOG_URL,
       releaseNotes: null,
       releaseNotesMarkdown: null,
+      recentAppReleases: [],
     }, null, 2)}\n`);
   } finally {
     await browser.close();
@@ -232,6 +271,7 @@ main().catch((error) => {
     sourceUrl: CHANGELOG_URL,
     releaseNotes: null,
     releaseNotesMarkdown: null,
+    recentAppReleases: [],
   }, null, 2)}\n`);
   process.exit(0);
 });

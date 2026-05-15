@@ -282,6 +282,7 @@ jobs:
           $version = '${{ steps.source.outputs.version }}'
           $sourceMode = '${{ steps.source.outputs.source_mode }}'
           $generatedAt = ''
+          $changelog = $null
 
           if (-not $skipBuild) {
             $packageId = '${{ steps.build.outputs.package_id }}'
@@ -307,7 +308,7 @@ jobs:
 
           if ($version) {
             try {
-              $changelogJson = node ./scripts/get-store-app-changelog.mjs --version $version
+              $changelogJson = node ./scripts/get-store-app-changelog.mjs --version $version --recent-app-limit 5
               $changelog = $changelogJson | ConvertFrom-Json
               if ($changelog.releaseNotesMarkdown) {
                 $lines.Add("")
@@ -317,6 +318,18 @@ jobs:
               }
             } catch {
               Write-Warning "Could not fetch app changelog: $_"
+            }
+          }
+
+          if ($changelog -and $changelog.recentAppReleases -and $changelog.recentAppReleases.Count -gt 0) {
+            $lines.Add("")
+            $lines.Add("## Official Codex app history")
+            $lines.Add("")
+            foreach ($release in $changelog.recentAppReleases) {
+              $publishedAt = if ($release.publishedAt) { $release.publishedAt } else { 'unknown date' }
+              $title = if ([string]::IsNullOrWhiteSpace($release.title)) { 'Codex app release' } else { $release.title }
+              $sourceUrl = if ([string]::IsNullOrWhiteSpace($release.sourceUrl)) { 'https://developers.openai.com/codex/changelog' } else { $release.sourceUrl }
+              $lines.Add("- [$title]($sourceUrl) - $publishedAt")
             }
           }
 
