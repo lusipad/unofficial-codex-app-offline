@@ -1,0 +1,48 @@
+{
+  "name": "spreadsheets",
+  "version": "26.426.12240",
+  "description": "Create, edit, analyze, visualize, render, and export spreadsheets in Codex.",
+  "author": {
+    "name": "OpenAI",
+    "email": "support@openai.com",
+    "url": "https://openai.com/"
+  },
+  "homepage": "https://openai.com/",
+  "repository": "https://github.com/openai/openai",
+  "license": "MIT",
+  "keywords": [
+    "sheet",
+    "sheets",
+    "spreadsheet",
+    "spreadsheets",
+    "excel",
+    "csv",
+    "xlsx",
+    "xls",
+    "workbook"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Spreadsheets",
+    "shortDescription": "Create and edit spreadsheet files",
+    "longDescription": "Create, edit, inspect, render, verify, and export XLSX, CSV, and TSV spreadsheets locally. Use Spreadsheets when the durable output or target is a spreadsheet, workbook, sheet, or CSV file.",
+    "developerName": "OpenAI",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Write"
+    ],
+    "websiteURL": "https://openai.com/",
+    "privacyPolicyURL": "https://openai.com/policies/privacy-policy/",
+    "termsOfServiceURL": "https://openai.com/policies/terms-of-use/",
+    "composerIcon": "./assets/icon.png",
+    "logo": "./assets/logo.png",
+    "defaultPrompt": [
+      "Create a spreadsheet to analyze this company's financials",
+      "Create a corporate expense report template for my company",
+      "Take this bank statement CSV and create a full spreadsheet to analyze my transactions"
+    ],
+    "brandColor": "#107C41",
+    "screenshots": []
+  }
+}

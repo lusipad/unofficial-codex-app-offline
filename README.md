@@ -16,7 +16,10 @@ Official skills from [`openai/skills`](https://github.com/openai/skills) are fet
 - Bundles the official `openai/skills` repository as a local seed, while default setup installs only the configured offline profile instead of auto-syncing every curated skill.
   Extra bundled skills remain available under `_internal\seed` and can be synced from `_internal\tools` if you really want the full set.
 - Bundles the Codex Chrome plugin assets already shipped with the app, plus an offline copy of the matching Chrome browser extension under `_internal\chrome-extension`.
-- Does not download or pre-enable every official marketplace plugin. The offline package keeps the app's bundled runtime plugins and adds the Chrome extension assets needed for `@chrome`.
+  On stock Google Chrome, the supported `@chrome` path is to manually load `_internal\chrome-extension\unpacked` once in `chrome://extensions`, then use the installed extension normally after restarting Chrome.
+- Does not download or pre-enable every official marketplace plugin. The offline package keeps the app's bundled runtime plugins, adds local copies of the Documents, Spreadsheets, and Presentations plugins, keeps the Plugins page reachable in API-key/offline sessions, and adds the Chrome extension assets needed for `@chrome`.
+  The Office artifact plugins can be discovered and installed without the online marketplace, but a fresh fully offline machine still needs the separate Codex primary runtime cache pre-seeded before DOCX/XLSX/PPTX generation.
+  Plugins that require a ChatGPT account, online marketplace install flow, or third-party OAuth still need those online services.
 - Adds a one-time interactive guided setup:
   `Setup Codex.cmd` asks step by step whether to sync the default offline skills profile, register the bundled Chrome native host, open Chrome's extension page, and launch Codex.
   After setup, use `Codex.cmd` for daily launches; it starts `_internal\app\Codex.exe` by relative path.
@@ -32,7 +35,7 @@ Official skills from [`openai/skills`](https://github.com/openai/skills) are fet
 1. Go to [Releases](../../releases) and download the latest `*-portable.zip`.
 2. Extract anywhere.
 3. Double-click **`Setup Codex.cmd`** once and follow the console prompts.
-4. If you want `@chrome`, enable Developer mode on the Chrome extensions page opened by setup, choose **Load unpacked**, and select `_internal\chrome-extension\unpacked`.
+4. If you want `@chrome`, use the Chrome extensions page opened by setup to manually install `_internal\chrome-extension\unpacked` once: enable Developer mode, choose **Load unpacked**, then restart Chrome.
 5. After setup, open **`Codex.cmd`** directly.
 
 Setup asks before copying the default offline skills profile to `~\.codex\skills` and leaves the rest of the bundled skills inside the package.
@@ -59,6 +62,8 @@ Setup registers the bundled Chrome native messaging host automatically.
 
 If Chrome does not already have the Codex extension installed, open `chrome://extensions`, enable Developer mode, choose **Load unpacked**, and select `_internal\chrome-extension\unpacked`.
 Restart Chrome after loading the extension, then try `@chrome` again.
+
+The unpacked folder is bundled so you can install the extension manually once in Chrome. Stock Google Chrome does not reliably support the command-line unpacked-extension loading path used by developer smokes, so the supported real-user flow is: manual install once, restart Chrome, then use `@chrome` through the installed extension.
 
 If `@chrome` appears in the composer but cannot communicate with Chrome while offline, rerun **`Setup Codex.cmd`** or use `_internal\tools\Repair Chrome Host.cmd` for diagnostics.
 
@@ -130,6 +135,8 @@ CODEX_SKILL_SOURCE_DIR=\\company-nas\shared-skills
 - Node.js ≥ 24
 - PowerShell 7+
 - (Optional) [Inno Setup 6](https://jrsoftware.org/isinfo.php) for generating `setup.exe`
+- This repo must include the vendored offline runtime plugins under `vendor\plugins\openai-primary-runtime\`
+  (`documents`, `spreadsheets`, `presentations`), because the build injects those local plugin copies into the bundled offline marketplace.
 
 #### Build
 
@@ -222,7 +229,8 @@ Artifacts are written to `dist/offline/<release-name>/`.
 3. `app.asar` is patched so Codex runs outside the MSIX container, and the Electron asar integrity fuse is disabled.
 4. The matching Chrome browser extension CRX is downloaded and unpacked into `_internal\chrome-extension`.
 5. Official skills are fetched from [`openai/skills`](https://github.com/openai/skills), bundled as a local seed, and tagged with a small default setup profile.
-6. Everything is staged into a portable directory, then zipped / compiled into an installer.
+6. Vendored runtime plugins from `vendor\plugins\openai-primary-runtime` are copied into the bundled offline marketplace so the Plugins page can offer local installs for Documents / Spreadsheets / Presentations.
+7. Everything is staged into a portable directory, then zipped / compiled into an installer.
 
 #### CI / CD
 
@@ -281,7 +289,10 @@ Additionally, notifications for the conversation you are currently viewing are s
 - 将官方 `openai/skills` 仓库作为本地 seed 打进安装包，但默认 Setup 只安装配置好的离线 profile，不再自动同步全部 curated skills。
   其它内置 skills 仍保留在 `_internal\seed`，确实需要完整集合时可从 `_internal\tools` 手动同步。
 - 将应用自带的 Codex Chrome plugin 资产打进包内，并在 `_internal\chrome-extension` 下附带匹配的 Chrome 浏览器扩展离线副本。
-- 不会下载或预启用所有官方 marketplace 插件；离线包保留应用自带 runtime 插件，并额外附带 `@chrome` 所需的 Chrome 扩展资产。
+  在标准版 Google Chrome 上，`@chrome` 的正式支持路径是：先在 `chrome://extensions` 里手动一次性加载 `_internal\chrome-extension\unpacked`，重启 Chrome 后再按已安装扩展的方式正常使用。
+- 不会下载或预启用所有官方 marketplace 插件；离线包保留应用自带 runtime 插件，增加 Documents、Spreadsheets、Presentations 插件的本地副本，在 API key/离线会话中保持 Plugins 页面可进入，并额外附带 `@chrome` 所需的 Chrome 扩展资产。
+  Office artifact 插件可以在不访问在线 marketplace 的情况下被发现和安装；但一台全新的断网机器如果要真正生成 DOCX/XLSX/PPTX，还需要提前预置独立的 Codex primary runtime 缓存。
+  依赖 ChatGPT 账号、在线 marketplace 安装流程或第三方 OAuth 的插件仍然需要对应在线服务。
 - 增加一次性交互式引导 Setup：
   `Setup Codex.cmd` 会逐步询问是否同步默认离线 skills profile、注册包内 Chrome native host、打开 Chrome 扩展页面，以及是否启动 Codex。
   Setup 完成后，日常直接打开 `Codex.cmd`；它会用相对路径启动 `_internal\app\Codex.exe`。
@@ -297,7 +308,7 @@ Additionally, notifications for the conversation you are currently viewing are s
 1. 前往 [Releases](../../releases) 下载最新的 `*-portable.zip`。
 2. 解压到任意目录。
 3. 首次使用双击 **`Setup Codex.cmd`**，按控制台提示操作。
-4. 如果要用 `@chrome`，在 Setup 打开的 Chrome 扩展页面启用开发者模式，选择 **加载已解压的扩展程序**，并选择 `_internal\chrome-extension\unpacked`。
+4. 如果要用 `@chrome`，在 Setup 打开的 Chrome 扩展页面里手动安装一次 `_internal\chrome-extension\unpacked`：启用开发者模式，选择 **加载已解压的扩展程序**，然后重启 Chrome。
 5. Setup 完成后，日常直接打开 **`Codex.cmd`**。
 
 Setup 会先询问，再把默认离线 skills profile 复制到 `~\.codex\skills`，其它内置 skills 继续留在包内。
@@ -324,6 +335,8 @@ Setup 会自动注册包内 Chrome native messaging host。
 
 如果 Chrome 里还没有安装 Codex 扩展，打开 `chrome://extensions`，启用开发者模式，选择 **加载已解压的扩展程序**，并选择 `_internal\chrome-extension\unpacked`。
 加载扩展后重启 Chrome，再尝试 `@chrome`。
+
+包内附带这个已解压目录，是为了让你在 Chrome 里手动安装一次扩展。标准版 Google Chrome 对开发态 smoke 使用的命令行已解压扩展加载路径支持并不可靠，所以正式可用的用户路径是：手动安装一次，重启 Chrome，然后通过已安装扩展使用 `@chrome`。
 
 如果输入框里能看到 `@chrome`，但离线时无法和 Chrome 通信，重新运行 **`Setup Codex.cmd`**，或使用 `_internal\tools\Repair Chrome Host.cmd` 查看诊断信息。
 
@@ -395,6 +408,8 @@ CODEX_SKILL_SOURCE_DIR=\\company-nas\shared-skills
 - Node.js ≥ 24
 - PowerShell 7+
 - （可选）[Inno Setup 6](https://jrsoftware.org/isinfo.php)，用于生成 `setup.exe`
+- 仓库中必须包含 `vendor\plugins\openai-primary-runtime\` 下的离线 runtime 插件副本
+  （`documents`、`spreadsheets`、`presentations`），因为构建时会把这些本地插件注入到离线 marketplace 里。
 
 #### 构建
 
@@ -487,7 +502,8 @@ pwsh -NoProfile -File ./scripts/build-offline-package.ps1
 3. 补丁 `app.asar` 使 Codex 可在 MSIX 容器外运行，并关闭 Electron asar 完整性校验。
 4. 下载匹配的 Chrome 浏览器扩展 CRX，并解包到 `_internal\chrome-extension`。
 5. 从 [`openai/skills`](https://github.com/openai/skills) 拉取官方 skills，作为本地 seed 打包，并标记小型默认 Setup profile。
-6. 所有内容 stage 到便携目录，然后打包 ZIP / 编译安装器。
+6. 将 `vendor\plugins\openai-primary-runtime` 下 vendored 的 runtime 插件复制进离线 marketplace，使 Plugins 页面可以本地安装 Documents / Spreadsheets / Presentations。
+7. 所有内容 stage 到便携目录，然后打包 ZIP / 编译安装器。
 
 #### CI / CD
 

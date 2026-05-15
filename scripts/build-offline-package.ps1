@@ -163,10 +163,98 @@ function Get-ChromeExtensionConfig {
     return $config
 }
 
+function Get-OfflineRuntimePluginSource {
+    param(
+        [Parameter(Mandatory = $true)][string]$VendorRoot,
+        [Parameter(Mandatory = $true)][string]$Name
+    )
+
+    $pluginRoot = Join-Path $VendorRoot $Name
+    if (-not (Test-Path -LiteralPath $pluginRoot -PathType Container)) {
+        throw "Offline runtime plugin vendor root is missing: $pluginRoot"
+    }
+
+    $directManifestPath = Join-Path $pluginRoot '.codex-plugin\plugin.json'
+    if (Test-Path -LiteralPath $directManifestPath -PathType Leaf) {
+        return $pluginRoot
+    }
+
+    $candidates = @(
+        Get-ChildItem -LiteralPath $pluginRoot -Directory |
+            Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName '.codex-plugin\plugin.json') -PathType Leaf }
+    )
+    if ($candidates.Count -ne 1) {
+        throw "Expected exactly one vendored version for offline runtime plugin '$Name', found $($candidates.Count)."
+    }
+
+    return $candidates[0].FullName
+}
+
+function Add-OfflineRuntimePlugins {
+    param(
+        [Parameter(Mandatory = $true)][string]$AppRoot,
+        [Parameter(Mandatory = $true)][string]$RepoRoot,
+        [Parameter(Mandatory = $true)][string[]]$PluginNames
+    )
+
+    $marketplaceRoot = Join-Path $AppRoot 'resources\plugins\openai-bundled'
+    $manifestPath = Join-Path $marketplaceRoot '.agents\plugins\marketplace.json'
+    $pluginsRoot = Join-Path $marketplaceRoot 'plugins'
+    $vendorRoot = Join-Path $RepoRoot 'vendor\plugins\openai-primary-runtime'
+
+    if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
+        throw "Bundled plugin marketplace manifest was not found: $manifestPath"
+    }
+
+    New-Item -ItemType Directory -Force -Path $pluginsRoot | Out-Null
+
+    $pluginInfo = @()
+    foreach ($name in $PluginNames) {
+        $sourceRoot = Get-OfflineRuntimePluginSource -VendorRoot $vendorRoot -Name $name
+        $destinationRoot = Join-Path $pluginsRoot $name
+        if (Test-Path -LiteralPath $destinationRoot) {
+            Remove-Item -LiteralPath $destinationRoot -Recurse -Force
+        }
+
+        Copy-Item -LiteralPath $sourceRoot -Destination $destinationRoot -Recurse -Force
+
+        $pluginManifest = Get-Content -LiteralPath (Join-Path $destinationRoot '.codex-plugin\plugin.json') -Raw | ConvertFrom-Json
+        $pluginInfo += [ordered]@{
+            name = [string]$pluginManifest.name
+            version = [string]$pluginManifest.version
+            category = [string]$pluginManifest.interface.category
+            path = "./plugins/$name"
+        }
+    }
+
+    $marketplace = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+    $existingPlugins = @($marketplace.plugins | Where-Object { $PluginNames -notcontains [string]$_.name })
+    foreach ($plugin in $pluginInfo) {
+        $existingPlugins += [ordered]@{
+            name = $plugin.name
+            source = [ordered]@{
+                source = 'local'
+                path = $plugin.path
+            }
+            policy = [ordered]@{
+                installation = 'AVAILABLE'
+                authentication = 'ON_INSTALL'
+            }
+            category = $plugin.category
+        }
+    }
+
+    $marketplace | Add-Member -NotePropertyName plugins -NotePropertyValue $existingPlugins -Force
+    $marketplace | ConvertTo-Json -Depth 8 | Set-Content -Path $manifestPath -Encoding UTF8
+
+    return $pluginInfo
+}
+
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot = [System.IO.Path]::GetFullPath((Join-Path $scriptRoot '..'))
 $configFile = Resolve-AbsolutePath -BasePath $repoRoot -PathValue $ConfigPath
 $config = Get-Content -Path $configFile -Raw | ConvertFrom-Json
+$offlineRuntimePluginNames = @('documents', 'spreadsheets', 'presentations')
 
 $workRoot = if ($WorkRoot) {
     [System.IO.Path]::GetFullPath($WorkRoot)
@@ -218,6 +306,13 @@ Copy-Item -Path (Join-Path $sourceExportRoot 'app') -Destination (Join-Path $int
 Copy-Item -Path (Join-Path $scriptRoot 'bootstrap-codex-skills.ps1') -Destination (Join-Path $internalRoot 'bootstrap-codex-skills.ps1') -Force
 Copy-Item -Path (Join-Path $scriptRoot 'repair-chrome-host.ps1') -Destination (Join-Path $internalRoot 'repair-chrome-host.ps1') -Force
 Copy-Item -Path (Join-Path $scriptRoot 'setup-codex-offline.ps1') -Destination (Join-Path $internalRoot 'setup-codex-offline.ps1') -Force
+
+Write-BuildTrace 'Bundling offline runtime plugins.'
+$offlineRuntimePluginInfo = Add-OfflineRuntimePlugins `
+    -AppRoot (Join-Path $internalRoot 'app') `
+    -RepoRoot $repoRoot `
+    -PluginNames $offlineRuntimePluginNames
+Write-BuildTrace 'Offline runtime plugins bundled.'
 
 $chromeExtensionInfo = $null
 $chromeExtensionConfig = Get-ChromeExtensionConfig -AppRoot (Join-Path $internalRoot 'app')
@@ -364,6 +459,7 @@ $buildInfo = [ordered]@{
         defaultInstallProfile = $defaultInstallProfile
         defaultInstallPaths = $defaultInstallPaths
     }
+    offlineRuntimePlugins = $offlineRuntimePluginInfo
 }
 
 Write-BuildTrace 'Build info written.'

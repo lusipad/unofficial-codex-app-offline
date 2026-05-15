@@ -184,6 +184,53 @@ try {
     }
 
     $chromePluginRoot = Join-Path $portableRoot '_internal\app\resources\plugins\openai-bundled\plugins\chrome'
+    $bundledMarketplaceRoot = Join-Path $portableRoot '_internal\app\resources\plugins\openai-bundled'
+    $bundledMarketplaceManifestPath = Join-Path $bundledMarketplaceRoot '.agents\plugins\marketplace.json'
+    $browserUsePluginRoot = Join-Path $bundledMarketplaceRoot 'plugins\browser-use'
+    if (-not (Test-Path $bundledMarketplaceManifestPath -PathType Leaf)) {
+        throw 'Bundled OpenAI plugin marketplace manifest was not found in the portable package.'
+    }
+    $bundledMarketplaceManifest = Get-Content -Path $bundledMarketplaceManifestPath -Raw | ConvertFrom-Json
+    $bundledMarketplaceEntries = @($bundledMarketplaceManifest.plugins)
+    foreach ($offlineRuntimePluginName in @('documents', 'spreadsheets', 'presentations')) {
+        $offlineRuntimePluginEntries = @(
+            $bundledMarketplaceEntries | Where-Object { [string]$_.name -eq $offlineRuntimePluginName }
+        )
+        if ($offlineRuntimePluginEntries.Count -ne 1) {
+            throw "Bundled OpenAI plugin marketplace should contain exactly one '$offlineRuntimePluginName' entry, found $($offlineRuntimePluginEntries.Count)."
+        }
+
+        $offlineRuntimePluginEntry = $offlineRuntimePluginEntries[0]
+        if ([string]$offlineRuntimePluginEntry.source.source -ne 'local') {
+            throw "Bundled runtime plugin '$offlineRuntimePluginName' is not configured as a local plugin source."
+        }
+        if ([string]$offlineRuntimePluginEntry.source.path -ne "./plugins/$offlineRuntimePluginName") {
+            throw "Bundled runtime plugin '$offlineRuntimePluginName' has an unexpected local source path: $($offlineRuntimePluginEntry.source.path)"
+        }
+        if ([string]$offlineRuntimePluginEntry.policy.installation -ne 'AVAILABLE') {
+            throw "Bundled runtime plugin '$offlineRuntimePluginName' is not available for offline installation."
+        }
+
+        $offlineRuntimePluginRoot = Join-Path $bundledMarketplaceRoot "plugins\$offlineRuntimePluginName"
+        $offlineRuntimePluginManifestPath = Join-Path $offlineRuntimePluginRoot '.codex-plugin\plugin.json'
+        if (-not (Test-Path $offlineRuntimePluginManifestPath -PathType Leaf)) {
+            throw "Bundled runtime plugin '$offlineRuntimePluginName' manifest was not found in the portable package."
+        }
+
+        $offlineRuntimePluginManifest = Get-Content -Path $offlineRuntimePluginManifestPath -Raw | ConvertFrom-Json
+        if ([string]$offlineRuntimePluginManifest.name -ne $offlineRuntimePluginName) {
+            throw "Bundled runtime plugin '$offlineRuntimePluginName' manifest name does not match its marketplace entry."
+        }
+        if (-not (Test-Path (Join-Path $offlineRuntimePluginRoot "skills\$offlineRuntimePluginName\SKILL.md") -PathType Leaf)) {
+            throw "Bundled runtime plugin '$offlineRuntimePluginName' is missing its skill entrypoint."
+        }
+    }
+    if (-not (Test-Path (Join-Path $browserUsePluginRoot '.codex-plugin\plugin.json') -PathType Leaf)) {
+        throw 'Bundled browser-use plugin manifest was not found in the portable package.'
+    }
+    if (-not (Test-Path (Join-Path $browserUsePluginRoot 'scripts\browser-client.mjs') -PathType Leaf)) {
+        throw 'Bundled browser-use plugin is missing scripts\browser-client.mjs.'
+    }
     if (-not (Test-Path $chromePluginRoot -PathType Container)) {
         throw 'Bundled Chrome plugin was not found in the portable package.'
     }
@@ -195,11 +242,19 @@ try {
         throw 'Bundled Chrome plugin is missing scripts\browser-client.mjs.'
     }
     $chromeBrowserClientContent = Get-Content -Path $chromeBrowserClientPath -Raw
-    if (-not $chromeBrowserClientContent.Contains('/*codex-offline:browser-use-discovery-timeout*/')) {
-        throw 'Bundled Chrome browser client is missing the discovery timeout patch.'
-    }
-    if (-not $chromeBrowserClientContent.Contains('/*codex-offline:browser-use-profile-metadata-timeout*/')) {
-        throw 'Bundled Chrome browser client is missing the profile metadata timeout patch.'
+    foreach ($removedTimeoutNeedle in @(
+        '/*codex-offline:browser-use-discovery-timeout*/',
+        '/*codex-offline:browser-use-profile-metadata-timeout*/',
+        '/*codex-offline:browser-use-request-timeout*/',
+        '_codexOfflineBrowserUseDiscoveryTimeout',
+        '_codexOfflineBrowserUseRequestTimeoutMs',
+        '_codexOfflineNativePipeConnectTimeoutMs',
+        'x-codex-browser-use-request-timeout-ms',
+        'x-codex-native-pipe-connect-timeout-ms'
+    )) {
+        if ($chromeBrowserClientContent.Contains($removedTimeoutNeedle)) {
+            throw "Bundled Chrome browser client still contains removed timeout patch marker: $removedTimeoutNeedle"
+        }
     }
     if (-not $chromeBrowserClientContent.Contains('/*codex-offline:browser-use-native-pipe-fallback*/')) {
         throw 'Bundled Chrome browser client is missing the Windows native pipe fallback patch.'
@@ -215,9 +270,6 @@ try {
     }
     if (-not $chromeBrowserClientContent.Contains('/*codex-offline:browser-use-direct-setup*/')) {
         throw 'Bundled Chrome browser client is missing the direct Windows pipe setup patch.'
-    }
-    if (-not $chromeBrowserClientContent.Contains('/*codex-offline:browser-use-request-timeout*/')) {
-        throw 'Bundled Chrome browser client is missing the JSON-RPC request timeout patch.'
     }
     if (-not $chromeBrowserClientContent.Contains('/*codex-offline:browser-use-disable-ambient-network-default*/')) {
         throw 'Bundled Chrome browser client is missing the offline ambient network default patch.'
@@ -357,6 +409,7 @@ const KNOWN_RAW_GATE_IDS = [
   '410065390',
   '4250630194',
   '588076040',
+  '533078438',
   '1609556872',
 ];
 const MEMORIES_GATE_RESIDUAL_PATTERN = '[$s]:Ue(e,ec)&&We(e,Qs).groupName===`Test`';
@@ -403,6 +456,8 @@ let fastModeSelectorPatched = false;
 let bundledBrowserPluginsPatched = false;
 let browserUseDescriptorPatched = false;
 let windowsBrowserUseCapabilityPatched = false;
+let pluginsApiKeyNavPatched = false;
+let pluginsApiKeyRoutePatched = false;
 const bundledBrowserPluginForceReloadResiduals = [];
 
 for (const entry of javaScriptEntries) {
@@ -411,6 +466,8 @@ for (const entry of javaScriptEntries) {
   fastModeSelectorPatched ||= content.includes('/*codex-offline:fast-mode-selector*/');
   bundledBrowserPluginsPatched ||= content.includes('/*codex-offline:bundled-browser-plugins-no-force-reload*/');
   windowsBrowserUseCapabilityPatched ||= content.includes('/*codex-offline:windows-browser-use-capability*/');
+  pluginsApiKeyNavPatched ||= content.includes('/*codex-offline:plugins-api-key-nav*/');
+  pluginsApiKeyRoutePatched ||= content.includes('/*codex-offline:plugins-api-key-route*/');
   browserUseDescriptorPatched ||=
     /\{autoInstallOptOutKey:[A-Za-z_$][\w$]*\.Nn\([A-Za-z_$][\w$]*\.Dn\),installWhenMissing:!0,name:[A-Za-z_$][\w$]*\.Dn,isAvailable:\(\{features:[A-Za-z_$][\w$]*\}\)=>\/\*codex-offline:bundled-browser-plugins-no-force-reload\*\/!0,migrate:[A-Za-z_$][\w$]*\}/.test(content);
   if (
@@ -470,6 +527,20 @@ if (hasDesktopFeatureAvailability && !windowsBrowserUseCapabilityPatched) {
 
 if (!bundledBrowserPluginsPatched) {
   throw new Error('Bundled browser plugin descriptor patch marker is missing.');
+}
+const hasPluginsApiKeyDisabledNavBranch = allJavaScriptContent.some(content =>
+  /sidebarElectron\.pluginsDisabledTooltip[\s\S]{0,700}disabled:!0[\s\S]{0,700}sidebarElectron\.pluginsRouteNavLink/.test(content) ||
+  /sidebarElectron\.pluginsRouteNavLink[\s\S]{0,700}disabled:!0[\s\S]{0,700}sidebarElectron\.pluginsDisabledTooltip/.test(content)
+);
+if (hasPluginsApiKeyDisabledNavBranch && !pluginsApiKeyNavPatched) {
+  throw new Error('Plugins API-key navigation lockout branch is present but was not patched.');
+}
+const hasPluginsApiKeyRouteFallback = allJavaScriptContent.some(content =>
+  content.includes('pluginDeepLinkAuthBlocked===!0') &&
+  content.includes('o&&!p){let t;return')
+);
+if (hasPluginsApiKeyRouteFallback && !pluginsApiKeyRoutePatched) {
+  throw new Error('Plugins API-key page fallback branch is present but was not patched.');
 }
 if (!browserUseDescriptorPatched) {
   throw new Error('Bundled browser-use descriptor was not patched for offline marketplace materialization.');

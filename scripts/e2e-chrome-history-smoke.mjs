@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
 import http from 'node:http';
+import { createHash } from 'node:crypto';
 import { spawn, execFileSync } from 'node:child_process';
 import { chromium } from 'playwright';
 
@@ -14,7 +15,7 @@ const chromePath = path.resolve(args.chromePath ?? findChromePath() ?? '');
 const extensionRoot = path.resolve(args.extensionRoot ?? process.env.CODEX_E2E_EXTENSION_ROOT ?? '');
 const workRoot = path.resolve(args.workRoot ?? path.join(process.env.TEMP ?? process.cwd(), 'codex-offline-chrome-e2e-v2'));
 const marker = args.marker ?? `E2E_CHROME_HISTORY_MARKER_${Date.now()}`;
-const title = args.title ?? 'Codex App Recent History - Chrome E2E';
+const title = args.title ?? `Codex App Recent History - Chrome E2E ${marker}`;
 const chromeMode = args.chromeMode ?? 'installed';
 
 if (!appRoot || !fs.existsSync(path.join(appRoot, 'Codex.exe'))) {
@@ -46,19 +47,6 @@ registerNativeHost(appRoot);
 
 const targetServer = await startTargetServer({ htmlPath });
 const targetUrl = targetServer.url;
-const chromeHandle = await openChromeTarget({
-  chromeMode,
-  chromePath,
-  chromeProfile,
-  extensionRoot,
-  targetUrl,
-});
-const chromeProbe = await waitForChromeBrowserUsePipe({
-  timeoutMs: Number(args.chromeProbeTimeoutMs ?? 120_000),
-  targetUrl,
-  title,
-});
-
 const debugPort = Number(args.debugPort ?? 9377);
 const out = fs.openSync(stdoutPath, 'w');
 const err = fs.openSync(stderrPath, 'w');
@@ -72,28 +60,46 @@ const appProcess = spawn(path.join(appRoot, 'Codex.exe'), [`--remote-debugging-p
   stdio: ['ignore', out, err],
   windowsHide: false,
 });
-const browser = await connectToElectronOverCdp(debugPort, 120_000);
 
 let pass = false;
 let reason = 'not-run';
 let finalBody = '';
+let chromeProbe = null;
+let browser = null;
+let chromeHandle = {
+  close: async () => {},
+};
+let codexWindow = null;
 
 try {
-  const window = await findCodexWindow(browser, 120_000);
-  await window.waitForLoadState('domcontentloaded', { timeout: 120_000 }).catch(() => {});
-  await window.waitForTimeout(8_000);
-  await window.setViewportSize({ width: 1450, height: 900 });
+  chromeHandle = await openChromeTarget({
+    chromeMode,
+    chromePath,
+    chromeProfile,
+    extensionRoot,
+    targetUrl,
+  });
+  chromeProbe = await waitForChromeBrowserUsePipe({
+    timeoutMs: Number(args.chromeProbeTimeoutMs ?? 120_000),
+    targetUrl,
+    title,
+  });
+  browser = await connectToElectronOverCdp(debugPort, 120_000);
+  codexWindow = await findCodexWindow(browser, 120_000);
+  await codexWindow.waitForLoadState('domcontentloaded', { timeout: 120_000 }).catch(() => {});
+  await codexWindow.waitForTimeout(8_000);
+  await codexWindow.setViewportSize({ width: 1450, height: 900 });
 
-  await clickNewChat(window);
+  await clickNewChat(codexWindow);
   const prompt = buildPrompt({ title });
-  await enterChromePrompt(window, prompt);
-  await pollForAnswer(window, {
+  await enterChromePrompt(codexWindow, prompt);
+  await pollForAnswer(codexWindow, {
     marker,
     progressPath,
     timeoutMs: Number(args.timeoutMs ?? 600_000),
   });
 
-  finalBody = await window.locator('body').innerText({ timeout: 10_000 });
+  finalBody = await codexWindow.locator('body').innerText({ timeout: 10_000 });
   fs.writeFileSync(finalBodyPath, finalBody, 'utf8');
   pass = finalBody.includes(marker) &&
     /codex-app-offline/i.test(finalBody) &&
@@ -103,7 +109,7 @@ try {
 } catch (error) {
   reason = error instanceof Error ? error.message : String(error);
   try {
-    const window = app.windows()[0];
+    const window = codexWindow ?? (browser ? await findCodexWindow(browser, 5_000).catch(() => null) : null);
     if (window) {
       finalBody = await window.locator('body').innerText({ timeout: 5_000 }).catch(() => '');
       fs.writeFileSync(finalBodyPath, finalBody, 'utf8');
@@ -127,9 +133,9 @@ try {
     htmlPath,
   };
   fs.writeFileSync(resultPath, JSON.stringify(result, null, 2), 'utf8');
-  await browser.close().catch(() => {});
   killProcessTree(appProcess.pid);
-  await chromeHandle.close();
+  await closeWithTimeout(browser?.close().catch(() => {}), 5_000);
+  await closeWithTimeout(chromeHandle.close(), 5_000);
   await targetServer.close();
   fs.closeSync(out);
   fs.closeSync(err);
@@ -219,6 +225,11 @@ async function openChromeTarget({ chromeMode, chromePath, chromeProfile, extensi
         '--no-default-browser-check',
       ],
     });
+    await assertChromeExtensionLoaded({
+      chromeContext,
+      chromePath,
+      extensionRoot,
+    });
     const chromePage = await chromeContext.newPage();
     await chromePage.goto(targetUrl);
     await chromePage.waitForLoadState('domcontentloaded');
@@ -242,6 +253,88 @@ async function openChromeTarget({ chromeMode, chromePath, chromeProfile, extensi
       // must not close Chrome or the user's existing windows.
     },
   };
+}
+
+async function assertChromeExtensionLoaded({ chromeContext, chromePath, extensionRoot }) {
+  const expectedExtensionId = readExpectedChromeExtensionId(extensionRoot);
+  if (!expectedExtensionId) {
+    return;
+  }
+
+  const extensionOrigin = `chrome-extension://${expectedExtensionId}/`;
+  const started = Date.now();
+  while (Date.now() - started < 5_000) {
+    const hasServiceWorker = chromeContext
+      .serviceWorkers()
+      .some((worker) => worker.url().startsWith(extensionOrigin));
+    if (hasServiceWorker) {
+      return;
+    }
+    await delay(250);
+  }
+
+  let popupProbeError = null;
+  const popupProbePage = await chromeContext.newPage();
+  try {
+    await popupProbePage.goto(`${extensionOrigin}popup.html`, {
+      timeout: 5_000,
+      waitUntil: 'domcontentloaded',
+    });
+    return;
+  } catch (error) {
+    popupProbeError = error instanceof Error ? error.message : String(error);
+  } finally {
+    await popupProbePage.close().catch(() => {});
+  }
+
+  const chromeHint = isLikelyGoogleChrome(chromePath)
+    ? ' Stock Google Chrome blocks the command-line unpacked-extension loading path used by this smoke (`--disable-extensions-except` is ignored), so use `--chromeMode installed` after manually loading `_internal\\\\chrome-extension\\\\unpacked` in `chrome://extensions`, or run this smoke against a Chromium build that permits command-line extension loading.'
+    : '';
+  throw new Error(
+    `Chrome did not load the unpacked Codex extension (expected extension id ${expectedExtensionId}).` +
+      chromeHint +
+      (popupProbeError ? ` Popup probe: ${popupProbeError}` : ''),
+  );
+}
+
+function readExpectedChromeExtensionId(extensionRoot) {
+  const extensionInfoPath = path.resolve(extensionRoot, '..', 'extension-info.json');
+  if (fs.existsSync(extensionInfoPath)) {
+    try {
+      const extensionInfo = JSON.parse(fs.readFileSync(extensionInfoPath, 'utf8'));
+      if (typeof extensionInfo?.extensionId === 'string' && extensionInfo.extensionId) {
+        return extensionInfo.extensionId;
+      }
+    } catch {
+      // Fall back to deriving the id from manifest.key.
+    }
+  }
+
+  const manifestPath = path.join(extensionRoot, 'manifest.json');
+  if (!fs.existsSync(manifestPath)) {
+    return null;
+  }
+
+  try {
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+    if (typeof manifest?.key !== 'string' || !manifest.key) {
+      return null;
+    }
+    return extensionIdFromPublicKey(Buffer.from(manifest.key, 'base64'));
+  } catch {
+    return null;
+  }
+}
+
+function extensionIdFromPublicKey(publicKey) {
+  const hash = createHash('sha256').update(publicKey).digest().subarray(0, 16);
+  return Array.from(hash, (byte) =>
+    String.fromCharCode(97 + (byte >> 4)) + String.fromCharCode(97 + (byte & 0x0f)),
+  ).join('');
+}
+
+function isLikelyGoogleChrome(chromePath) {
+  return /Google[\\/]+Chrome[\\/]+Application[\\/]+chrome\.exe$/i.test(chromePath);
 }
 
 async function clickNewChat(window) {
@@ -308,6 +401,14 @@ function killProcessTree(pid) {
 
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function closeWithTimeout(promise, timeoutMs) {
+  if (!promise) return;
+  await Promise.race([
+    promise,
+    delay(timeoutMs),
+  ]);
 }
 
 async function enterChromePrompt(window, prompt) {
@@ -432,7 +533,17 @@ async function waitForChromeBrowserUsePipe({ timeoutMs, targetUrl, title }) {
         }
         const type = probe.info?.type ?? 'unknown';
         const tabCount = probe.tabs?.length ?? 0;
-        errors.push(`${pipePath}: ${type}, target missing, tabs=${tabCount}`);
+        const tabSummary = (probe.tabs ?? [])
+          .slice(0, 4)
+          .map((tab) => {
+            const tabTitle = typeof tab?.title === 'string' ? tab.title : '';
+            const tabUrl = typeof tab?.url === 'string' ? tab.url : '';
+            return `${tabTitle || '<untitled>'} <${tabUrl || 'about:blank'}>`;
+          })
+          .join(' | ');
+        errors.push(
+          `${pipePath}: ${type}, target missing, tabs=${tabCount}${tabSummary ? `, seen=${tabSummary}` : ''}`,
+        );
       } catch (error) {
         errors.push(`${pipePath}: ${error instanceof Error ? error.message : String(error)}`);
       }

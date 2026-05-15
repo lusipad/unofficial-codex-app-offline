@@ -81,6 +81,12 @@
  *    gate can be false even after the bundled Chrome plugin and native host
  *    are installed, so we bypass that renderer gate.
  *
+ * 39. Enable Plugins navigation for API-key/offline sessions
+ *    The desktop sidebar shows a disabled Plugins item for API-key users when
+ *    gate 533078438 is on, even though the bundled runtime marketplace can be
+ *    used offline. We disable that API-key-only lockout and keep the bundled
+ *    Plugins route visible for offline builds.
+ *
  * 8. Normalize Windows automation cwd paths
  *    The packaged Automations UI can persist selected project paths in
  *    `\\?\C:\...` form on Windows.  Automation execution later compares that
@@ -329,67 +335,61 @@ function patchChromeBrowserClient(filePath) {
 
   let content = fs.readFileSync(filePath, 'utf8');
   let changed = false;
-  const discoveryTimeoutPatchMarker = '/*codex-offline:browser-use-discovery-timeout*/';
-  if (content.includes(discoveryTimeoutPatchMarker)) {
-    log('Chrome browser client discovery timeout already patched.');
-  } else {
-    const needle =
-      'async function _O(t,e){let r=null,n="pipe-connect";try{' +
-      'let o=await kc.create(t);r=e(o),n="backend-info-request";' +
-      'let i=await r.getInfo(),s=await LS(i).catch(a=>(ee(a),i));' +
-      'return{browser:{id:crypto.randomUUID().substring(8),api:r,info:xO(s)}}}' +
-      'catch(o){return await r?.close(),ee(o),{failure:`${n}/${jS(o)}`}}}';
-    const helper =
-      `var _codexOfflineBrowserUseDiscoveryTimeout=(t,e,r=8e3)=>new Promise((n,o)=>{` +
-      `let i=setTimeout(()=>o(new Error(\`${'${e}'} timed out after ${'${r}'}ms\`)),r);` +
-      `Promise.resolve(t).then(s=>{clearTimeout(i),n(s)},s=>{clearTimeout(i),o(s)})});` +
-      discoveryTimeoutPatchMarker;
-    const replacement =
-      helper +
-      'async function _O(t,e){let r=null,n="pipe-connect";try{' +
-      'let o=await _codexOfflineBrowserUseDiscoveryTimeout(kc.create(t),"pipe-connect");' +
-      'r=e(o),n="backend-info-request";' +
-      'let i=await _codexOfflineBrowserUseDiscoveryTimeout(r.getInfo(),"backend-info-request"),' +
-      's=await _codexOfflineBrowserUseDiscoveryTimeout(LS(i),"profile-metadata",2e3).catch(a=>(ee(a),i));' +
-      'return{browser:{id:crypto.randomUUID().substring(8),api:r,info:xO(s)}}}' +
-      'catch(o){return await r?.close(),ee(o),{failure:`${n}/${jS(o)}`}}}';
-
-    if (!content.includes(needle)) {
-      throw new Error(
-        'Could not locate Chrome browser-client discovery flow to add pipe timeout.',
-      );
+  const removeStaleTimeoutPatch = (needle, replacement, message) => {
+    if (content.includes(needle)) {
+      content = content.replace(needle, replacement);
+      changed = true;
+      log(message);
     }
+  };
 
-    content = content.replace(needle, replacement);
-    changed = true;
-    log('Chrome browser client discovery timeout patched.');
-  }
-
+  const discoveryTimeoutPatchMarker = '/*codex-offline:browser-use-discovery-timeout*/';
   const profileMetadataTimeoutPatchMarker =
     '/*codex-offline:browser-use-profile-metadata-timeout*/';
-  if (content.includes(profileMetadataTimeoutPatchMarker)) {
-    log('Chrome browser client profile metadata timeout already patched.');
-  } else {
-    const profileNeedle =
-      's=await LS(i).catch(a=>(ee(a),i));';
-    const profileReplacement =
-      's=await _codexOfflineBrowserUseDiscoveryTimeout(LS(i),"profile-metadata",2e3)' +
-      `.catch(a=>(ee(a),i));${profileMetadataTimeoutPatchMarker}`;
-    if (content.includes(profileNeedle)) {
-      content = content.replace(profileNeedle, profileReplacement);
-      changed = true;
-      log('Chrome browser client profile metadata timeout patched.');
-    } else if (content.includes('"profile-metadata"')) {
-      content = content.replace('"profile-metadata",2e3).catch(a=>(ee(a),i));',
-        `"profile-metadata",2e3).catch(a=>(ee(a),i));${profileMetadataTimeoutPatchMarker}`);
-      changed = true;
-      log('Chrome browser client profile metadata timeout marker added.');
-    } else {
-      throw new Error(
-        'Could not locate Chrome browser-client profile metadata enrichment flow.',
-      );
-    }
-  }
+  const originalDiscoveryFlow =
+    'async function _O(t,e){let r=null,n="pipe-connect";try{' +
+    'let o=await kc.create(t);r=e(o),n="backend-info-request";' +
+    'let i=await r.getInfo(),s=await LS(i).catch(a=>(ee(a),i));' +
+    'return{browser:{id:crypto.randomUUID().substring(8),api:r,info:xO(s)}}}' +
+    'catch(o){return await r?.close(),ee(o),{failure:`${n}/${jS(o)}`}}}';
+  const discoveryTimeoutFlow =
+    'async function _O(t,e){let r=null,n="pipe-connect";try{' +
+    'let o=await _codexOfflineBrowserUseDiscoveryTimeout(kc.create(t),"pipe-connect");' +
+    'r=e(o),n="backend-info-request";' +
+    'let i=await _codexOfflineBrowserUseDiscoveryTimeout(r.getInfo(),"backend-info-request"),' +
+    's=await _codexOfflineBrowserUseDiscoveryTimeout(LS(i),"profile-metadata",2e3).catch(a=>(ee(a),i));' +
+    'return{browser:{id:crypto.randomUUID().substring(8),api:r,info:xO(s)}}}' +
+    'catch(o){return await r?.close(),ee(o),{failure:`${n}/${jS(o)}`}}}';
+  const discoveryTimeoutFlowWithProfileMarker =
+    discoveryTimeoutFlow.replace(
+      '"profile-metadata",2e3).catch(a=>(ee(a),i));',
+      `"profile-metadata",2e3).catch(a=>(ee(a),i));${profileMetadataTimeoutPatchMarker}`,
+    );
+  const discoveryTimeoutHelper =
+    `var _codexOfflineBrowserUseDiscoveryTimeout=(t,e,r=8e3)=>new Promise((n,o)=>{` +
+    `let i=setTimeout(()=>o(new Error(\`${'${e}'} timed out after ${'${r}'}ms\`)),r);` +
+    `Promise.resolve(t).then(s=>{clearTimeout(i),n(s)},s=>{clearTimeout(i),o(s)})});` +
+    discoveryTimeoutPatchMarker;
+  removeStaleTimeoutPatch(
+    discoveryTimeoutFlowWithProfileMarker,
+    originalDiscoveryFlow,
+    'Removed stale Chrome browser client discovery/profile timeout patch.',
+  );
+  removeStaleTimeoutPatch(
+    discoveryTimeoutFlow,
+    originalDiscoveryFlow,
+    'Removed stale Chrome browser client discovery timeout patch.',
+  );
+  removeStaleTimeoutPatch(
+    discoveryTimeoutHelper,
+    '',
+    'Removed stale Chrome browser client discovery timeout helper.',
+  );
+  removeStaleTimeoutPatch(
+    `s=await _codexOfflineBrowserUseDiscoveryTimeout(LS(i),"profile-metadata",2e3).catch(a=>(ee(a),i));${profileMetadataTimeoutPatchMarker}`,
+    's=await LS(i).catch(a=>(ee(a),i));',
+    'Removed stale Chrome browser client profile metadata timeout patch.',
+  );
 
   const nativePipeFallbackPatchMarker =
     '/*codex-offline:browser-use-native-pipe-fallback*/';
@@ -397,6 +397,16 @@ function patchChromeBrowserClient(filePath) {
     '/*codex-offline:browser-use-native-pipe-direct*/';
   const nativePipeDirectCreateReplacement =
     `static async create(e){if(_codexOfflineShouldUseNativePipeFallback(e)){let r=await _codexOfflineCreateNativePipeConnection(e);return new t(r)}let r=Wf();if(r!=null){let n=await _codexOfflineBridgeCreateConnection(r,e);return new t(n)}throw new Error(Vf())}${nativePipeDirectPatchMarker}`;
+  const nativePipeHelpersWithoutTimeout =
+    'function _codexOfflineBridgeCreateConnection(t,e){return t.createConnection(e)}' +
+    'async function _codexOfflineCreateNativePipeConnection(t){let{createConnection:e}=await import("node:net");return e(t)}';
+  removeStaleTimeoutPatch(
+    'function _codexOfflineNativePipeConnectTimeoutMs(){let t=Number(globalThis.nodeRepl?.requestMeta?.["x-codex-native-pipe-connect-timeout-ms"]);return Number.isFinite(t)&&t>0?t:1e3}' +
+    'function _codexOfflineBridgeCreateConnection(t,e){let r=_codexOfflineNativePipeConnectTimeoutMs();return new Promise((n,o)=>{let i=setTimeout(()=>o(new Error(`native pipe bridge timed out after ${r}ms`)),r);Promise.resolve(t.createConnection(e)).then(s=>{clearTimeout(i),n(s)},s=>{clearTimeout(i),o(s)})})}' +
+    'async function _codexOfflineCreateNativePipeConnection(t){let{createConnection:e}=await import("node:net"),r=_codexOfflineNativePipeConnectTimeoutMs();return await new Promise((n,o)=>{let i=e(t),s=!1,a=setTimeout(()=>u(new Error(`native pipe connect timed out after ${r}ms`)),r);function u(c,d){if(s)return;s=!0,clearTimeout(a),i.off("connect",l),i.off("error",u),c?(i.destroy(),o(c)):n(d)}function l(){u(null,i)}i.once("connect",l),i.once("error",u)})}',
+    nativePipeHelpersWithoutTimeout,
+    'Removed stale Chrome browser client native pipe timeout helpers.',
+  );
   if (content.includes(nativePipeDirectPatchMarker)) {
     log('Chrome browser client native pipe direct path already patched.');
   } else if (content.includes(nativePipeFallbackPatchMarker)) {
@@ -417,9 +427,7 @@ function patchChromeBrowserClient(filePath) {
     const helperReplacement =
       helperNeedle +
       'function _codexOfflineShouldUseNativePipeFallback(t){return hO()==="win32"&&typeof t=="string"&&t.startsWith("\\\\\\\\.\\\\pipe\\\\codex-browser-use")}' +
-      'function _codexOfflineNativePipeConnectTimeoutMs(){let t=Number(globalThis.nodeRepl?.requestMeta?.["x-codex-native-pipe-connect-timeout-ms"]);return Number.isFinite(t)&&t>0?t:1e3}' +
-      'function _codexOfflineBridgeCreateConnection(t,e){let r=_codexOfflineNativePipeConnectTimeoutMs();return new Promise((n,o)=>{let i=setTimeout(()=>o(new Error(`native pipe bridge timed out after ${r}ms`)),r);Promise.resolve(t.createConnection(e)).then(s=>{clearTimeout(i),n(s)},s=>{clearTimeout(i),o(s)})})}' +
-      'async function _codexOfflineCreateNativePipeConnection(t){let{createConnection:e}=await import("node:net"),r=_codexOfflineNativePipeConnectTimeoutMs();return await new Promise((n,o)=>{let i=e(t),s=!1,a=setTimeout(()=>u(new Error(`native pipe connect timed out after ${r}ms`)),r);function u(c,d){if(s)return;s=!0,clearTimeout(a),i.off("connect",l),i.off("error",u),c?(i.destroy(),o(c)):n(d)}function l(){u(null,i)}i.once("connect",l),i.once("error",u)})}' +
+      nativePipeHelpersWithoutTimeout +
       nativePipeFallbackPatchMarker;
     const createNeedle =
       'static async create(e){let r=Wf();if(r!=null){let n=await r.createConnection(e);return new t(n)}throw new Error(Vf())}';
@@ -511,32 +519,27 @@ function patchChromeBrowserClient(filePath) {
 
   const requestTimeoutPatchMarker =
     '/*codex-offline:browser-use-request-timeout*/';
-  if (content.includes(requestTimeoutPatchMarker)) {
-    log('Chrome browser client request timeout already patched.');
-  } else {
-    const requestTimeoutHelperNeedle =
-      'var Vi=class{constructor(e){';
-    const requestTimeoutHelperReplacement =
-      'function _codexOfflineBrowserUseRequestTimeoutMs(t,e){let r=Number(e?.client_timeout_ms??globalThis.nodeRepl?.requestMeta?.["x-codex-browser-use-request-timeout-ms"]);return Number.isFinite(r)&&r>0?r:1e4}' +
-      requestTimeoutPatchMarker +
-      requestTimeoutHelperNeedle;
-    const requestTimeoutNeedle =
-      'sendRequest(e,r){let n=this.nextId++;return new Promise((o,i)=>{this.pendingRequests.set(n,{resolve:o,reject:i});try{this.transport.sendMessage({jsonrpc:"2.0",method:e.toString(),params:r,id:n})}catch(s){this.pendingRequests.delete(n),i(s)}})}';
-    const requestTimeoutReplacement =
-      'sendRequest(e,r){let n=this.nextId++,o=_codexOfflineBrowserUseRequestTimeoutMs(e,r);return new Promise((i,s)=>{let a=setTimeout(()=>{this.pendingRequests.delete(n),s(new Error(`${String(e)} timed out after ${o}ms`))},o);this.pendingRequests.set(n,{resolve:u=>{clearTimeout(a),i(u)},reject:u=>{clearTimeout(a),s(u)}});try{this.transport.sendMessage({jsonrpc:"2.0",method:e.toString(),params:r,id:n})}catch(u){clearTimeout(a),this.pendingRequests.delete(n),s(u)}})}';
-
-    if (!content.includes(requestTimeoutHelperNeedle) || !content.includes(requestTimeoutNeedle)) {
-      throw new Error(
-        'Could not locate Chrome browser-client JSON-RPC request flow to add timeouts.',
-      );
-    }
-
-    content = content
-      .replace(requestTimeoutHelperNeedle, requestTimeoutHelperReplacement)
-      .replace(requestTimeoutNeedle, requestTimeoutReplacement);
-    changed = true;
-    log('Chrome browser client request timeout patched.');
-  }
+  const requestTimeoutNeedle =
+    'sendRequest(e,r){let n=this.nextId++;return new Promise((o,i)=>{this.pendingRequests.set(n,{resolve:o,reject:i});try{this.transport.sendMessage({jsonrpc:"2.0",method:e.toString(),params:r,id:n})}catch(s){this.pendingRequests.delete(n),i(s)}})}';
+  const requestTimeoutReplacement =
+    'sendRequest(e,r){let n=this.nextId++,o=_codexOfflineBrowserUseRequestTimeoutMs(e,r);return new Promise((i,s)=>{let a=setTimeout(()=>{this.pendingRequests.delete(n),s(new Error(`${String(e)} timed out after ${o}ms`))},o);this.pendingRequests.set(n,{resolve:u=>{clearTimeout(a),i(u)},reject:u=>{clearTimeout(a),s(u)}});try{this.transport.sendMessage({jsonrpc:"2.0",method:e.toString(),params:r,id:n})}catch(u){clearTimeout(a),this.pendingRequests.delete(n),s(u)}})}';
+  removeStaleTimeoutPatch(
+    'function _codexOfflineBrowserUseRequestTimeoutMs(t,e){let r=Number(e?.client_timeout_ms??globalThis.nodeRepl?.requestMeta?.["x-codex-browser-use-request-timeout-ms"]);if(Number.isFinite(r)&&r>0)return r;let n=String(t);return /^(ping|getInfo|getTabs|getUserTabs|getUserHistory|claimUserTab|createTab|finalizeTabs|nameSession)$/.test(n)?15e3:12e4}' +
+    requestTimeoutPatchMarker,
+    '',
+    'Removed stale Chrome browser client responsive request timeout helper.',
+  );
+  removeStaleTimeoutPatch(
+    'function _codexOfflineBrowserUseRequestTimeoutMs(t,e){let r=Number(e?.client_timeout_ms??globalThis.nodeRepl?.requestMeta?.["x-codex-browser-use-request-timeout-ms"]);return Number.isFinite(r)&&r>0?r:1e4}' +
+    requestTimeoutPatchMarker,
+    '',
+    'Removed stale Chrome browser client request timeout helper.',
+  );
+  removeStaleTimeoutPatch(
+    requestTimeoutReplacement,
+    requestTimeoutNeedle,
+    'Removed stale Chrome browser client JSON-RPC request timeout patch.',
+  );
 
   const ambientNetworkPatchMarker =
     '/*codex-offline:browser-use-disable-ambient-network-default*/';
@@ -1345,6 +1348,24 @@ try {
   const EXTERNAL_BROWSER_USE_GATE_FUNCTION_RE =
     /function\s+(\w+)\(\)\{return\s+[$\w]+\(`410065390`\)\}/;
 
+  // ── Patch 39: Enable Plugins navigation for API-key/offline sessions ──
+  //
+  // Gate 533078438 enables a disabled "Please sign in with ChatGPT to use
+  // plugins" sidebar item for API-key users. The same sidebar block also hides
+  // the real Plugins/Skills+Apps route behind an auth-method check. Disable the
+  // lockout while preserving the bundled marketplace feature check.
+  const PLUGINS_API_KEY_NAV_PATCH_MARKER =
+    '/*codex-offline:plugins-api-key-nav*/';
+  const PLUGINS_API_KEY_ROUTE_PATCH_MARKER =
+    '/*codex-offline:plugins-api-key-route*/';
+  const PLUGINS_API_KEY_DISABLED_GATE_ID_MARKER = '`533078438`';
+  const PLUGINS_API_KEY_DISABLED_GATE_INLINE_RE =
+    /([,;]\s*[A-Za-z_$][\w$]*=)\s*[$\w]+\(`533078438`\)/g;
+  const PLUGINS_ROUTE_FEATURE_AND_AUTH_RE =
+    /([,;])([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\(\{hostId:([A-Za-z_$][\w$]*)\}\),([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)&&\2&&!([A-Za-z_$][\w$]*)/g;
+  const PLUGINS_ROUTE_FEATURE_AUTH_RE =
+    /([,;])([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\(\{hostId:([A-Za-z_$][\w$]*)\}\)&&!([A-Za-z_$][\w$]*)/g;
+
   // ── Patch 22: Enable Background Subagents for offline builds ───────────
   //
   // Gate 1221508807 controls whether background subagents are enabled.
@@ -1573,6 +1594,13 @@ try {
     let pluginsBundledMarketplaceGateSeen = false;
     let externalBrowserUseGateCount = 0;
     let externalBrowserUseGateSeen = false;
+    let pluginsApiKeyNavGateCount = 0;
+    let pluginsApiKeyNavAuthFilterCount = 0;
+    let pluginsApiKeyNavGateSeen = false;
+    let pluginsApiKeyNavAlreadyCorrect = false;
+    let pluginsApiKeyRouteGateCount = 0;
+    let pluginsApiKeyRouteGateSeen = false;
+    let pluginsApiKeyRouteAlreadyCorrect = false;
     let automationDialogCwdPatched = false;
     const automationDialogCwdUnpatchedFiles = [];
     let backgroundSubagentsGatePatched = false;
@@ -1679,6 +1707,13 @@ try {
         originalContent.match(EXTERNAL_BROWSER_USE_GATE_INLINE_RE) !== null ||
         EXTERNAL_BROWSER_USE_GATE_FUNCTION_RE.test(originalContent) ||
         originalContent.includes(EXTERNAL_BROWSER_USE_GATE_ID_MARKER);
+      pluginsApiKeyNavGateSeen ||=
+        originalContent.includes(PLUGINS_API_KEY_DISABLED_GATE_ID_MARKER) ||
+        originalContent.includes('sidebarElectron.pluginsDisabledTooltip');
+      pluginsApiKeyNavAlreadyCorrect ||=
+        originalContent.includes(PLUGINS_API_KEY_NAV_PATCH_MARKER);
+      pluginsApiKeyRouteGateSeen ||= originalContent.includes('pluginDeepLinkAuthBlocked===!0');
+      pluginsApiKeyRouteAlreadyCorrect ||= originalContent.includes(PLUGINS_API_KEY_ROUTE_PATCH_MARKER);
       backgroundSubagentsGateSeen ||= originalContent.includes(BACKGROUND_SUBAGENTS_GATE_ID_MARKER);
       threadOverlayGateSeen ||= originalContent.includes(THREAD_OVERLAY_GATE_ID_MARKER);
       multiWindowGateSeen ||= originalContent.includes(MULTI_WINDOW_GATE_ID_MARKER);
@@ -2079,6 +2114,56 @@ try {
           content = content.replace(EXTERNAL_BROWSER_USE_GATE_FUNCTION_RE, 'function $1(){return!0}');
           externalBrowserUseGateCount += 1;
           modified = true;
+        }
+      }
+
+      {
+        if (
+          originalContent.includes(PLUGINS_API_KEY_DISABLED_GATE_ID_MARKER) ||
+          originalContent.includes('sidebarElectron.pluginsDisabledTooltip')
+        ) {
+          const gateMatches = content.match(PLUGINS_API_KEY_DISABLED_GATE_INLINE_RE);
+          if (gateMatches) {
+            content = content.replaceAll(
+              PLUGINS_API_KEY_DISABLED_GATE_INLINE_RE,
+              `$1!1${PLUGINS_API_KEY_NAV_PATCH_MARKER}`,
+            );
+            pluginsApiKeyNavGateCount += gateMatches.length;
+            modified = true;
+          }
+
+          const featureAndAuthMatches = content.match(PLUGINS_ROUTE_FEATURE_AND_AUTH_RE);
+          if (featureAndAuthMatches) {
+            content = content.replaceAll(
+              PLUGINS_ROUTE_FEATURE_AND_AUTH_RE,
+              `$1$2=$3({hostId:$4}),$5=$6&&$2${PLUGINS_API_KEY_NAV_PATCH_MARKER}`,
+            );
+            pluginsApiKeyNavAuthFilterCount += featureAndAuthMatches.length;
+            modified = true;
+          }
+
+          const featureAuthMatches = content.match(PLUGINS_ROUTE_FEATURE_AUTH_RE);
+          if (featureAuthMatches) {
+            content = content.replaceAll(
+              PLUGINS_ROUTE_FEATURE_AUTH_RE,
+              `$1$2=$3({hostId:$4})${PLUGINS_API_KEY_NAV_PATCH_MARKER}`,
+            );
+            pluginsApiKeyNavAuthFilterCount += featureAuthMatches.length;
+            modified = true;
+          }
+        }
+      }
+
+      {
+        if (originalContent.includes('pluginDeepLinkAuthBlocked===!0')) {
+          const skillsRouteNeedle = 'o&&!p){let t;return';
+          const skillsRouteReplacement =
+            `o${PLUGINS_API_KEY_ROUTE_PATCH_MARKER}){let t;return`;
+          if (content.includes(skillsRouteNeedle)) {
+            content = content.replace(skillsRouteNeedle, skillsRouteReplacement);
+            pluginsApiKeyRouteGateCount += 1;
+            modified = true;
+          }
         }
       }
 
@@ -2534,6 +2619,39 @@ try {
       throw new Error(
         'External browser use gate 410065390 is still present, but no ' +
         'supported patch pattern matched. @chrome may be hidden in the composer.',
+      );
+    }
+
+    if (pluginsApiKeyNavGateCount > 0 || pluginsApiKeyNavAuthFilterCount > 0) {
+      log(
+        'Plugins navigation API-key lockout bypassed for offline mode ' +
+        `(${pluginsApiKeyNavGateCount} gate occurrence(s), ` +
+        `${pluginsApiKeyNavAuthFilterCount} auth filter occurrence(s)).`,
+      );
+    } else if (pluginsApiKeyNavAlreadyCorrect) {
+      log('Plugins navigation API-key lockout already patched.');
+    } else if (!pluginsApiKeyNavGateSeen) {
+      log('Plugins navigation API-key lockout gate 533078438 is not present in this app version. No patch needed.');
+    } else {
+      throw new Error(
+        'Plugins navigation API-key lockout is present, but no supported ' +
+        'patch pattern matched. API-key/offline users may still see a disabled Plugins entry.',
+      );
+    }
+
+    if (pluginsApiKeyRouteGateCount > 0) {
+      log(
+        'Plugins page API-key fallback bypassed for offline mode ' +
+        `(${pluginsApiKeyRouteGateCount} occurrence(s)).`,
+      );
+    } else if (pluginsApiKeyRouteAlreadyCorrect) {
+      log('Plugins page API-key fallback already patched.');
+    } else if (!pluginsApiKeyRouteGateSeen) {
+      log('Plugins page API-key fallback gate is not present in this app version. No patch needed.');
+    } else {
+      throw new Error(
+        'Plugins page API-key fallback is present, but no supported patch pattern matched. ' +
+        'API-key/offline users may still fall back to the skills-only page.',
       );
     }
 

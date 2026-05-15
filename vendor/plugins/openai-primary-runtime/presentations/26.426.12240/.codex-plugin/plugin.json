@@ -1,0 +1,48 @@
+{
+  "name": "presentations",
+  "version": "26.426.12240",
+  "description": "Create, edit, render, verify, and export presentation slide decks. Use when Codex needs to build or modify a deck, slidedeck, presentation deck, slide deck, slides, PowerPoint, PPT, PPTX, .ppt, or .pptx file.",
+  "author": {
+    "name": "OpenAI",
+    "email": "support@openai.com",
+    "url": "https://openai.com/"
+  },
+  "homepage": "https://openai.com/",
+  "repository": "https://github.com/openai/openai",
+  "license": "MIT",
+  "keywords": [
+    "slides",
+    "slide",
+    "deck",
+    "slidedeck",
+    "presentation",
+    "presentations",
+    "powerpoint",
+    "ppt",
+    "pptx"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Presentations",
+    "shortDescription": "Create and edit presentations",
+    "longDescription": "Create, edit, inspect, render, verify, and export PPTX presentation slide decks locally. Use Presentations when the durable output or target is a deck, slidedeck, presentation deck, slide deck, slides, PowerPoint, presentation, speaker notes, or visual deck repair.",
+    "developerName": "OpenAI",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Write"
+    ],
+    "websiteURL": "https://openai.com/",
+    "privacyPolicyURL": "https://openai.com/policies/privacy-policy/",
+    "termsOfServiceURL": "https://openai.com/policies/terms-of-use/",
+    "composerIcon": "./assets/icon.png",
+    "logo": "./assets/logo.png",
+    "defaultPrompt": [
+      "Create a slide deck about the solar system",
+      "Research this company's latest earnings and create a slide deck on the company's financial performance",
+      "Create a visually stunning slide deck about the latest AI trends"
+    ],
+    "brandColor": "#C43E1C",
+    "screenshots": []
+  }
+}
