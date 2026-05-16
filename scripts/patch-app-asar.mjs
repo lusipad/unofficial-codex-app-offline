@@ -1723,25 +1723,21 @@ try {
   const PERSONALITY_GATE_UNPATCHED_RE =
     /[$\w]+\(`1444479692`\)/;
 
-  // ── Patch 32: Enable Remote Connections for offline builds ─────────────
+  // ── Patch 32: Keep cloud-backed Remote Connections gated ───────────────
   //
-  // Gate 1042620455 controls remote Codex instance connections.  A
-  // standalone function in the app-server-manager-hooks chunk exports the
-  // gate result.  Replace to always return !0.
+  // Gate 1042620455 controls Codex Mobile / remote control connections.  The
+  // onboarding flow calls ChatGPT cloud endpoints for MFA and enrolled client
+  // checks, so the offline package intentionally leaves this gate intact
+  // instead of exposing a setup flow that cannot complete offline.
   const REMOTE_CONNECTIONS_GATE_ID_MARKER = '`1042620455`';
   const REMOTE_CONNECTIONS_GATE_FUNCTION_RE =
     /function\s+(\w+)\(\)\{return\s+[$\w]+\(`1042620455`\)\}/;
-  const REMOTE_CONNECTIONS_GATE_INLINE_RE =
-    /([,;]\s*\w+\s*=)\s*[$\w]+\(`1042620455`\)/g;
 
-  // ── Patch 33: Enable Remote Connections feature flag for offline ─────────
+  // ── Patch 33: Keep Remote Connections feature flag gated ───────────────
   //
   // Gate 4114442250 is used in the app-server-manager-hooks feature check
   // function alongside the config check for features.remote_connections.
-  // Replace inline gate calls with !0.
   const REMOTE_CONNECTIONS_FEATURE_GATE_ID_MARKER = '`4114442250`';
-  const REMOTE_CONNECTIONS_FEATURE_GATE_INLINE_RE =
-    /([,;]\s*\w+\s*=)\s*[$\w]+\(`4114442250`\)/g;
   const REMOTE_CONNECTIONS_FEATURE_GATE_UNPATCHED_RE =
     /[$\w]+\(`4114442250`\)/;
 
@@ -1881,9 +1877,7 @@ try {
     let chronicleGateSeen = false;
     let personalityGateCount = 0;
     let personalityGateSeen = false;
-    let remoteConnectionsGatePatched = false;
     let remoteConnectionsGateSeen = false;
-    let remoteConnectionsFeatureGateCount = 0;
     let remoteConnectionsFeatureGateSeen = false;
     let artifactElectronGatePatched = false;
     let artifactElectronGateSeen = false;
@@ -2548,30 +2542,6 @@ try {
         }
       }
 
-      // Patch 32: Remote Connections
-      if (REMOTE_CONNECTIONS_GATE_FUNCTION_RE.test(content)) {
-        content = content.replace(REMOTE_CONNECTIONS_GATE_FUNCTION_RE, 'function $1(){return!0}');
-        remoteConnectionsGatePatched = true;
-        modified = true;
-      } else {
-        const inlineMatches = content.match(REMOTE_CONNECTIONS_GATE_INLINE_RE);
-        if (inlineMatches) {
-          content = content.replaceAll(REMOTE_CONNECTIONS_GATE_INLINE_RE, '$1!0');
-          remoteConnectionsGatePatched = true;
-          modified = true;
-        }
-      }
-
-      // Patch 33: Remote Connections feature flag
-      {
-        const inlineMatches = content.match(REMOTE_CONNECTIONS_FEATURE_GATE_INLINE_RE);
-        if (inlineMatches) {
-          content = content.replaceAll(REMOTE_CONNECTIONS_FEATURE_GATE_INLINE_RE, '$1!0');
-          remoteConnectionsFeatureGateCount += inlineMatches.length;
-          modified = true;
-        }
-      }
-
       // Patch 34: Artifact Electron native functionality
       if (ARTIFACT_ELECTRON_GATE_FUNCTION_RE.test(content)) {
         content = content.replace(ARTIFACT_ELECTRON_GATE_FUNCTION_RE, 'function $1(){return!0}');
@@ -3057,29 +3027,16 @@ try {
       );
     }
 
-    if (remoteConnectionsGatePatched) {
-      log('Remote connections gate bypassed for offline mode.');
-    } else if (!remoteConnectionsGateSeen) {
-      log('Remote connections gate 1042620455 is not present in this app version. No patch needed.');
+    if (remoteConnectionsGateSeen) {
+      log('Remote connections gate 1042620455 left intact because Codex Mobile is cloud-backed.');
     } else {
-      warn(
-        'Remote connections gate 1042620455 is still present, but no supported ' +
-        'patch pattern matched.',
-      );
+      log('Remote connections gate 1042620455 is not present in this app version. No patch needed.');
     }
 
-    if (remoteConnectionsFeatureGateCount > 0) {
-      log(
-        'Remote connections feature flag gate bypassed for offline mode ' +
-        `(${remoteConnectionsFeatureGateCount} occurrence(s)).`,
-      );
-    } else if (!remoteConnectionsFeatureGateSeen) {
-      log('Remote connections feature gate 4114442250 is not present in this app version. No patch needed.');
+    if (remoteConnectionsFeatureGateSeen) {
+      log('Remote connections feature gate 4114442250 left intact because Codex Mobile is cloud-backed.');
     } else {
-      warn(
-        'Remote connections feature gate 4114442250 is still present, but no ' +
-        'supported patch pattern matched.',
-      );
+      log('Remote connections feature gate 4114442250 is not present in this app version. No patch needed.');
     }
 
     if (artifactElectronGatePatched) {

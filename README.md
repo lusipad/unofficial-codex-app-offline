@@ -26,6 +26,7 @@ Official skills from [`openai/skills`](https://github.com/openai/skills) are fet
 - Patches the Microsoft Store desktop build so it can run as a normal standalone package outside the Store install flow, including bootstrap/runtime fixes, Electron fuse adjustments, and Windows-specific path handling fixes used by the offline repack.
 - Adds a compatibility patch layer for selected bundled features that may be hidden behind remote feature gates in some upstream app versions. When those gates are present, the offline build can unlock the already-bundled UI instead of silently hiding it.
   This includes keeping the Speed selector visible so users can switch between Fast and Standard modes in offline builds.
+  Cloud-backed device connection / Codex Mobile remains gated because it depends on ChatGPT remote-control security checks and enrolled client APIs.
 - Adds build-time verification so packaging fails when a known patch or gate bypass no longer matches the upstream app, instead of shipping a silently broken offline build.
 
 ### Quick Start
@@ -298,6 +299,7 @@ Additionally, notifications for the conversation you are currently viewing are s
 - 对微软商店版桌面应用做了离线重打包所需的运行时修补，使其可以脱离商店安装流程作为普通独立包运行，包括 bootstrap/runtime 修补、Electron fuse 调整，以及 Windows 路径处理修复。
 - 增加了一层兼容性 patch，用来处理上游某些版本里被远端 feature gate 隐藏、但实际上已经随包提供的功能界面；当这些 gate 在目标版本中存在时，离线版会解锁对应的已捆绑 UI，而不是静默隐藏。
   其中包括保持 Speed 选择器可见，避免离线版选择 Fast 后无法切回 Standard。
+  云端设备连接 / Codex Mobile 会保持 gate，不在离线版里强行放开，因为它依赖 ChatGPT 远控安全检查和已登记客户端 API。
 - 增加了构建期校验；如果某个已知 patch 或 gate bypass 与上游版本不再匹配，打包会直接失败，避免产出一个表面成功、实际失效的离线包。
 
 ### 快速开始
