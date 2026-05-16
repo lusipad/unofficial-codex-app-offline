@@ -1,7 +1,7 @@
 import process from 'node:process';
 import { chromium } from 'playwright';
 
-const CHANGELOG_URL = 'https://developers.openai.com/codex/changelog';
+const CHANGELOG_URL = 'https://developers.openai.com/codex/changelog?type=codex-app';
 
 function parseArgs(argv) {
   const args = {};
@@ -172,10 +172,20 @@ async function main() {
         return blocks.join('\n\n').trim();
       }
 
-      function getAnchorId(node) {
+      function getEntryHeading(entry) {
+        return (
+          entry.querySelector('h1[data-anchor-id], h2[data-anchor-id], h3[data-anchor-id], h4[data-anchor-id], h5[data-anchor-id], h6[data-anchor-id]') ||
+          entry.querySelector('article h1, article h2, article h3, article h4, article h5, article h6, h1, h2, h3, h4, h5, h6')
+        );
+      }
+
+      function getAnchorId(node, entry) {
         return (
           node.querySelector('[data-anchor-id]')?.getAttribute('data-anchor-id') ||
           node.getAttribute('data-anchor-id') ||
+          entry?.querySelector('[data-anchor-id]')?.getAttribute('data-anchor-id') ||
+          entry?.getAttribute('data-anchor-id') ||
+          entry?.id ||
           node.id ||
           ''
         );
@@ -186,7 +196,7 @@ async function main() {
         const article = entry?.querySelector('article');
         const title = normalizeWhitespace(node.textContent || '');
         const publishedAt = normalizeWhitespace(entry?.querySelector('time')?.textContent || '');
-        const anchorId = getAnchorId(node);
+        const anchorId = getAnchorId(node, entry);
         const sourceUrl = anchorId ? `${changeLogUrl}#${anchorId}` : changeLogUrl;
         const body = article ? serializeArticle(article) : '';
 
@@ -208,19 +218,54 @@ async function main() {
         };
       }
 
-      const headings = [...document.querySelectorAll('h1, h2, h3, h4, h5, h6')];
-      const versionPattern = new RegExp(`(^|\\s)${versionLabel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\s|$)`);
-      const targetHeading = headings.find((node) => versionPattern.test((node.textContent || '').replace(/\s+/g, ' ').trim()));
-      const recentAppReleases = headings
-        .map((node) => ({
-          node,
-          text: normalizeWhitespace(node.textContent || ''),
-        }))
-        .filter(({ text }) => /^Codex app\s+\d+\.\d+\b/.test(text))
-        .slice(0, Math.max(recentLimit, 0))
-        .map(({ node }) => extractEntry(node));
+      function getChangelogEntries() {
+        return [...document.querySelectorAll('li')]
+          .map((entry) => {
+            const heading = getEntryHeading(entry);
+            const title = heading ? normalizeWhitespace(heading.textContent || '') : '';
+            const publishedAt = normalizeWhitespace(entry.querySelector('time')?.textContent || '');
+            const topic = normalizeWhitespace(entry.getAttribute('data-codex-topics') || '');
+            const product = normalizeWhitespace(entry.getAttribute('data-product') || '');
+            const anchorId = getAnchorId(heading || entry, entry);
 
-      if (!targetHeading) {
+            return {
+              entry,
+              heading,
+              title,
+              publishedAt,
+              topic,
+              product,
+              anchorId,
+            };
+          })
+          .filter(({ heading, title, publishedAt }) => heading && title && publishedAt);
+      }
+
+      function isCodexAppHistoryEntry(item) {
+        if (/^Codex CLI\b/i.test(item.title)) {
+          return false;
+        }
+
+        if (item.topic.toLowerCase() === 'codex-cli') {
+          return false;
+        }
+
+        return (
+          item.product.toLowerCase() === 'codex' ||
+          item.anchorId.startsWith('codex-') ||
+          /^Codex\b/i.test(item.title)
+        );
+      }
+
+      const changelogEntries = getChangelogEntries();
+      const versionPattern = new RegExp(`(^|\\s)${versionLabel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\s|$)`);
+      const targetEntry = changelogEntries.find(({ title }) => versionPattern.test(title));
+      const recentAppReleases = changelogEntries
+        .filter(isCodexAppHistoryEntry)
+        .slice(0, Math.max(recentLimit, 0))
+        .map(({ heading }) => extractEntry(heading));
+
+      if (!targetEntry) {
         return {
           matchedVersion: versionLabel,
           title: null,
@@ -232,7 +277,7 @@ async function main() {
         };
       }
 
-      const matchedEntry = extractEntry(targetHeading);
+      const matchedEntry = extractEntry(targetEntry.heading);
       return {
         matchedVersion: versionLabel,
         title: matchedEntry.title,

@@ -326,7 +326,7 @@ jobs:
             foreach ($release in $changelog.recentAppReleases) {
               $publishedAt = if ($release.publishedAt) { $release.publishedAt } else { 'unknown date' }
               $title = if ([string]::IsNullOrWhiteSpace($release.title)) { 'Codex app release' } else { $release.title }
-              $sourceUrl = if ([string]::IsNullOrWhiteSpace($release.sourceUrl)) { 'https://developers.openai.com/codex/changelog' } else { $release.sourceUrl }
+              $sourceUrl = if ([string]::IsNullOrWhiteSpace($release.sourceUrl)) { 'https://developers.openai.com/codex/changelog?type=codex-app' } else { $release.sourceUrl }
               $lines.Add("- [$title]($sourceUrl) - $publishedAt")
             }
           }
