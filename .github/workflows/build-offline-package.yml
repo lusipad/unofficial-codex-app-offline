@@ -22,11 +22,13 @@ on:
       - '.github/workflows/build-offline-package.yml'
       - '.github/workflows/build-offline-package-monitor.yml'
       - 'README.md'
+      - 'CHANGELOG.md'
       - 'config/**'
       - 'installer/**'
       - 'package.json'
       - 'package-lock.json'
       - 'scripts/**'
+      - 'web-gateway/**'
   pull_request:
     branches:
       - main
@@ -34,11 +36,13 @@ on:
       - '.github/workflows/build-offline-package.yml'
       - '.github/workflows/build-offline-package-monitor.yml'
       - 'README.md'
+      - 'CHANGELOG.md'
       - 'config/**'
       - 'installer/**'
       - 'package.json'
       - 'package-lock.json'
       - 'scripts/**'
+      - 'web-gateway/**'
 
 permissions:
   contents: write
@@ -88,6 +92,7 @@ jobs:
           }
 
           node --check './scripts/patch-app-asar.mjs'
+          node --check './web-gateway/start-web.mjs'
           Test-PowerShellSyntax './scripts/build-offline-package.ps1'
           Test-PowerShellSyntax './scripts/verify-offline-package.ps1'
 

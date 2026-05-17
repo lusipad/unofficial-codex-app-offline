@@ -135,6 +135,80 @@ function Find-Iscc {
     return $null
 }
 
+function Invoke-NpmCommand {
+    param(
+        [Parameter(Mandatory = $true)][string]$WorkingDirectory,
+        [Parameter(Mandatory = $true)][string[]]$Arguments
+    )
+
+    $npm = Get-Command npm.cmd -ErrorAction SilentlyContinue
+    if ($null -eq $npm) {
+        $npm = Get-Command npm -ErrorAction SilentlyContinue
+    }
+    if ($null -eq $npm) {
+        throw 'npm was not found. It is required to build the Codex Web gateway.'
+    }
+
+    $process = Start-Process -FilePath $npm.Source -ArgumentList $Arguments -WorkingDirectory $WorkingDirectory -NoNewWindow -Wait -PassThru
+    if ($process.ExitCode -ne 0) {
+        throw "npm $($Arguments -join ' ') failed with exit code $($process.ExitCode)."
+    }
+}
+
+function Add-WebGatewayRuntime {
+    param(
+        [Parameter(Mandatory = $true)][string]$RepoRoot,
+        [Parameter(Mandatory = $true)][string]$InternalRoot
+    )
+
+    $sourceRoot = Join-Path $RepoRoot 'web-gateway'
+    if (-not (Test-Path -LiteralPath (Join-Path $sourceRoot 'package.json') -PathType Leaf)) {
+        return $null
+    }
+
+    Write-BuildTrace 'Building Codex Web gateway.'
+    Invoke-NpmCommand -WorkingDirectory $sourceRoot -Arguments @('ci')
+    Invoke-NpmCommand -WorkingDirectory $sourceRoot -Arguments @('run', 'build:gateway')
+
+    $destinationRoot = Join-Path $InternalRoot 'web'
+    if (Test-Path -LiteralPath $destinationRoot) {
+        Remove-Item -LiteralPath $destinationRoot -Recurse -Force
+    }
+    New-Item -ItemType Directory -Force -Path $destinationRoot | Out-Null
+
+    foreach ($fileName in @('start-web.mjs', 'package.json', 'package-lock.json', 'LICENSE')) {
+        Copy-Item -LiteralPath (Join-Path $sourceRoot $fileName) -Destination (Join-Path $destinationRoot $fileName) -Force
+    }
+
+    Copy-Item -LiteralPath (Join-Path $sourceRoot 'node_modules') -Destination (Join-Path $destinationRoot 'node_modules') -Recurse -Force
+    Invoke-NpmCommand -WorkingDirectory $destinationRoot -Arguments @('prune', '--omit=dev')
+    Copy-Item -LiteralPath (Join-Path $sourceRoot 'web-shell') -Destination (Join-Path $destinationRoot 'web-shell') -Recurse -Force
+
+    New-Item -ItemType Directory -Force -Path (Join-Path $destinationRoot 'gateway') | Out-Null
+    Copy-Item -LiteralPath (Join-Path $sourceRoot 'gateway\dist') -Destination (Join-Path $destinationRoot 'gateway\dist') -Recurse -Force
+
+    foreach ($requiredPath in @(
+        'start-web.mjs',
+        'gateway\dist\server.js',
+        'web-shell\index.html',
+        'web-shell\codex-bridge-polyfill.js',
+        'node_modules\express\package.json',
+        'node_modules\ws\package.json',
+        'node_modules\@electron\asar\package.json'
+    )) {
+        if (-not (Test-Path -LiteralPath (Join-Path $destinationRoot $requiredPath) -PathType Leaf)) {
+            throw "Codex Web gateway runtime is missing required file: $requiredPath"
+        }
+    }
+
+    Write-BuildTrace 'Codex Web gateway bundled.'
+    return [ordered]@{
+        source = 'web-gateway'
+        defaultHost = '127.0.0.1'
+        defaultPort = 3737
+    }
+}
+
 function Export-AppSource {
     param(
         [Parameter(Mandatory = $true)]$Config,
@@ -494,10 +568,12 @@ if (Test-Path $envExampleSrc) {
     Copy-Item -Path $envExampleSrc -Destination (Join-Path $internalRoot 'skill-installer.env.example') -Force
 }
 
-# Include README so users have documentation inside the package.
-$readmeSrc = Join-Path $repoRoot 'README.md'
-if (Test-Path $readmeSrc) {
-    Copy-Item -Path $readmeSrc -Destination (Join-Path $packageRoot 'README.md') -Force
+# Include root docs so users have documentation and package history inside the package.
+foreach ($docName in @('README.md', 'CHANGELOG.md')) {
+    $docSrc = Join-Path $repoRoot $docName
+    if (Test-Path $docSrc) {
+        Copy-Item -Path $docSrc -Destination (Join-Path $packageRoot $docName) -Force
+    }
 }
 
 # Generate the one-time setup command. Setup is intentionally visible because
@@ -509,6 +585,26 @@ $dailyLaunchCmd = @(
     'start "" "%~dp0_internal\app\Codex.exe" %*'
 )
 $dailyLaunchCmd | Set-Content -Path (Join-Path $packageRoot 'Codex.cmd') -Encoding ASCII
+
+$webLaunchCmd = @(
+    '@echo off',
+    'setlocal',
+    'where node >nul 2>nul',
+    'if errorlevel 1 (',
+    '  echo Node.js was not found. Install Node.js 22 or newer, then run this launcher again.',
+    '  pause',
+    '  exit /b 1',
+    ')',
+    'node "%~dp0_internal\web\start-web.mjs" %*',
+    'set WEB_EXIT=%ERRORLEVEL%',
+    'if not "%WEB_EXIT%"=="0" (',
+    '  echo.',
+    '  echo Codex Web stopped with exit code %WEB_EXIT%.',
+    '  pause',
+    ')',
+    'exit /b %WEB_EXIT%'
+)
+$webLaunchCmd | Set-Content -Path (Join-Path $packageRoot 'Codex Web.cmd') -Encoding ASCII
 
 $setupCmd = @(
     '@echo off',
@@ -556,6 +652,8 @@ $repairChromeHostCmd = @(
 )
 $repairChromeHostCmd | Set-Content -Path (Join-Path $toolsRoot 'Repair Chrome Host.cmd') -Encoding ASCII
 
+$webGatewayInfo = Add-WebGatewayRuntime -RepoRoot $repoRoot -InternalRoot $internalRoot
+
 Write-BuildTrace 'Resolving skill source roots.'
 $skillSources = @()
 foreach ($source in $config.skills.sources) {
@@ -590,6 +688,7 @@ $buildInfo = [ordered]@{
     }
     primaryRuntime = $primaryRuntimePluginSource
     offlineRuntimePlugins = $offlineRuntimePluginInfo
+    webGateway = $webGatewayInfo
 }
 
 Write-BuildTrace 'Build info written.'

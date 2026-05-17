@@ -99,10 +99,20 @@ try {
 
     $requiredPortableFiles = @(
         'Codex.cmd',
+        'Codex Web.cmd',
         'Setup Codex.cmd',
+        'README.md',
+        'CHANGELOG.md',
         '_internal\bootstrap-codex-skills.ps1',
         '_internal\setup-codex-offline.ps1',
         '_internal\repair-chrome-host.ps1',
+        '_internal\web\start-web.mjs',
+        '_internal\web\gateway\dist\server.js',
+        '_internal\web\web-shell\index.html',
+        '_internal\web\web-shell\codex-bridge-polyfill.js',
+        '_internal\web\node_modules\express\package.json',
+        '_internal\web\node_modules\ws\package.json',
+        '_internal\web\node_modules\@electron\asar\package.json',
         '_internal\tools\Launch Codex Direct.cmd',
         '_internal\tools\Sync Default Skills.cmd',
         '_internal\tools\Sync All Skills.cmd',
@@ -172,6 +182,32 @@ try {
     foreach ($needle in @('%~dp0_internal\app\Codex.exe', 'CODEX_ELECTRON_ENABLE_WINDOWS_COMPUTER_USE')) {
         if (-not $dailyLauncherContent.Contains($needle)) {
             throw "Daily launcher is missing expected relative-launch marker: $needle"
+        }
+    }
+
+    $webLauncherPath = Join-Path $portableRoot 'Codex Web.cmd'
+    $webLauncherContent = Get-Content -Path $webLauncherPath -Raw
+    foreach ($needle in @('where node', '%~dp0_internal\web\start-web.mjs')) {
+        if (-not $webLauncherContent.Contains($needle)) {
+            throw "Web launcher is missing expected Node startup marker: $needle"
+        }
+    }
+
+    $webStartupPath = Join-Path $portableRoot '_internal\web\start-web.mjs'
+    $webStartupContent = Get-Content -Path $webStartupPath -Raw
+    foreach ($needle in @(
+        '127.0.0.1',
+        'CODEX_DESKTOP_APP_PATH',
+        'CODEX_APP_SERVER_CMD',
+        'CODEX_WEB_OFFICIAL_BUNDLE_DIR',
+        'resources',
+        'codex.exe',
+        'CODEX_WEB_PASSWORD is required',
+        'app-server --listen stdio://',
+        '/api/health'
+    )) {
+        if (-not $webStartupContent.Contains($needle)) {
+            throw "Web startup script is missing expected gateway marker: $needle"
         }
     }
 

@@ -1,6 +1,10 @@
 build/
 dist/
 node_modules/
+web-gateway/node_modules/
+web-gateway/gateway/dist/
+web-gateway/cache/
+web-gateway/reports/
 vendor/plugins/openai-primary-runtime/
 .tmp-home/
 .tmp-test/
