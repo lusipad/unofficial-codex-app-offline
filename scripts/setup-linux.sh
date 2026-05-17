@@ -107,7 +107,11 @@ if [ "$(ls -1 "$INSTALL_DIR" | wc -l)" = "1" ] && [ -d "$INSTALL_DIR/$(ls -1 "$I
   rmdir "$INSTALL_DIR/$INNER"
 fi
 # 修复 Windows 构建可能引入的 CRLF 换行符
-find "$INSTALL_DIR" -name '*.sh' -exec sed -i 's/\r$//' {} + 2>/dev/null || true
+CR=$(printf '\r')
+for f in $(find "$INSTALL_DIR" -name '*.sh' -o -name '*.mjs' 2>/dev/null); do
+  tr -d "$CR" < "$f" > "${f}.tmp" && mv "${f}.tmp" "$f"
+done
+chmod +x "$INSTALL_DIR"/*.sh 2>/dev/null || true
 rm -f "$DL_FILE"
 echo -e "  ${GREEN}✓${NC}"
 
