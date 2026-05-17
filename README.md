@@ -51,6 +51,17 @@ Setup runs in a console window so Chrome/native-host errors are visible instead 
 
 The standalone **`-web.zip`** package works on all three platforms without the full Electron Desktop app.
 
+**Linux users: use the guided setup script:**
+
+```bash
+wget https://raw.githubusercontent.com/lusipad/unofficial-codex-app-offline/main/scripts/setup-linux.sh
+bash setup-linux.sh
+```
+
+The script walks through: system deps → download latest → install CLI → configure port/password → systemd service.
+
+**Manual install:**
+
 1. Install Node.js 18+ and the Codex CLI:
    ```bash
    # Windows (PowerShell as Administrator)
@@ -412,6 +423,17 @@ Setup 会打开控制台窗口，这样 Chrome/native-host 错误不会被隐藏
 #### 方式 C — Web-Only（Windows / Linux / macOS）
 
 独立的 **`-web.zip`** 包可在三个平台上使用，无需完整的 Electron Desktop 应用。
+
+**Linux 推荐使用一键引导脚本：**
+
+```bash
+wget https://raw.githubusercontent.com/lusipad/unofficial-codex-app-offline/main/scripts/setup-linux.sh
+bash setup-linux.sh
+```
+
+脚本会引导完成：系统依赖 → 下载最新版 → 安装 CLI → 配置端口/密码 → systemd 服务。
+
+**手动安装：**
 
 1. 安装 Node.js 18+ 和 Codex CLI：
    ```bash

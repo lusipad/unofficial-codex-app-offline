@@ -743,6 +743,10 @@ if ($config.packaging.crossPlatformWeb) {
 set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
+# 加载用户配置（如果存在）
+if [ -f "$SCRIPT_DIR/.env" ]; then
+  set -a; source "$SCRIPT_DIR/.env"; set +a
+fi
 if [ ! -d "node_modules" ]; then
   echo "[codex-web] Installing dependencies..."
   npm install --omit=dev --no-audit --no-fund

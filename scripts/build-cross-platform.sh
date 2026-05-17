@@ -56,6 +56,11 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
+# 加载用户配置（如果存在）
+if [ -f "$SCRIPT_DIR/.env" ]; then
+  set -a; source "$SCRIPT_DIR/.env"; set +a
+fi
+
 # 首次运行：安装依赖
 if [ ! -d "node_modules" ]; then
   echo "[codex-web] 首次运行，安装依赖..."
