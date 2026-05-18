@@ -724,14 +724,20 @@ if ($config.packaging.crossPlatformWeb) {
     # web-shell
     Copy-Item -Path (Join-Path $repoRoot 'web-gateway\web-shell\*') -Destination (Join-Path $webRoot 'web-shell') -Recurse -Force
 
-    # webview (from already-extracted cache)
-    $webviewSrc = Join-Path $internalRoot 'web\cache\official-bundle\webview'
-    if (Test-Path $webviewSrc) {
-        Copy-Item -Path "$webviewSrc\*" -Destination (Join-Path $webRoot 'cache\official-bundle\webview') -Recurse -Force
+    # Cross-platform Web packages do not carry app.asar, so the official
+    # renderer must be pre-extracted during packaging.
+    $webviewDest = Join-Path $webRoot 'cache\official-bundle\webview'
+    $webviewManifest = Join-Path $webRoot 'cache\official-bundle\manifest.json'
+    $webviewExtractJson = & node (Join-Path $scriptRoot 'extract-webview-from-asar.mjs') `
+        --asar (Join-Path $stagedAppDir 'resources\app.asar') `
+        --destination $webviewDest `
+        --manifest $webviewManifest `
+        --source-app $stagedAppDir `
+        --version $version
+    if ($LASTEXITCODE -ne 0) {
+        throw 'extract-webview-from-asar.mjs failed.'
     }
-    else {
-        Write-Warning "Webview not found at $webviewSrc — cross-platform Web package will lack UI assets"
-    }
+    Write-BuildTrace "Pre-extracted cross-platform Web renderer: $webviewExtractJson"
 
     # Version
     $version | Set-Content -Path (Join-Path $webRoot 'VERSION') -Encoding ASCII
@@ -878,4 +884,3 @@ if (-not [string]::IsNullOrWhiteSpace($MetadataOutputPath)) {
 }
 
 $buildMetadataJson
-

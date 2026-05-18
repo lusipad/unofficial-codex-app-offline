@@ -92,6 +92,7 @@ jobs:
           }
 
           node --check './scripts/patch-app-asar.mjs'
+          node --check './scripts/extract-webview-from-asar.mjs'
           node --check './web-gateway/start-web.mjs'
           Test-PowerShellSyntax './scripts/build-offline-package.ps1'
           Test-PowerShellSyntax './scripts/verify-offline-package.ps1'

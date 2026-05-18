@@ -44,13 +44,23 @@ if (-not (Test-Path $artifactRoot)) {
 
 $metadataAssets = @($metadata.assets)
 $portableAssets = @($metadataAssets | Where-Object { $_.fileName -like '*-portable.zip' })
+$webAssets = @($metadataAssets | Where-Object { $_.fileName -like '*-web.zip' })
 $skillsAssets = @($metadataAssets | Where-Object { $_.fileName -like '*-skills.zip' })
 $installerAssets = @($metadataAssets | Where-Object { $_.fileName -like '*-setup.exe' })
 $storeExportAssets = @($metadataAssets | Where-Object { $_.fileName -like '*-store-export.zip' })
 $checksumAssets = @($metadataAssets | Where-Object { $_.fileName -eq 'SHA256SUMS.txt' })
+$crossPlatformWebEnabled = $null -ne $config.packaging.PSObject.Properties['crossPlatformWeb'] -and [bool]$config.packaging.crossPlatformWeb
 
 if ($config.packaging.portableZip -and $portableAssets.Count -ne 1) {
     throw "Expected exactly one portable zip asset, found $($portableAssets.Count)."
+}
+
+if ($crossPlatformWebEnabled -and $webAssets.Count -ne 1) {
+    throw "Expected exactly one web zip asset, found $($webAssets.Count)."
+}
+
+if (-not $crossPlatformWebEnabled -and $webAssets.Count -gt 0) {
+    throw 'Cross-platform Web zip is disabled, but a *-web.zip asset was still produced.'
 }
 
 if ($config.packaging.skillArchive -and $skillsAssets.Count -ne 1) {
@@ -208,6 +218,55 @@ try {
     )) {
         if (-not $webStartupContent.Contains($needle)) {
             throw "Web startup script is missing expected gateway marker: $needle"
+        }
+    }
+
+    if ($crossPlatformWebEnabled) {
+        $webZipPath = Join-Path $artifactRoot $webAssets[0].fileName
+        if (-not (Test-Path $webZipPath)) {
+            throw "Web zip was not found: $webZipPath"
+        }
+
+        $webTempRoot = Join-Path $tempRoot 'web-package'
+        Expand-Archive -Path $webZipPath -DestinationPath $webTempRoot -Force
+
+        $webRoot = $webTempRoot
+        $webTopLevelEntries = @(Get-ChildItem -Path $webTempRoot -Force)
+        if ($webTopLevelEntries.Count -eq 1 -and $webTopLevelEntries[0].PSIsContainer) {
+            $webRoot = $webTopLevelEntries[0].FullName
+        }
+
+        foreach ($relativePath in @(
+            'start-web.mjs',
+            'start.sh',
+            'start.bat',
+            'package.json',
+            'gateway\dist\server.js',
+            'web-shell\index.html',
+            'web-shell\codex-bridge-polyfill.js',
+            'cache\official-bundle\manifest.json',
+            'cache\official-bundle\webview\index.html'
+        )) {
+            if (-not (Test-Path (Join-Path $webRoot $relativePath) -PathType Leaf)) {
+                throw "Web zip is missing required file: $relativePath"
+            }
+        }
+
+        $webviewAssetsDir = Join-Path $webRoot 'cache\official-bundle\webview\assets'
+        if (-not (Test-Path $webviewAssetsDir -PathType Container)) {
+            throw 'Web zip is missing the webview assets directory.'
+        }
+        $webviewIndexBundles = @(Get-ChildItem -Path $webviewAssetsDir -Filter 'index-*.js' -File -ErrorAction SilentlyContinue)
+        if ($webviewIndexBundles.Count -lt 1) {
+            throw 'Web zip webview assets are incomplete: assets/index-*.js was not found.'
+        }
+
+        $webManifest = Get-Content -Path (Join-Path $webRoot 'cache\official-bundle\manifest.json') -Raw | ConvertFrom-Json
+        if ([int]$webManifest.schemaVersion -ne 3) {
+            throw "Web zip manifest has unexpected schemaVersion: $($webManifest.schemaVersion)"
+        }
+        if ([string]$webManifest.sourceLayoutKind -ne 'preextracted-web-package') {
+            throw "Web zip manifest has unexpected sourceLayoutKind: $($webManifest.sourceLayoutKind)"
         }
     }
 

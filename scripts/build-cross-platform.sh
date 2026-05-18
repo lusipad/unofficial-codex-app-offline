@@ -18,6 +18,12 @@ echo "Gateway: $GATEWAY_DIR"
 echo "Webview: $WEBVIEW_SRC"
 echo "输出: $OUTPUT_DIR"
 
+if [ ! -f "$WEBVIEW_SRC/index.html" ] || ! ls "$WEBVIEW_SRC"/assets/index-*.js >/dev/null 2>&1; then
+  echo "ERROR: webview source is incomplete: $WEBVIEW_SRC" >&2
+  echo "Expected index.html and assets/index-*.js." >&2
+  exit 1
+fi
+
 # ── 1. 编译 gateway ──────────────────────────────────────
 echo ""
 echo "--- 1/5 编译 TypeScript ---"
@@ -43,7 +49,23 @@ cp -r "$GATEWAY_DIR/web-shell/"* "$PKG/web-shell/"
 
 # 预提取好的 webview（前端 UI）
 cp -r "$WEBVIEW_SRC/"* "$PKG/cache/official-bundle/webview/"
-echo "{\"version\":\"$VERSION\",\"source\":\"cross-platform-build\"}" > "$PKG/cache/official-bundle/manifest.json"
+cat > "$PKG/cache/official-bundle/manifest.json" << EOF
+{
+  "schemaVersion": 3,
+  "sourceAppPath": "",
+  "sourceResourcesPath": "",
+  "sourceAsarPath": "",
+  "sourceCodexBinaryPath": "",
+  "sourceLayoutKind": "preextracted-web-package",
+  "sourcePlatformHint": "cross-platform",
+  "bundleIdentifier": "openai-codex-electron",
+  "version": "$VERSION",
+  "build": "cross-platform-build",
+  "sourceAsarSize": 0,
+  "sourceAsarMtimeMs": 0,
+  "processedAt": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+}
+EOF
 
 # ── 3. 生成启动脚本 ──────────────────────────────────────
 echo ""

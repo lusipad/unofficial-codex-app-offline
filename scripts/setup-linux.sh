@@ -112,6 +112,21 @@ for f in $(find "$INSTALL_DIR" -name '*.sh' -o -name '*.mjs' 2>/dev/null); do
   tr -d "$CR" < "$f" > "${f}.tmp" && mv "${f}.tmp" "$f"
 done
 chmod +x "$INSTALL_DIR"/*.sh 2>/dev/null || true
+
+WEBVIEW_DIR="$INSTALL_DIR/cache/official-bundle/webview"
+if [ ! -f "$INSTALL_DIR/start-web.mjs" ] || [ ! -f "$INSTALL_DIR/gateway/dist/server.js" ]; then
+  echo -e "${RED}下载的 Web 包缺少 gateway 启动文件。${NC}"
+  echo "请重新下载最新 *-web.zip，或等待发布包重新构建后再运行此脚本。"
+  exit 1
+fi
+if [ ! -f "$INSTALL_DIR/cache/official-bundle/manifest.json" ] ||
+   [ ! -f "$WEBVIEW_DIR/index.html" ] ||
+   ! find "$WEBVIEW_DIR/assets" -maxdepth 1 -type f -name 'index-*.js' 2>/dev/null | grep -q .; then
+  echo -e "${RED}下载的 Web 包缺少预提取 Codex UI（webview）。${NC}"
+  echo "这会导致 WebView 空白或 gateway 启动时找不到 app.asar。"
+  echo "请重新下载最新 *-web.zip，或等待发布包重新构建后再运行此脚本。"
+  exit 1
+fi
 rm -f "$DL_FILE"
 echo -e "  ${GREEN}✓${NC}"
 
