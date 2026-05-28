@@ -299,6 +299,10 @@
     control: true,
     avatarOverlay: true,
     "3903742690": true,
+    "3326157269": true,
+    "2900529421": true,
+    "2711149772": true,
+    "816842483": true,
     artifacts: true,
   };
   const configuredStatsigOverrides =

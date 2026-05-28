@@ -88,6 +88,12 @@
  *    gate can be false even after the bundled Chrome plugin and native host
  *    are installed, so we bypass that renderer gate.
  *
+ * 38. Enable external agent config import in Settings > General
+ *    Newer builds hide the "Import external agent config" row behind the
+ *    external-agent-config gates.  Offline Statsig defaults can leave those
+ *    gates false, so we bypass the local calls while keeping the migration
+ *    IPC handlers safe to no-op in Web gateway builds.
+ *
  * 39. Enable Plugins navigation for API-key/offline sessions
  *    The desktop sidebar shows a disabled Plugins item for API-key users when
  *    gate 533078438 is on, even though the bundled runtime marketplace can be
@@ -437,6 +443,83 @@ function countOccurrences(content, needle) {
 
 function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function externalAgentConfigGateAliases(content) {
+  const aliases = [];
+  const gateExports = new Set(['i', 'n', 'r', 't']);
+  const importRe = /import\{([^}]+)\}from"\.\/external-agent-config-gates-[^"]+\.js";/g;
+  let match;
+
+  while ((match = importRe.exec(content)) !== null) {
+    for (const rawPart of match[1].split(',')) {
+      const part = rawPart.trim();
+      if (!part) continue;
+
+      const aliasMatch = part.match(/^([A-Za-z_$][\w$]*)(?:\s+as\s+([A-Za-z_$][\w$]*))?$/);
+      if (!aliasMatch || !gateExports.has(aliasMatch[1])) continue;
+
+      aliases.push(aliasMatch[2] || aliasMatch[1]);
+    }
+  }
+
+  return aliases;
+}
+
+function patchExternalAgentConfigGateCalls(content, patchMarker) {
+  let next = content;
+  let count = 0;
+
+  for (const alias of externalAgentConfigGateAliases(content)) {
+    const gateCallRe = new RegExp(
+      `(^|[^.\\w$])[$\\w]+\\(${escapeRegExp(alias)}\\)`,
+      'g',
+    );
+    next = next.replace(gateCallRe, (_match, prefix) => {
+      count += 1;
+      return `${prefix}!0${patchMarker}`;
+    });
+  }
+
+  return { content: next, count };
+}
+
+function patchExternalAgentConfigDirectGateCalls(content, gateIds, patchMarker) {
+  let next = content;
+  let count = 0;
+
+  for (const gateId of gateIds) {
+    const gateCallRe = new RegExp(
+      `(?<!!)(?:\\(0,[$\\w]+\\)|[$\\w]+)\\(\`${gateId}\`\\)`,
+      'g',
+    );
+    next = next.replace(gateCallRe, () => {
+      count += 1;
+      return `!0${patchMarker}`;
+    });
+  }
+
+  return { content: next, count };
+}
+
+function patchExternalAgentConfigGateIdLiterals(content, gateIds, patchMarker) {
+  let next = content;
+  let count = 0;
+
+  for (const gateId of gateIds) {
+    const literal = '`' + gateId + '`';
+    if (!next.includes(literal)) continue;
+
+    const splitAt = Math.floor(gateId.length / 2);
+    const replacement =
+      '`' + gateId.slice(0, splitAt) + '`+`' + gateId.slice(splitAt) + '`' +
+      patchMarker;
+    const occurrences = countOccurrences(next, literal);
+    next = next.replaceAll(literal, replacement);
+    count += occurrences;
+  }
+
+  return { content: next, count };
 }
 
 function patchChromePluginScripts(rootAppDir) {
@@ -1724,6 +1807,24 @@ try {
   const EXTERNAL_BROWSER_USE_GATE_FUNCTION_RE =
     /function\s+(\w+)\(\)\{return\s+[$\w]+\(`410065390`\)\}/;
 
+  // ── Patch 38: Enable external agent config import for offline builds ──
+  //
+  // The Settings > General "Import external agent config" row is controlled
+  // by the external-agent-config-gates chunk.  The chunk exports gate ids
+  // 3326157269 / 2900529421 / 2711149772 / 816842483; consumers import those
+  // ids under minified aliases and call the Statsig hook on the aliases.
+  // Replace those local hook calls with !0 so the row is not hidden offline.
+  const EXTERNAL_AGENT_CONFIG_IMPORT_PATCH_MARKER =
+    contractPatchMarker('/*codex-offline:external-agent-config-import*/');
+  const EXTERNAL_AGENT_CONFIG_GATE_IDS = [
+    '3326157269',
+    '2900529421',
+    '2711149772',
+    '816842483',
+  ];
+  const EXTERNAL_AGENT_CONFIG_GATE_ID_MARKERS =
+    EXTERNAL_AGENT_CONFIG_GATE_IDS.map(id => '`' + id + '`');
+
   // ── Patch 39: Enable Plugins navigation for API-key/offline sessions ──
   //
   // Gate 533078438 enables a disabled "Please sign in with ChatGPT to use
@@ -2038,6 +2139,9 @@ try {
     let pluginsBundledMarketplaceGateSeen = false;
     let externalBrowserUseGateCount = 0;
     let externalBrowserUseGateSeen = false;
+    let externalAgentConfigGateCount = 0;
+    let externalAgentConfigGateSeen = false;
+    let externalAgentConfigGateAlreadyCorrect = false;
     let pluginsApiKeyNavGateCount = 0;
     let pluginsApiKeyNavAuthFilterCount = 0;
     let pluginsApiKeyNavGateSeen = false;
@@ -2159,6 +2263,11 @@ try {
         originalContent.match(EXTERNAL_BROWSER_USE_GATE_INLINE_RE) !== null ||
         EXTERNAL_BROWSER_USE_GATE_FUNCTION_RE.test(originalContent) ||
         originalContent.includes(EXTERNAL_BROWSER_USE_GATE_ID_MARKER);
+      externalAgentConfigGateSeen ||=
+        originalContent.includes('external-agent-config-gates') ||
+        EXTERNAL_AGENT_CONFIG_GATE_ID_MARKERS.some(marker => originalContent.includes(marker));
+      externalAgentConfigGateAlreadyCorrect ||=
+        originalContent.includes(EXTERNAL_AGENT_CONFIG_IMPORT_PATCH_MARKER);
       pluginsApiKeyNavGateSeen ||=
         originalContent.includes(PLUGINS_API_KEY_DISABLED_GATE_ID_MARKER) ||
         originalContent.includes('sidebarElectron.pluginsDisabledTooltip');
@@ -2594,6 +2703,41 @@ try {
           content = content.replace(EXTERNAL_BROWSER_USE_GATE_FUNCTION_RE, 'function $1(){return!0}');
           externalBrowserUseGateCount += 1;
           modified = true;
+        }
+      }
+
+      {
+        if (!content.includes(EXTERNAL_AGENT_CONFIG_IMPORT_PATCH_MARKER)) {
+          const externalAgentConfigDirectPatch = patchExternalAgentConfigDirectGateCalls(
+            content,
+            EXTERNAL_AGENT_CONFIG_GATE_IDS,
+            EXTERNAL_AGENT_CONFIG_IMPORT_PATCH_MARKER,
+          );
+          if (externalAgentConfigDirectPatch.count > 0) {
+            content = externalAgentConfigDirectPatch.content;
+            externalAgentConfigGateCount += externalAgentConfigDirectPatch.count;
+            modified = true;
+          }
+
+          const externalAgentConfigLiteralPatch = patchExternalAgentConfigGateIdLiterals(
+            content,
+            EXTERNAL_AGENT_CONFIG_GATE_IDS,
+            EXTERNAL_AGENT_CONFIG_IMPORT_PATCH_MARKER,
+          );
+          if (externalAgentConfigLiteralPatch.count > 0) {
+            content = externalAgentConfigLiteralPatch.content;
+            modified = true;
+          }
+
+          const externalAgentConfigPatch = patchExternalAgentConfigGateCalls(
+            content,
+            EXTERNAL_AGENT_CONFIG_IMPORT_PATCH_MARKER,
+          );
+          if (externalAgentConfigPatch.count > 0) {
+            content = externalAgentConfigPatch.content;
+            externalAgentConfigGateCount += externalAgentConfigPatch.count;
+            modified = true;
+          }
         }
       }
 
@@ -3342,6 +3486,22 @@ try {
       throw new Error(
         'External browser use gate 410065390 is still present, but no ' +
         'supported patch pattern matched. @chrome may be hidden in the composer.',
+      );
+    }
+
+    if (externalAgentConfigGateCount > 0) {
+      log(
+        'External agent config import gates bypassed for offline mode ' +
+        `(${externalAgentConfigGateCount} occurrence(s)).`,
+      );
+    } else if (externalAgentConfigGateAlreadyCorrect) {
+      log('External agent config import gates already patched.');
+    } else if (!externalAgentConfigGateSeen) {
+      log('External agent config import gates are not present in this app version. No patch needed.');
+    } else {
+      throw new Error(
+        'External agent config import gates are present, but no supported ' +
+        'patch pattern matched. Settings > General may still miss the import row.',
       );
     }
 

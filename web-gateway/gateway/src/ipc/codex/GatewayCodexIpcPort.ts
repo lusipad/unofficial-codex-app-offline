@@ -574,6 +574,13 @@ function makeHandlers({ appServer, broadcast, logger, isClientConnected }) {
         return path.join(os.homedir(), ".codex");
       case "home-directory":
         return { homeDirectory: os.homedir() };
+      case "claude-code-import-status":
+      case "external-agent-import-status":
+        return { importedSessionCount: 0, latestImportedAtMs: null };
+      case "external-agent-import-detect":
+        return { items: [], unsupportedProjects: [] };
+      case "external-agent-import-import":
+        return { projectRoots: [] };
       case "external-agent-imported-connectors":
         return { connectors: [] };
       case "locale-info":

@@ -876,6 +876,8 @@ const CONTEXT_USAGE_STATUS_SECTION_PATCH_MARKER =
   requiredPatchMarker(CONTEXT_USAGE_CONTRACT.visibilityPatchMarker);
 const CONTEXT_USAGE_STATUS_SECTION_KEY =
   CONTEXT_USAGE_CONTRACT.localStatusSectionStorageKey || 'local-conversation-status-section-visible';
+const EXTERNAL_AGENT_CONFIG_IMPORT_PATCH_MARKER =
+  requiredPatchMarker('/*codex-offline:external-agent-config-import*/');
 const BUNDLED_BROWSER_PLUGINS_PATCH_MARKER = requiredPatchMarker('/*codex-offline:bundled-browser-plugins-no-force-reload*/');
 const BUNDLED_RUNTIME_PLUGINS_PATCH_MARKER = requiredPatchMarker('/*codex-offline:bundled-runtime-plugins*/');
 const WINDOWS_BROWSER_USE_CAPABILITY_PATCH_MARKER = requiredPatchMarker('/*codex-offline:windows-browser-use-capability*/');
@@ -962,6 +964,7 @@ let codexMobileAuthReloginPatched = false;
 const bundledBrowserPluginForceReloadResiduals = [];
 const settingsRouteResiduals = [];
 const localeSourceResiduals = [];
+const externalAgentConfigImportResiduals = [];
 const fastModeServiceTierOptionsResiduals = [];
 const contextUsageStatusSectionResiduals = [];
 
@@ -998,6 +1001,12 @@ for (const entry of javaScriptEntries) {
   }
   if (content.includes(LOCALE_SOURCE_BAD_PATTERN)) {
     localeSourceResiduals.push(entry);
+  }
+  if (
+    content.includes('from"./external-agent-config-gates-') &&
+    !content.includes(EXTERNAL_AGENT_CONFIG_IMPORT_PATCH_MARKER)
+  ) {
+    externalAgentConfigImportResiduals.push(entry);
   }
   if (
     fastModeServiceTierOptionsResidualRe.test(content) &&
@@ -1037,6 +1046,12 @@ if (localeSourceResiduals.length > 0) {
   throw new Error(
     'Renderer i18n provider still defaults locale_source to IDE: ' +
     localeSourceResiduals.join(', ')
+  );
+}
+if (externalAgentConfigImportResiduals.length > 0) {
+  throw new Error(
+    'External agent config import gate consumers were not patched: ' +
+    externalAgentConfigImportResiduals.join(', ')
   );
 }
 

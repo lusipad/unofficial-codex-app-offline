@@ -23,6 +23,10 @@ const STATSIG_DEFAULT_FEATURE_OVERRIDES = Object.freeze({
   control: true,
   avatarOverlay: true,
   "3903742690": true,
+  "3326157269": true,
+  "2900529421": true,
+  "2711149772": true,
+  "816842483": true,
   artifacts: true,
 });
 
@@ -82,6 +86,8 @@ const REQUIRED_STATSIG_FEATURE_MARKERS = Object.freeze([
   "externalBrowserUseAllowed",
   "computerUseNodeRepl",
   "3903742690",
+  "3326157269",
+  "2900529421",
 ]);
 
 const REQUIRED_DESKTOP_FEATURE_MARKERS = Object.freeze([
@@ -135,6 +141,10 @@ const DESKTOP_ASAR_KNOWN_GATE_IDS = Object.freeze([
   "1609556872",
   "1506311413",
   "2171042036",
+  "3326157269",
+  "2900529421",
+  "2711149772",
+  "816842483",
 ]);
 
 const DESKTOP_ASAR_PATCH_MARKERS = Object.freeze([
@@ -149,6 +159,7 @@ const DESKTOP_ASAR_PATCH_MARKERS = Object.freeze([
   "/*codex-offline:plugins-api-key-nav*/",
   "/*codex-offline:plugins-api-key-route*/",
   "/*codex-offline:codex-mobile-auth-relogin*/",
+  "/*codex-offline:external-agent-config-import*/",
 ]);
 
 const FAST_MODE_CONTRACT = Object.freeze({

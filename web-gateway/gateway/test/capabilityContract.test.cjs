@@ -3,6 +3,7 @@ const path = require("node:path");
 const test = require("node:test");
 
 const contract = require("../dist/ipc/codex/capabilityContract.js");
+const { makeHandlers } = require("../dist/ipc/codex/GatewayCodexIpcPort.js");
 const contractData = require("../src/ipc/codex/capabilityContractData.cjs");
 
 test("capability contract exports required statsig defaults", () => {
@@ -14,6 +15,8 @@ test("capability contract exports required statsig defaults", () => {
     "externalBrowserUseAllowed",
     "computerUseNodeRepl",
     "3903742690",
+    "3326157269",
+    "2900529421",
   ]) {
     assert.equal(contract.STATSIG_DEFAULT_FEATURE_OVERRIDES[key], true, key);
   }
@@ -93,7 +96,17 @@ test("source data contract covers direct exe asar patch surfaces", () => {
     "inAppBrowserUse",
   ]);
 
-  for (const gateId of ["410262010", "410065390", "4250630194", "1506311413", "2171042036"]) {
+  for (const gateId of [
+    "410262010",
+    "410065390",
+    "4250630194",
+    "1506311413",
+    "2171042036",
+    "3326157269",
+    "2900529421",
+    "2711149772",
+    "816842483",
+  ]) {
     assert.ok(contractData.DESKTOP_ASAR_KNOWN_GATE_IDS.includes(gateId), gateId);
   }
 
@@ -104,6 +117,7 @@ test("source data contract covers direct exe asar patch surfaces", () => {
     "/*codex-offline:fast-mode-auth-method*/",
     "/*codex-offline:fast-mode-service-tier-options*/",
     "/*codex-offline:context-usage-visible*/",
+    "/*codex-offline:external-agent-config-import*/",
   ]) {
     assert.ok(contractData.DESKTOP_ASAR_PATCH_MARKERS.includes(marker), marker);
   }
@@ -123,4 +137,32 @@ test("desktop script patcher is wired to the source data contract", () => {
   const patcherSource = require("node:fs").readFileSync(patcherPath, "utf8");
 
   assert.match(patcherSource, /capabilityContractData\.cjs/);
+});
+
+test("web gateway safely no-ops external agent import channels", async () => {
+  const handlers = makeHandlers({
+    appServer: {},
+    broadcast: () => {},
+    logger: { warn: () => {} },
+    isClientConnected: () => false,
+  });
+
+  assert.deepEqual(await handlers.handle("claude-code-import-status", { hostId: "local" }), {
+    importedSessionCount: 0,
+    latestImportedAtMs: null,
+  });
+  assert.deepEqual(await handlers.handle("external-agent-import-status", { hostId: "local" }), {
+    importedSessionCount: 0,
+    latestImportedAtMs: null,
+  });
+  assert.deepEqual(await handlers.handle("external-agent-import-detect", { hostId: "local" }), {
+    items: [],
+    unsupportedProjects: [],
+  });
+  assert.deepEqual(await handlers.handle("external-agent-import-import", { hostId: "local", items: [] }), {
+    projectRoots: [],
+  });
+  assert.deepEqual(await handlers.handle("external-agent-imported-connectors", { hostId: "local" }), {
+    connectors: [],
+  });
 });
