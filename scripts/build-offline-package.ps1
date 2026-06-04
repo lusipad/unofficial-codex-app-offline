@@ -670,10 +670,17 @@ if ($null -ne $config.skills.official) {
     Write-BuildTrace 'Official skills synced.'
 }
 
-Write-BuildTrace 'Exporting app source.'
-$appSourceInfo = Export-AppSource -Config $config -ScriptRoot $scriptRoot -SourceExportRoot $sourceExportRoot
-$sourceMetadata = Get-Content -Path (Join-Path $sourceExportRoot 'metadata/package-metadata.json') -Raw | ConvertFrom-Json
-$version = $sourceMetadata.version
+$sourceMetadataPath = Join-Path $sourceExportRoot 'metadata/package-metadata.json'
+if ((Test-Path (Join-Path $sourceExportRoot 'app/Codex.exe')) -and (Test-Path $sourceMetadataPath)) {
+  Write-BuildTrace 'Using cached app source (skip Export-AppSource).'
+  $sourceMetadata = Get-Content -Path $sourceMetadataPath -Raw | ConvertFrom-Json
+  $version = $sourceMetadata.version
+} else {
+  Write-BuildTrace 'Exporting app source.'
+  $appSourceInfo = Export-AppSource -Config $config -ScriptRoot $scriptRoot -SourceExportRoot $sourceExportRoot
+  $sourceMetadata = Get-Content -Path $sourceMetadataPath -Raw | ConvertFrom-Json
+  $version = $sourceMetadata.version
+}
 $releaseBase = '{0}-{1}' -f $config.releaseNamePrefix, $version
 $releaseTag = 'offline-v{0}' -f $version
 $artifactRoot = Join-Path $outputRoot $releaseBase
@@ -701,6 +708,17 @@ Copy-Item -Path (Join-Path $sourceExportRoot 'app') -Destination (Join-Path $int
 Copy-Item -Path (Join-Path $scriptRoot 'bootstrap-codex-skills.ps1') -Destination (Join-Path $internalRoot 'bootstrap-codex-skills.ps1') -Force
 Copy-Item -Path (Join-Path $scriptRoot 'repair-chrome-host.ps1') -Destination (Join-Path $internalRoot 'repair-chrome-host.ps1') -Force
 Copy-Item -Path (Join-Path $scriptRoot 'setup-codex-offline.ps1') -Destination (Join-Path $internalRoot 'setup-codex-offline.ps1') -Force
+
+Write-BuildTrace 'Copying desktop IPC interception patches.'
+$desktopPatchesSource = Join-Path $scriptRoot 'desktop-patches'
+if (Test-Path $desktopPatchesSource) {
+  $desktopPatchesDest = Join-Path $internalRoot 'patches'
+  New-Item -ItemType Directory -Force -Path $desktopPatchesDest | Out-Null
+  Copy-Item -Path (Join-Path $desktopPatchesSource '*') -Destination $desktopPatchesDest -Recurse -Force
+  Write-BuildTrace 'Desktop patches copied to _internal/patches/.'
+} else {
+  Write-BuildTrace 'Desktop patches source not found — continuing without IPC interception.'
+}
 
 Write-BuildTrace 'Bundling offline runtime plugins.'
 $primaryRuntimePluginSource = Resolve-OfflineRuntimePluginMarketplaceRoot -Config $config -WorkRoot $workRoot
