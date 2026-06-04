@@ -422,7 +422,7 @@ function patchAppServerManagerSignalsChunk(source) {
     /turnStartedAtMs:([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*)\.startedAt\),firstTurnWorkItemStartedAtMs:\1\(\2\.firstTurnWorkItemStartedAt\?\?\2\.startedAt\),finalAssistantStartedAtMs:\1\(\2\.completedAt\)/;
   if (alreadyPatched.test(source)) return source;
   const historyTurnShape =
-    /(turnStartedAtMs:([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*)\.startedAt\),)(finalAssistantStartedAtMs:\2\(\3\.completedAt\),status:\3\.status)/;
+    /(turnStartedAtMs:([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*)\.startedAt\),)(?:durationMs:[^,]+,)?(finalAssistantStartedAtMs:\2\(\3\.completedAt\),status:\3\.status)/;
   if (!historyTurnShape.test(source)) {
     if (!hasWarnedWorkedForPatchMiss) {
       hasWarnedWorkedForPatchMiss = true;
@@ -447,6 +447,60 @@ function patchI18nDefaultsChunk(source) {
     .replaceAll(".get(`locale_source`,`IDE`)", ".get(`locale_source`,`SYSTEM`)");
 }
 
+/** Web 环境下 RPC 初始化使用的 Electron MessagePort 不可用，替换为 mock services。 */
+function patchRpcInitChunk(source) {
+  // 替换 async function de(){...} 为直接提供 mock services 的版本
+  // 原始: var Q,$;async function de(){Q=ue(),$=await Q.services}export{$ as n,de as r,Q as t};
+  // Mock: 跳过 MessageChannel，直接暴露 mock services
+  if (/async function de\(\)\{Q=ue\(\),\$=await Q\.services\}/.test(source)) {
+    return source.replace(
+      /async function de\(\)\{Q=ue\(\),\$=await Q\.services\}/,
+      "async function de(){Q={services:Promise.resolve({" +
+      "hotkeyWindowHotkeys:{" +
+      "dismiss:function(){},transitionDone:function(){},setEnabled:function(){},open:function(){}" +
+      "}," +
+      "notifications:{" +
+      "dispatchMessage:function(){},show:function(){},hide:function(){}" +
+      "}," +
+      "primaryRuntime:{ensurePrimaryRuntimeInstalled:function(){return Promise.resolve()}," +
+      "  getPrimaryRuntimeInstallState:function(){return Promise.resolve({state:'installed'})}}," +
+      "codexMicro:{getMicroStatus:function(){return Promise.resolve({available:false})}}," +
+      "projectWritableRoots:{clearRoots:function(){return Promise.resolve()}," +
+      "  getWritableRoots:function(){return Promise.resolve([])}," +
+      "  setWritableRoots:function(){return Promise.resolve()}," +
+      "  roots:[]}" +
+      "})},$=await Q.services}"
+    );
+  }
+  return source;
+}
+
+/** Web 环境下 RPC 调用被 mock 替换，ma() 现在会立即 resolve。 */
+function patchAppMainRpcInitChunk(source) {
+  // ma() 现在调用的是被 patchRpcInitChunk mock 过的 de()，会立即 resolve
+  return source;
+}
+
+/** 工作树页面依赖完整 RPC 客户端，在 Web 环境下因 mock 不完整而崩溃。
+  * 将 worktree query 的 queryFn 替换为返回空数据的 mock，避免页面崩溃。 */
+function patchWorktreesSettingsChunk(source) {
+  return source.replace(
+    /e\(`git`\)\.request\(\{method:`codex-worktrees`[^)]*\)/g,
+    "Promise.resolve({worktrees:[],pinnedWorktrees:[]})"
+  );
+}
+
+/** 个性化页面中 codex-agents-md 查询依赖 RPC 客户端，mock 不可用时显示错误。
+  * 将查询替换为空 mock，显示"暂无自定义指令"而非错误。 */
+function patchPersonalizationSettingsChunk(source) {
+  // 替换 Me=C(S,`codex-agents-md`,e=>({params:{hostId:e},staleTime:O.FIVE_SECONDS}))
+  // 为 mock，注意嵌套括号需要用 .+? 配合末尾的 })) 来精确匹配
+  return source.replace(
+    /,Me=C\(S,`codex-agents-md`,e=>\(\{params:\{hostId:e\},staleTime:O\.FIVE_SECONDS\}\)\)/,
+    ",Me={data:{instructions:\"\"},isLoading:false,isFetching:false}"
+  );
+}
+
 /** 对官方 chunk 做响应期 patch，不落盘改 vendor/官方构建产物。 */
 function patchOfficialAsset(reqPath, data, authToken = "") {
   if (!shouldPatchOfficialAsset(reqPath)) return data;
@@ -454,9 +508,18 @@ function patchOfficialAsset(reqPath, data, authToken = "") {
   const withPatchedImports = patchOfficialJsModuleSpecifiers(source, authToken);
   const withSettingsGate = patchSettingsGateChunk(withPatchedImports);
   const withI18nDefaults = patchI18nDefaultsChunk(withSettingsGate);
-  const patched = /\/app-server-manager-signals-[^/]+\.js$/.test(reqPath)
+  const withAppServerPatch = /\/app-server-manager-signals-[^/]+\.js$/.test(reqPath)
     ? patchAppServerManagerSignalsChunk(withI18nDefaults)
     : withI18nDefaults;
+  const withRpcMock = /\/rpc-[^/]+\.js$/.test(reqPath)
+    ? patchRpcInitChunk(withAppServerPatch)
+    : withAppServerPatch;
+  const withWorktreesMock = /\/use-codex-worktrees-[^/]+\.js$/.test(reqPath)
+    ? patchWorktreesSettingsChunk(withRpcMock)
+    : withRpcMock;
+  const patched = /\/app-main-[^/]+\.js$/.test(reqPath)
+    ? patchAppMainRpcInitChunk(withWorktreesMock)
+    : withWorktreesMock;
   return Buffer.from(patched, "utf-8");
 }
 

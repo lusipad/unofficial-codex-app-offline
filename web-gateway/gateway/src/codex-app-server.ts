@@ -820,10 +820,17 @@ function createCodexAppServerClient({ broadcast, logger, defaultCodexBinaryPath 
       if (transport.kind === "stdio") {
         if (!cmd) throw new Error("app-server stdio transport requires CODEX_APP_SERVER_CMD or a default command");
         logger && logger.info(`[app-server] spawning (${transport.display}): ${cmd}`);
+        const workspaceRoots = (process.env.CODEX_WEB_WORKSPACE_ROOTS || "")
+          .split(",")
+          .map((root) => root.trim())
+          .filter(Boolean);
+        const childCwd = workspaceRoots.length > 0 ? workspaceRoots[0] : PROJECT_ROOT;
+        logger && logger.info(`[app-server] cwd=${childCwd}`);
         child = spawn(cmd, {
           shell: true,
           stdio: ["pipe", "pipe", "pipe"],
           detached: process.platform !== "win32",
+          cwd: childCwd,
           env: process.env,
         });
         child.on("exit", (code, signal) => {

@@ -468,6 +468,30 @@ function makeHandlers({ appServer, broadcast, logger, isClientConnected }) {
         return { shellEnvironment: null };
       case "get-config-requirements-for-host":
         return patchConfigRequirementsResult(await appServerBridge.callAppServer("configRequirements/read", undefined));
+      case "codex-agents-md": {
+        // Web 环境没有 Chronicle，直接读取 workspace roots 下的 AGENTS.md/CLAUDE.md
+        const roots = workspaceIpc.parseWorkspaceRoots();
+        const fs = require("fs");
+        const path = require("path");
+        let instructions = "";
+        const candidateNames = ["AGENTS.md", "CLAUDE.md", "agents.md", "claude.md"];
+        for (const root of roots) {
+          for (const name of candidateNames) {
+            const filePath = path.join(root, name);
+            try {
+              if (fs.existsSync(filePath)) {
+                const content = fs.readFileSync(filePath, "utf-8");
+                if (content.trim()) {
+                  instructions = content.trim();
+                  break;
+                }
+              }
+            } catch {}
+          }
+          if (instructions) break;
+        }
+        return { instructions };
+      }
       case "developer-instructions": {
         const params = payload && typeof payload === "object" && payload.params ? payload.params : payload;
         const baseInstructions =
