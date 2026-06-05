@@ -517,9 +517,12 @@ function patchOfficialAsset(reqPath, data, authToken = "") {
   const withWorktreesMock = /\/use-codex-worktrees-[^/]+\.js$/.test(reqPath)
     ? patchWorktreesSettingsChunk(withRpcMock)
     : withRpcMock;
-  const patched = /\/app-main-[^/]+\.js$/.test(reqPath)
-    ? patchAppMainRpcInitChunk(withWorktreesMock)
+  const withPersonalizationMock = /\/personalization-settings-[^/]+\.js$/.test(reqPath)
+    ? patchPersonalizationSettingsChunk(withWorktreesMock)
     : withWorktreesMock;
+  const patched = /\/app-main-[^/]+\.js$/.test(reqPath)
+    ? patchAppMainRpcInitChunk(withPersonalizationMock)
+    : withPersonalizationMock;
   return Buffer.from(patched, "utf-8");
 }
 
