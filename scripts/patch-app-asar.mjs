@@ -1847,7 +1847,7 @@ try {
       ? findAppServerRequestBusName(source)
       : null;
     if (!appServerRequestFn) {
-      throw new Error('Could not locate app-server request bus for Computer Use node_repl.js bridge.');
+      warn('Could not locate app-server request bus for Computer Use node_repl.js bridge (app version may have changed).');
     }
     return (
       groups.prefix +
@@ -2609,8 +2609,8 @@ try {
   } else if (computerUsePluginRootFallbackAlreadyCorrect) {
     log('Computer Use plugin root fallback already patched.');
   } else {
-    throw new Error(
-      'Could not locate Computer Use installed plugin path resolver. ' +
+    warn(
+      'Could not locate Computer Use installed plugin path resolver (app version may have changed). ' +
       'node_repl may start without the packaged Computer Use plugin runtime paths.',
     );
   }
@@ -2846,9 +2846,9 @@ try {
   } else if (nodeReplConfigReconcileAlreadyCorrect) {
     log('Node REPL config reconcile finalizer already patched.');
   } else {
-    throw new Error(
+    warn(
       'Could not locate bundled plugin reconcile tail to guarantee node_repl ' +
-      'config refresh after plugin reconcile failures.',
+      'config refresh after plugin reconcile failures (app version may have changed).',
     );
   }
 
@@ -3457,11 +3457,15 @@ try {
   // injects gate=true into IPC shared-object data at the transport layer.
   // No regex patching of compiled renderer JavaScript is needed.
   // ═══════════════════════════════════════════════════════════════════
+  // ═══════════════════════════════════════════════════════════════════
+  // Category A/B (renderer Statsig gate bypass & config defaults) REMOVED.
+  // Handled at runtime by scripts/desktop-patches/init.cjs via IPC interception.
+  // ═══════════════════════════════════════════════════════════════════
   const assetsDir = path.join(tmpDir, 'webview', 'assets');
   if (!fs.existsSync(assetsDir)) {
     throw new Error('webview/assets directory not found. Package structure may have changed.');
   }
-  log('Renderer Statsig gates handled by init.cjs IPC interception (no renderer asar patching).');
+  log('Renderer Statsig gates handled by init.cjs IPC interception (no asar patching).');
 
   // Repack.
   log('Repacking asar…');
