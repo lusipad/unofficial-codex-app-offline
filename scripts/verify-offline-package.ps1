@@ -911,6 +911,7 @@ const requireFromRepo = createRequire(path.join(repoRoot, 'package.json'));
 const asar = requireFromRepo('@electron/asar');
 const capabilityContract = require(capabilityContractPath);
 const DESKTOP_ASAR_PATCH_MARKERS = capabilityContract.DESKTOP_ASAR_PATCH_MARKERS || [];
+const DESKTOP_ASAR_KNOWN_GATE_IDS = capabilityContract.DESKTOP_ASAR_KNOWN_GATE_IDS || [];
 const DESKTOP_BROWSER_USE_AVAILABILITY_MARKERS = capabilityContract.DESKTOP_BROWSER_USE_AVAILABILITY_MARKERS || [];
 const DESKTOP_BROWSER_USE_CAPABILITY_KEYS = capabilityContract.DESKTOP_BROWSER_USE_CAPABILITY_KEYS || [];
 function requiredPatchMarker(marker) {
@@ -924,6 +925,11 @@ function escapeRegExp(value) {
 }
 function warn(message) {
   console.warn(`[verify-offline-package] WARNING: ${message}`);
+}
+function directStatsigGateCallRe(gateId) {
+  return new RegExp(
+    `!?(?:\\(0,[$\\w]+\\)|[$\\w]+)\\(\`${escapeRegExp(gateId)}\`\\)`
+  );
 }
 const PATCH_MARKER = requiredPatchMarker('/* codex-offline:windowsStore-patch */');
 const SETTINGS_ROUTE_BAD_PATTERN_RE =
@@ -973,6 +979,8 @@ const FEATURE_ENABLEMENT_PRESERVE_UNIFIED_EXEC_PATCH_MARKER =
   requiredPatchMarker('/*codex-offline:feature-enablement-preserve-unified-exec*/');
 const BUNDLED_PLUGIN_CACHE_LOCK_NONFATAL_PATCH_MARKER =
   requiredPatchMarker('/*codex-offline:bundled-plugin-cache-lock-nonfatal*/');
+const RENDERER_KNOWN_STATSIG_GATES_PATCH_MARKER =
+  requiredPatchMarker('/*codex-offline:renderer-known-statsig-gates*/');
 const bundledPluginCacheLockFatalResultRe =
   /if\([A-Za-z_$][\w$]*!=null\)\{if\([A-Za-z_$][\w$]*\.warning\(`bundled_plugins_marketplace_install_failed`,\{safe:\{errorCategory:[A-Za-z_$][\w$]*\(\{error:[A-Za-z_$][\w$]*\.error,platformFamily:e\.platformFamily\}\),marketplaceName:t,platformFamily:e\.platformFamily,\.\.\.[A-Za-z_$][\w$]*\.safe\},sensitive:\{error:[A-Za-z_$][\w$]*\.error,marketplaceRoot:e\.materializedMarketplace\.marketplaceRoot,\.\.\.[A-Za-z_$][\w$]*\.sensitive\}\}\),n\)throw [A-Za-z_$][\w$]*\.error;return!1\}return!0\}/;
 const bundledPluginCacheLockFatalCatchRe =
@@ -1075,6 +1083,7 @@ let featureEnablementPreserveUnifiedExecPatched = false;
 let bundledPluginCacheLockNonfatalPatched = false;
 let pluginsApiKeyNavPatched = false;
 let pluginsApiKeyRoutePatched = false;
+let rendererKnownStatsigGatesPatched = false;
 let codexMobileRemoteControlMfaEndpointSeen = false;
 let codexMobileAuthReloginPatched = false;
 let autoUpdaterBreadcrumbPatched = false;
@@ -1085,12 +1094,32 @@ const autoUpdaterBreadcrumbResiduals = [];
 const legacyElectronNamespacePatchResiduals = [];
 const bundledPluginCacheLockFatalResiduals = [];
 const webviewBrokenBooleanPatchResiduals = [];
+const rendererKnownStatsigGateResiduals = [];
+const rendererKnownStatsigGateLiteralEntries = [];
 
 for (const entry of javaScriptEntries) {
   const content = asar.extractFile(asarPath, entryMap.get(entry)).toString('utf8');
   allJavaScriptContent.push(content);
-  if (/(^|\/)webview\/assets\/[^/]+\.js$/.test(entry) && WEBVIEW_BROKEN_BOOLEAN_PATCH_RE.test(content)) {
+  const isWebviewAsset = /(^|\/)webview\/assets\/[^/]+\.js$/.test(entry);
+  if (isWebviewAsset && WEBVIEW_BROKEN_BOOLEAN_PATCH_RE.test(content)) {
     webviewBrokenBooleanPatchResiduals.push(entry);
+  }
+  if (isWebviewAsset) {
+    if (content.includes(RENDERER_KNOWN_STATSIG_GATES_PATCH_MARKER)) {
+      rendererKnownStatsigGatesPatched = true;
+    }
+    const literalGateIds = [];
+    for (const gateId of DESKTOP_ASAR_KNOWN_GATE_IDS) {
+      if (content.includes('`' + gateId + '`')) {
+        literalGateIds.push(gateId);
+      }
+      if (directStatsigGateCallRe(gateId).test(content)) {
+        rendererKnownStatsigGateResiduals.push(`${entry}:${gateId}`);
+      }
+    }
+    if (literalGateIds.length > 0) {
+      rendererKnownStatsigGateLiteralEntries.push(`${entry}:${literalGateIds.join(',')}`);
+    }
   }
   bundledBrowserPluginsPatched ||= content.includes(BUNDLED_BROWSER_PLUGINS_PATCH_MARKER);
   bundledRuntimePluginsPatched ||= content.includes(BUNDLED_RUNTIME_PLUGINS_PATCH_MARKER);
@@ -1217,6 +1246,18 @@ if (webviewBrokenBooleanPatchResiduals.length > 0) {
     webviewBrokenBooleanPatchResiduals.join(', ')
   );
 }
+if (rendererKnownStatsigGateResiduals.length > 0) {
+  throw new Error(
+    'Renderer webview assets still call offline-known Statsig gates directly: ' +
+    rendererKnownStatsigGateResiduals.join(', ')
+  );
+}
+if (!rendererKnownStatsigGatesPatched && rendererKnownStatsigGateLiteralEntries.length > 0) {
+  throw new Error(
+    'Renderer webview assets contain offline-known Statsig gate literals but no direct-gate patch marker: ' +
+    rendererKnownStatsigGateLiteralEntries.join(', ')
+  );
+}
 if (autoUpdaterBreadcrumbResiduals.length > 0) {
   throw new Error(
     'Electron autoUpdater breadcrumb still reads autoUpdater during portable startup: ' +
@@ -1321,7 +1362,7 @@ if (!allJavaScriptContent.some(content => /for\(let [A-Za-z_$][\w$]* of \[(["'`]
   throw new Error('Bundled runtime plugin materialization patch does not preserve computer-use.');
 }
 if (!computerUsePluginRootFallbackPatched) {
-  warn('Computer Use plugin root fallback marker is missing; patch-app-asar treats this app-version drift as non-fatal.');
+  throw new Error('Computer Use plugin root fallback marker is missing; packaged computer-use runtime paths may be unavailable.');
 }
 if (!computerUseInputMentionPatched) {
   warn('Computer Use prompt input mention marker is missing; verifier will rely on transport-level skill injection.');
@@ -1333,10 +1374,10 @@ if (!computerUseThreadStartToolSearchPatched) {
   throw new Error('Computer Use thread/start forwarding does not preserve features.tool_search and node_repl --disable-sandbox.');
 }
 if (!computerUseNodeReplDynamicToolPatched) {
-  warn('Computer Use node_repl.js dynamic tool exposure marker is missing; renderer dynamic-tool injection was removed from the current patch path.');
+  throw new Error('Computer Use node_repl.js dynamic tool exposure marker is missing.');
 }
 if (!computerUseNodeReplDynamicToolCallPatched) {
-  warn('Computer Use node_repl.js dynamic tool call bridge marker is missing; verify the current transport/runtime flow with E2E smoke.');
+  throw new Error('Computer Use node_repl.js dynamic tool call bridge marker is missing.');
 }
 if (codexMobileRemoteControlMfaEndpointSeen && !codexMobileAuthReloginPatched) {
   warn('Codex Mobile remote-control auth relogin marker is missing; this stale renderer patch is not part of the current Computer Use verifier gate.');

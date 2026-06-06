@@ -207,6 +207,7 @@ const DESKTOP_ASAR_PATCH_MARKERS = Object.freeze([
   "/*codex-offline:context-usage-visible*/",
   "/*codex-offline:plugins-api-key-nav*/",
   "/*codex-offline:plugins-api-key-route*/",
+  "/*codex-offline:renderer-known-statsig-gates*/",
   "/*codex-offline:codex-mobile-auth-relogin*/",
   "/*codex-offline:external-agent-config-import*/",
   "/*codex-offline:disable-auto-updater-breadcrumb*/",

@@ -155,6 +155,7 @@ const asar = require('@electron/asar');
 const { flipFuses, FuseVersion, FuseV1Options } = require('@electron/fuses');
 const {
   DESKTOP_ASAR_PATCH_MARKERS,
+  DESKTOP_ASAR_KNOWN_GATE_IDS,
   DESKTOP_BROWSER_USE_CAPABILITY_KEYS,
   CONTEXT_USAGE_CONTRACT,
   FAST_MODE_CONTRACT,
@@ -556,6 +557,34 @@ function patchExternalAgentConfigDirectGateCalls(content, gateIds, patchMarker) 
   for (const gateId of gateIds) {
     const gateCallRe = new RegExp(
       `(?<!!)(?:\\(0,[$\\w]+\\)|[$\\w]+)\\(\`${gateId}\`\\)`,
+      'g',
+    );
+    next = next.replace(gateCallRe, () => {
+      count += 1;
+      return `!0${patchMarker}`;
+    });
+  }
+
+  return { content: next, count };
+}
+
+function patchDirectStatsigGateCalls(content, gateIds, patchMarker) {
+  let next = content;
+  let count = 0;
+
+  for (const gateId of gateIds) {
+    const escapedGateId = escapeRegExp(gateId);
+    const negatedGateCallRe = new RegExp(
+      `!(?:\\(0,[$\\w]+\\)|[$\\w]+)\\(\`${escapedGateId}\`\\)`,
+      'g',
+    );
+    next = next.replace(negatedGateCallRe, () => {
+      count += 1;
+      return `!1${patchMarker}`;
+    });
+
+    const gateCallRe = new RegExp(
+      `(?<!!)(?:\\(0,[$\\w]+\\)|[$\\w]+)\\(\`${escapedGateId}\`\\)`,
       'g',
     );
     next = next.replace(gateCallRe, () => {
@@ -1610,6 +1639,8 @@ try {
     'return wt({env:r,pathExists:l})}';
   const COMPUTER_USE_PLUGIN_ROOT_FALLBACK_CURRENT_RE =
     /function ([A-Za-z_$][\w$]*)\(\{codexHome:([A-Za-z_$][\w$]*),env:([A-Za-z_$][\w$]*)=process\.env,marketplaceName:([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\.or\(([A-Za-z_$][\w$]*)\.M\.resolve\(\)\),marketplaces:([A-Za-z_$][\w$]*),pathExists:([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\.existsSync\}\)\{for\(let ([A-Za-z_$][\w$]*) of ([A-Za-z_$][\w$]*)\(\{marketplaceName:\4,marketplaces:\7\}\)\)\{let ([A-Za-z_$][\w$]*)=\10\.plugins\.find\(([A-Za-z_$][\w$]*)=>\13\.name===`computer-use`&&\13\.installed&&\13\.enabled&&\13\.source\.type===`local`\);if\(\12\?\.source\.type===`local`\)return ([A-Za-z_$][\w$]*)\(\{env:\3,installedPluginRoot:\5\.([A-Za-z_$][\w$]*)\(\{codexHome:\2,localVersion:\12\.localVersion,marketplaceName:\10\.name,pluginName:\12\.name\}\),pathExists:\8\}\)\}return \14\(\{env:\3,pathExists:\8\}\)\}/;
+  const COMPUTER_USE_PLUGIN_ROOT_FALLBACK_CURRENT_RE_V2 =
+    /function ([A-Za-z_$][\w$]*)\(\{codexHome:([A-Za-z_$][\w$]*),env:([A-Za-z_$][\w$]*)=process\.env,marketplaceName:([A-Za-z_$][\w$]*)=([^,{}]+?\([^{}]*?\.resolve\(\)\)),marketplaces:([A-Za-z_$][\w$]*),pathExists:([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\.existsSync\}\)\{for\(let ([A-Za-z_$][\w$]*) of ([A-Za-z_$][\w$]*)\(\{marketplaceName:\4,marketplaces:\6\}\)\)\{let ([A-Za-z_$][\w$]*)=\9\.plugins\.find\(([A-Za-z_$][\w$]*)=>\12\.name===`computer-use`&&\12\.installed&&\12\.enabled&&\12\.source\.type===`local`\);if\(\11\?\.source\.type===`local`\)return ([A-Za-z_$][\w$]*)\(\{env:\3,installedPluginRoot:([A-Za-z_$][\w$]*)\.([A-Za-z_$][\w$]*)\(\{codexHome:\2,localVersion:\11\.localVersion,marketplaceName:\9\.name,pluginName:\11\.name\}\),pathExists:\7\}\)\}return \13\(\{env:\3,pathExists:\7\}\)\}/;
   const COMPUTER_USE_FORWARD_THREAD_START_DIAGNOSTICS_NEEDLE =
     'try{this.logger.debug(`bridge_forwarded_to_transport`,{safe:{requestId:r,' +
     'method:t.method,conversationId:i??null,originWebcontentsId:e.id,' +
@@ -1847,7 +1878,9 @@ try {
       ? findAppServerRequestBusName(source)
       : null;
     if (!appServerRequestFn) {
-      warn('Could not locate app-server request bus for Computer Use node_repl.js bridge (app version may have changed).');
+      throw new Error(
+        'Could not locate app-server request bus for Computer Use node_repl.js bridge.',
+      );
     }
     return (
       groups.prefix +
@@ -1873,6 +1906,32 @@ try {
       COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_PATCH_MARKER +
       `}else ${groups.gate}`
     );
+  }
+  function patchComputerUseNodeReplDynamicTools(content) {
+    if (content.includes(COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_PATCH_MARKER)) {
+      return { content, alreadyCorrect: true, patched: false };
+    }
+
+    const next = content.replace(
+      COMPUTER_USE_NODE_REPL_DYNAMIC_TOOLS_RETURN_RE,
+      (_match, toolListExpression) =>
+        `return${toolListExpression}.concat([` +
+        `${COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_SPEC},` +
+        `${COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_COMPAT_SPEC}])` +
+        COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_PATCH_MARKER,
+    );
+    return { content: next, alreadyCorrect: false, patched: next !== content };
+  }
+  function patchComputerUseNodeReplDynamicToolCall(content) {
+    if (content.includes(COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_PATCH_MARKER)) {
+      return { content, alreadyCorrect: true, patched: false };
+    }
+
+    const next = content.replace(
+      COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_CURRENT_V2_RE,
+      computerUseNodeReplDynamicToolCallCurrentV2Replacement,
+    );
+    return { content: next, alreadyCorrect: false, patched: next !== content };
   }
   const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_LEGACY_RE =
     /if\(([A-Za-z_$][\w$]*)\.namespace===`node_repl`&&([A-Za-z_$][\w$]*)===`js`\)\{let _codexOfflineNodeReplResult;try\{_codexOfflineNodeReplResult=await Pi\(`mcpServer\/tool\/call`,\{params:\{threadId:([A-Za-z_$][\w$]*),server:`node_repl`,tool:`js`,arguments:\1\.arguments\}\}\);let _codexOfflineNodeReplText=Array\.isArray\(_codexOfflineNodeReplResult\?\.content\)\?_codexOfflineNodeReplResult\.content\.map\(e=>e\?\.type===`text`\?String\(e\.text\?\?``\):JSON\.stringify\(e\)\)\.join\(`\\n`\):JSON\.stringify\(_codexOfflineNodeReplResult\);u=\{contentItems:\[\{type:`inputText`,text:_codexOfflineNodeReplText\}\],success:_codexOfflineNodeReplResult\?\.isError!==!0\}\}catch\(_codexOfflineNodeReplError\)\{u=Ge\(String\(_codexOfflineNodeReplError\?\.message\?\?_codexOfflineNodeReplError\)\)\}\/\*codex-offline:computer-use-node-repl-dynamic-tool-call\*\/X\.dispatchMessage\(`mcp-response`,\{hostId:([A-Za-z_$][\w$]*),response:\{id:a\(([A-Za-z_$][\w$]*)\),result:u\}\}\);return\}/;
@@ -2585,6 +2644,39 @@ try {
         ) =>
           `function ${functionName}({codexHome:${codexHomeVar},env:${envVar}=process.env,` +
           `marketplaceName:${marketplaceNameVar}=${pluginPathNamespace}.or(${buildFlavorNamespace}.M.resolve()),` +
+          `marketplaces:${marketplacesVar},pathExists:${pathExistsVar}=${fsNamespace}.existsSync})` +
+          `{for(let ${marketplaceVar} of ${listMarketplacesFunction}({marketplaceName:${marketplaceNameVar},marketplaces:${marketplacesVar}}))` +
+          `{let ${installedPluginVar}=${marketplaceVar}.plugins.find(${pluginEntryVar}=>${pluginEntryVar}.name===\`computer-use\`&&${pluginEntryVar}.installed&&${pluginEntryVar}.enabled&&${pluginEntryVar}.source.type===\`local\`);` +
+          `if(${installedPluginVar}?.source.type===\`local\`)return ${computerUsePathsFunction}({env:${envVar},installedPluginRoot:${pluginPathNamespace}.${pluginRootFunction}({codexHome:${codexHomeVar},localVersion:${installedPluginVar}.localVersion,marketplaceName:${marketplaceVar}.name,pluginName:${installedPluginVar}.name}),pathExists:${pathExistsVar}});` +
+          `let u=${marketplaceVar}.plugins.find(e=>e.name===\`computer-use\`&&(e.source?.type===\`local\`||e.source?.source===\`local\`)),d=u?.source?.path??null,` +
+          `f=d==null?null:/^(?:[A-Za-z]:[\\\\/]|\\\\\\\\)/.test(d)?d:${marketplaceVar}.path!=null?\`${'${'}String(${marketplaceVar}.path).replace(/[\\\\/]+$/,\`\`)}\\\\${'${'}String(d).replace(/^\\\\.?[\\\\/]/,\`\`)}\`:null;` +
+          `if(f!=null&&${pathExistsVar}(f))return ${computerUsePathsFunction}({env:${envVar},installedPluginRoot:f,pathExists:${pathExistsVar}})}` +
+          COMPUTER_USE_PLUGIN_ROOT_FALLBACK_PATCH_MARKER +
+          `return ${computerUsePathsFunction}({env:${envVar},pathExists:${pathExistsVar}})}`,
+      );
+    } else if (COMPUTER_USE_PLUGIN_ROOT_FALLBACK_CURRENT_RE_V2.test(content)) {
+      content = content.replace(
+        COMPUTER_USE_PLUGIN_ROOT_FALLBACK_CURRENT_RE_V2,
+        (
+          match,
+          functionName,
+          codexHomeVar,
+          envVar,
+          marketplaceNameVar,
+          marketplaceNameDefaultExpr,
+          marketplacesVar,
+          pathExistsVar,
+          fsNamespace,
+          marketplaceVar,
+          listMarketplacesFunction,
+          installedPluginVar,
+          pluginEntryVar,
+          computerUsePathsFunction,
+          pluginPathNamespace,
+          pluginRootFunction,
+        ) =>
+          `function ${functionName}({codexHome:${codexHomeVar},env:${envVar}=process.env,` +
+          `marketplaceName:${marketplaceNameVar}=${marketplaceNameDefaultExpr},` +
           `marketplaces:${marketplacesVar},pathExists:${pathExistsVar}=${fsNamespace}.existsSync})` +
           `{for(let ${marketplaceVar} of ${listMarketplacesFunction}({marketplaceName:${marketplaceNameVar},marketplaces:${marketplacesVar}}))` +
           `{let ${installedPluginVar}=${marketplaceVar}.plugins.find(${pluginEntryVar}=>${pluginEntryVar}.name===\`computer-use\`&&${pluginEntryVar}.installed&&${pluginEntryVar}.enabled&&${pluginEntryVar}.source.type===\`local\`);` +
@@ -3415,6 +3507,8 @@ try {
       '`' +
       String.raw`,)!0(\))`,
   );
+  const RENDERER_KNOWN_STATSIG_GATES_PATCH_MARKER =
+    contractPatchMarker('/*codex-offline:renderer-known-statsig-gates*/');
   const FEATURE_ENABLEMENT_PRESERVE_UNIFIED_EXEC_PATCH_MARKER =
     contractPatchMarker('/*codex-offline:feature-enablement-preserve-unified-exec*/');
   const FEATURE_ENABLEMENT_LOCAL_STATE_RE =
@@ -3467,10 +3561,45 @@ try {
     let localeSourcePatched = false;
     let fastModeAuthPatched = false;
     let fastModeServiceTierPatched = false;
+    let rendererKnownStatsigGatePatchCount = 0;
+    const computerUseNodeReplDynamicToolPatchedFiles = [];
+    const computerUseNodeReplDynamicToolCallPatchedFiles = [];
+    let computerUseNodeReplDynamicToolAlreadyCorrect = false;
+    let computerUseNodeReplDynamicToolCallAlreadyCorrect = false;
 
     for (const filePath of webviewJsFiles) {
       let content = fs.readFileSync(filePath, 'utf8');
       let changed = false;
+      const computerUseNodeReplDynamicToolsPatch =
+        patchComputerUseNodeReplDynamicTools(content);
+      if (computerUseNodeReplDynamicToolsPatch.patched) {
+        content = computerUseNodeReplDynamicToolsPatch.content;
+        computerUseNodeReplDynamicToolPatchedFiles.push(path.relative(tmpDir, filePath));
+        changed = true;
+      } else if (computerUseNodeReplDynamicToolsPatch.alreadyCorrect) {
+        computerUseNodeReplDynamicToolAlreadyCorrect = true;
+      }
+
+      const computerUseNodeReplDynamicToolCallPatch =
+        patchComputerUseNodeReplDynamicToolCall(content);
+      if (computerUseNodeReplDynamicToolCallPatch.patched) {
+        content = computerUseNodeReplDynamicToolCallPatch.content;
+        computerUseNodeReplDynamicToolCallPatchedFiles.push(path.relative(tmpDir, filePath));
+        changed = true;
+      } else if (computerUseNodeReplDynamicToolCallPatch.alreadyCorrect) {
+        computerUseNodeReplDynamicToolCallAlreadyCorrect = true;
+      }
+
+      const rendererKnownStatsigGatePatch = patchDirectStatsigGateCalls(
+        content,
+        DESKTOP_ASAR_KNOWN_GATE_IDS,
+        RENDERER_KNOWN_STATSIG_GATES_PATCH_MARKER,
+      );
+      if (rendererKnownStatsigGatePatch.count > 0) {
+        content = rendererKnownStatsigGatePatch.content;
+        rendererKnownStatsigGatePatchCount += rendererKnownStatsigGatePatch.count;
+        changed = true;
+      }
       if (content.includes(I18N_NEEDLE)) {
         content = content.replaceAll(I18N_NEEDLE, I18N_REPLACEMENT);
         changed = true;
@@ -3518,9 +3647,30 @@ try {
         (localeSourcePatched ? ' (locale_source)' : '') +
         (fastModeAuthPatched ? ' (fast-mode auth)' : '') +
         (fastModeServiceTierPatched ? ' (fast-mode service-tier)' : '') +
+        (rendererKnownStatsigGatePatchCount > 0 ? ` (renderer gates: ${rendererKnownStatsigGatePatchCount})` : '') +
         '.');
     } else {
       log('Webview assets already correct (no patching needed).');
+    }
+    if (computerUseNodeReplDynamicToolPatchedFiles.length > 0) {
+      log('Computer Use node_repl.js dynamic tool exposed in ' +
+        `${computerUseNodeReplDynamicToolPatchedFiles.join(', ')}.`);
+    } else if (computerUseNodeReplDynamicToolAlreadyCorrect) {
+      log('Computer Use node_repl.js dynamic tool exposure already patched.');
+    } else {
+      throw new Error(
+        'Could not locate renderer dynamic tools list to expose Computer Use node_repl.js.',
+      );
+    }
+    if (computerUseNodeReplDynamicToolCallPatchedFiles.length > 0) {
+      log('Computer Use node_repl.js dynamic tool call bridge patched in ' +
+        `${computerUseNodeReplDynamicToolCallPatchedFiles.join(', ')}.`);
+    } else if (computerUseNodeReplDynamicToolCallAlreadyCorrect) {
+      log('Computer Use node_repl.js dynamic tool call bridge already patched.');
+    } else {
+      throw new Error(
+        'Could not locate renderer dynamic tool call handler for Computer Use node_repl.js.',
+      );
     }
   }
   log('Renderer Statsig gates handled by init.cjs IPC interception (no asar patching).');

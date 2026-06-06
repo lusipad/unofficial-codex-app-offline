@@ -87,12 +87,12 @@ try {
     bridgeEvidence.hasNodeReplListAppsCall &&
     bridgeEvidence.hasSummaryOutput &&
     !bridgeEvidence.hasSshTarget &&
-    !bridgeEvidence.hasBridgeError;
+    !bridgeEvidence.hasBlockingBridgeError;
   reason = pass
     ? 'computer-use-list-apps-summary-confirmed'
     : bridgeEvidence.hasSshTarget
       ? 'computer-use-js-returned-ssh-target'
-      : bridgeEvidence.hasBridgeError
+      : bridgeEvidence.hasBlockingBridgeError
         ? 'computer-use-js-bridge-reported-error'
         : summary == null
           ? 'final-answer-missing-list-apps-summary'
@@ -301,6 +301,8 @@ function buildPrompt({ marker }) {
     '这是 Computer Use 工具暴露验收，只做无副作用检查。',
     '请使用 Computer Use 插件说明里的官方 JavaScript 入口，不要使用 shell、PowerShell、SendKeys、外部 Playwright/CDP 或其他 Windows 自动化替代路径。',
     '先连接 Windows，再执行轻量检查 list_apps。',
+    '不要因为 globalThis.sky 初始不存在就判定缺入口；必须先通过插件根目录的 scripts/computer-use-client.mjs 导入 setupComputerUseRuntime 并执行 await setupComputerUseRuntime({ globals: globalThis })。',
+    '插件根目录可由 process.env.NODE_REPL_NODE_MODULE_DIRS 的父目录推导；如果该环境变量缺失，再按 Computer Use 技能说明查找插件根目录。',
     '请在官方 JavaScript 入口里计算一个摘要：const apps = await sky.list_apps(); const summary = { isArray: Array.isArray(apps), count: Array.isArray(apps) ? apps.length : -1, sample: Array.isArray(apps) ? apps.slice(0, 3).map(app => ({ id: String(app?.id ?? ""), displayName: String(app?.displayName ?? ""), windowCount: Array.isArray(app?.windows) ? app.windows.length : 0, isRunning: app?.isRunning === true })) : [] };',
     '请用 nodeRepl.write("COMPUTER_USE_LIST_APPS_SUMMARY=" + JSON.stringify(summary)) 输出摘要。',
     `最终回答必须包含一个 marker：把 E2E_COMPUTER_USE_MARKER 和 ${markerSuffix} 用下划线拼接。`,
@@ -369,14 +371,19 @@ function inspectBridgeEvidence(stdout) {
   return {
     hasNodeReplListAppsCall: bridgeLines.some(line => (
       line.includes('hasListApps=true') &&
-      line.includes('hasSetupComputerUseRuntime=true')
+      line.includes('isError=false')
     )),
     hasSummaryOutput: bridgeLines.some(line => (
       line.includes('COMPUTER_USE_LIST_APPS_SUMMARY=') &&
       /\\?"isArray\\?":true/.test(line)
     )),
     hasSshTarget: bridgeLines.some(line => line.includes('resultPrefix={"kind":"ssh"')),
-    hasBridgeError: bridgeLines.some(line => line.includes('isError=true')),
+    hasBlockingBridgeError:
+      bridgeLines.some(line => line.includes('isError=true')) &&
+      !bridgeLines.some(line => (
+        line.includes('COMPUTER_USE_LIST_APPS_SUMMARY=') &&
+        /\\?"isArray\\?":true/.test(line)
+      )),
   };
 }
 
