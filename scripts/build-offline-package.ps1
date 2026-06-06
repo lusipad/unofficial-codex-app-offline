@@ -675,6 +675,28 @@ if ((Test-Path (Join-Path $sourceExportRoot 'app/Codex.exe')) -and (Test-Path $s
   Write-BuildTrace 'Using cached app source (skip Export-AppSource).'
   $sourceMetadata = Get-Content -Path $sourceMetadataPath -Raw | ConvertFrom-Json
   $version = $sourceMetadata.version
+  $cachedSourceMode = [string](Get-OptionalProperty -Object $sourceMetadata -Name 'sourceMode')
+  if ([string]::IsNullOrWhiteSpace($cachedSourceMode)) {
+      $cachedSourceMode = [string]$config.appSource.mode
+  }
+  $appSourceInfo = [ordered]@{
+      mode = $cachedSourceMode
+      resolver = 'cached'
+      packageFamilyName = [string](Get-OptionalProperty -Object $sourceMetadata -Name 'packageFamilyName')
+      version = $version
+  }
+  $cachedInstallLocation = [string](Get-OptionalProperty -Object $sourceMetadata -Name 'installLocation')
+  if (-not [string]::IsNullOrWhiteSpace($cachedInstallLocation)) {
+      $appSourceInfo['installLocation'] = $cachedInstallLocation
+  }
+  $cachedSourceFileName = [string](Get-OptionalProperty -Object $sourceMetadata -Name 'sourceFileName')
+  if (-not [string]::IsNullOrWhiteSpace($cachedSourceFileName)) {
+      $appSourceInfo['selected'] = [ordered]@{
+          fileName = $cachedSourceFileName
+          href = [string](Get-OptionalProperty -Object $sourceMetadata -Name 'sourceBundleUrl')
+          sha1 = [string](Get-OptionalProperty -Object $sourceMetadata -Name 'sourceSha1')
+      }
+  }
 } else {
   Write-BuildTrace 'Exporting app source.'
   $appSourceInfo = Export-AppSource -Config $config -ScriptRoot $scriptRoot -SourceExportRoot $sourceExportRoot
