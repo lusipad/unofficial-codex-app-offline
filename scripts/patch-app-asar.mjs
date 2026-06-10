@@ -1414,6 +1414,11 @@ try {
     /function\s+([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*),\{env:([A-Za-z_$][\w$]*)=process\.env,platform:([A-Za-z_$][\w$]*)=process\.platform\}=\{\}\)\{return\s+\4!==`win32`\|\|\3\.CODEX_ELECTRON_ENABLE_WINDOWS_COMPUTER_USE!==`1`\?\2:\{\.\.\.\2,computerUse:!0,computerUseNodeRepl:!0\}\}/;
   const WINDOWS_BROWSER_USE_CAPABILITY_CURRENT_RE =
     /function\s+([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*),\{((?:buildFlavor:[A-Za-z_$][\w$]*=[^,}]+,)?env:([A-Za-z_$][\w$]*)=[^,}]+,platform:([A-Za-z_$][\w$]*)=[^,}]+)\}=\{\}\)\{let ([A-Za-z_$][\w$]*)=\5===`win32`&&\4\.CODEX_ELECTRON_ENABLE_WINDOWS_COMPUTER_USE===`1`\?\{\.\.\.\2,computerUse:!0,computerUseNodeRepl:!0\}:\2,/;
+  // v26.608+ introduced a multi-step let chain: darwin/win32-cu checks precede the CODEX env check.
+  // The CODEX_ELECTRON_ENABLE_WINDOWS_COMPUTER_USE assignment is no longer the first let; it is
+  // preceded by a comma rather than being immediately after the opening brace.
+  const WINDOWS_BROWSER_USE_CAPABILITY_V3_RE =
+    /,([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)===`win32`&&([A-Za-z_$][\w$]*)\.CODEX_ELECTRON_ENABLE_WINDOWS_COMPUTER_USE===`1`\?\{\.\.\.([A-Za-z_$][\w$]*),computerUse:!0,computerUseNodeRepl:!0\}:\4(?=,)/;
   const NODE_REPL_FEATURE_ENABLED_PATCH_MARKER =
     contractPatchMarker('/*codex-offline:node-repl-feature-enabled*/');
   const NODE_REPL_FEATURE_CONFIG_RE =
@@ -2297,6 +2302,12 @@ try {
         'function $1($2,{$3}={}){' +
           'let $6=$5===`win32`&&$4.CODEX_ELECTRON_ENABLE_WINDOWS_COMPUTER_USE===`1`?' +
           `{...$2,${DESKTOP_BROWSER_USE_CAPABILITY_PATCH_FIELDS}${WINDOWS_BROWSER_USE_CAPABILITY_PATCH_MARKER}}:$2,`,
+      );
+    } else if (WINDOWS_BROWSER_USE_CAPABILITY_V3_RE.test(content)) {
+      content = content.replace(
+        WINDOWS_BROWSER_USE_CAPABILITY_V3_RE,
+        ',$1=$2===`win32`&&$3.CODEX_ELECTRON_ENABLE_WINDOWS_COMPUTER_USE===`1`?' +
+          `{...$4,computerUse:!0,computerUseNodeRepl:!0,${DESKTOP_BROWSER_USE_CAPABILITY_PATCH_FIELDS}${WINDOWS_BROWSER_USE_CAPABILITY_PATCH_MARKER}}:$4`,
       );
     } else {
       continue;
