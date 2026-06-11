@@ -581,7 +581,7 @@ function Repair-ComputerUseClientNativePipeFallback {
         $oldFunction = (@'
 function getComputerUsePipePath() {
   const nativePipeDirectory =
-    globalThis.nodeRepl?.env?.SKY_CUA_NATIVE_PIPE_DIRECTORY;
+    getComputerUsePrivilegedNodeRepl()?.env?.SKY_CUA_NATIVE_PIPE_DIRECTORY;
   if (typeof nativePipeDirectory === "string") {
     const trimmed = nativePipeDirectory.trim();
     if (trimmed) {
@@ -596,7 +596,7 @@ function getComputerUsePipePath() {
 function getComputerUsePipePaths() {
   const paths = [];
   const nativePipeDirectory =
-    globalThis.nodeRepl?.env?.SKY_CUA_NATIVE_PIPE_DIRECTORY;
+    getComputerUsePrivilegedNodeRepl()?.env?.SKY_CUA_NATIVE_PIPE_DIRECTORY;
   if (typeof nativePipeDirectory === "string") {
     const trimmed = nativePipeDirectory.trim();
     if (trimmed) {
