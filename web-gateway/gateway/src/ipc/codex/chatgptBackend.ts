@@ -315,8 +315,7 @@ async function transcribeAudioViaChatgpt(callAppServer, payload) {
   }
 }
 
-/** 从 app-server account/read 和 token claim 合成 renderer 需要的账号信息。
- *  API key 模式下无 ChatGPT token，额外从 getAuthStatus 尝试提取 email。 */
+/** 从 app-server account/read 和 token claim 合成 renderer 需要的账号信息。 */
 async function accountInfoFromCodexAccount(callAppServer, payload) {
   let accountResult = null;
   try {
@@ -332,13 +331,11 @@ async function accountInfoFromCodexAccount(callAppServer, payload) {
     tokenClaims = auth ? auth.claims : {};
   } catch {}
   if (!account || typeof account !== "object") {
-    // API key 模式：没有 ChatGPT token，但可能从 getAuthStatus 拿到 email。
-    const fallbackEmail = tokenClaims.email || (await emailFromAuthStatus(callAppServer));
     return {
       accountId: tokenClaims.accountId || null,
       userId: tokenClaims.userId || null,
       plan: tokenClaims.plan || null,
-      email: fallbackEmail || null,
+      email: tokenClaims.email || null,
     };
   }
   return {
@@ -362,19 +359,7 @@ async function accountInfoFromCodexAccount(callAppServer, payload) {
   };
 }
 
-/** 尽量从 getAuthStatus 提取 email，供 API key / 离线兜底使用。 */
-async function emailFromAuthStatus(callAppServer) {
-  try {
-    const authStatus = await callAppServer("getAuthStatus", {});
-    if (authStatus && typeof authStatus === "object" && typeof authStatus.email === "string" && authStatus.email) {
-      return authStatus.email;
-    }
-  } catch {}
-  return "";
-}
-
-/** 用 app-server 的本地账号状态快速构造 /wham/accounts/check，避免刷新时阻塞真实后端探测。
- *  API key 模式和离线模式下不抛异常——总是返回至少一条本地账号记录。 */
+/** 用 app-server 的本地账号状态快速构造 /wham/accounts/check，避免刷新时阻塞真实后端探测。 */
 async function buildWhamAccountsCheck(callAppServer, logger) {
   let accountResult = null;
   try {
@@ -416,26 +401,9 @@ async function buildWhamAccountsCheck(callAppServer, logger) {
   try {
     return await fetchChatgptBackendJson(callAppServer, "/wham/accounts/check");
   } catch (error) {
-    logger && logger.warn("[wham] real /wham/accounts/check failed, returning local fallback", error);
+    logger && logger.warn("[wham] real /wham/accounts/check failed", error);
+    throw error;
   }
-
-  // 终极兜底（API key 模式 / 离线模式）：从 getAuthStatus 捞 email，构造最小本地账号。
-  const fallbackEmail = await emailFromAuthStatus(callAppServer);
-  const fallbackId = fallbackEmail || "local";
-  return {
-    accounts: [
-      {
-        id: fallbackId,
-        email: fallbackEmail,
-        account: {
-          id: fallbackId,
-          email: fallbackEmail,
-          account_user_role: "member",
-          plan_type: null,
-        },
-      },
-    ],
-  };
 }
 
 /** 把 /wham/accounts/check 响应转成旧 accounts/check 的兼容结构。 */
