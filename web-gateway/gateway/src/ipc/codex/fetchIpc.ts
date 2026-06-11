@@ -56,9 +56,16 @@ function createFetchIpcHandlers(deps) {
   function localWhamFallback(pathname) {
     switch (pathname) {
       case "/wham/usage":
+      // profile 页请求的用量明细，离线 / API key 模式下返回空
+      case "/wham/usage/summary":
+      case "/wham/usage/details":
         return null;
       case "/wham/environments":
         return [];
+      // profile 页可能请求的账号功能/权益列表，离线时返回空
+      case "/wham/user/features":
+      case "/wham/user/entitlements":
+        return { features: [], entitlements: [] };
       default:
         return undefined;
     }
@@ -213,17 +220,29 @@ function createFetchIpcHandlers(deps) {
 
       if (pathname.startsWith("/wham/") || pathname.startsWith("/aip/") || pathname.startsWith("/files/")) {
         // 这些请求必须由 gateway 带 token 代理，远端浏览器不能直接访问底层后端。
+        // API key 模式或离线模式下无 token，代理会抛异常；对 /wham/ GET 请求返回空对象兜底，
+        // 避免 profile 页因单个接口失败而整体崩溃。
         const backendPath = urlObject ? `${urlObject.pathname}${urlObject.search}` : url;
-        const proxied = await chatgptBackend.fetchChatgptBackendRaw(backendPath, {
-          method: String(message.method || "GET"),
-          headers: chatgptBackend.normalizeFetchHeaders(message.headers),
-          body:
-            body !== undefined && String(message.method || "GET").toUpperCase() !== "GET"
-              ? typeof body === "string"
-                ? body
-                : JSON.stringify(body)
-              : undefined,
-        });
+        let proxied;
+        try {
+          proxied = await chatgptBackend.fetchChatgptBackendRaw(backendPath, {
+            method: String(message.method || "GET"),
+            headers: chatgptBackend.normalizeFetchHeaders(message.headers),
+            body:
+              body !== undefined && String(message.method || "GET").toUpperCase() !== "GET"
+                ? typeof body === "string"
+                  ? body
+                  : JSON.stringify(body)
+                : undefined,
+          });
+        } catch (proxyError) {
+          if (pathname.startsWith("/wham/") && String(message.method || "GET").toUpperCase() === "GET") {
+            logger && logger.warn(`[wham] proxy unavailable for ${pathname}, returning empty fallback`, proxyError);
+            broadcastFetchResponse(requestId, null, 200, targetClientId);
+            return true;
+          }
+          throw proxyError;
+        }
         broadcastFetchHttpResponse(requestId, {
           requestId,
           ...proxied,
