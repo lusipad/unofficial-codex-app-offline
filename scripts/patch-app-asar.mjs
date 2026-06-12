@@ -205,6 +205,38 @@ function warn(msg) {
   console.warn(`[patch-app-asar] WARNING: ${msg}`);
 }
 
+// Required vs optional patch failures.
+//
+// A patch is "required" when its absence breaks core usability — launch, the
+// settings page, Computer Use, or the bundled browser plugins. Those must fail
+// the build instead of silently shipping a broken package. Optional patches
+// (diagnostics, edge-case resilience, legacy migrations, non-core plugins) keep
+// using warn(): their absence degrades a peripheral feature but the package
+// still launches and works.
+//
+// Required failures are collected rather than thrown immediately so a single
+// run surfaces every failure at once (an upstream restructure usually breaks
+// several needles together); assertRequiredPatchesApplied() fails the build
+// before the asar is repacked.
+const requiredPatchFailures = [];
+
+function failRequiredPatch(msg) {
+  requiredPatchFailures.push(msg);
+  console.error(`[patch-app-asar] REQUIRED PATCH FAILED: ${msg}`);
+}
+
+function assertRequiredPatchesApplied() {
+  if (requiredPatchFailures.length === 0) {
+    return;
+  }
+  throw new Error(
+    `${requiredPatchFailures.length} required offline patch(es) failed to apply — ` +
+    'the upstream bundle structure likely changed. Refusing to ship a ' +
+    'crash-or-broken package:\n' +
+    requiredPatchFailures.map((m) => `  - ${m}`).join('\n'),
+  );
+}
+
 /** Return the main-process entry file listed in an asar's package.json. */
 function resolveMainEntry(extractDir) {
   const pkgPath = path.join(extractDir, 'package.json');
@@ -667,7 +699,7 @@ function patchChromePluginScripts(rootAppDir) {
     'chrome',
   );
   if (!fs.existsSync(chromePluginRoot)) {
-    warn('Bundled Chrome plugin was not found. Chrome plugin script patches skipped.');
+    failRequiredPatch('Bundled Chrome plugin was not found. Chrome plugin script patches skipped.');
     return;
   }
 
@@ -2128,7 +2160,7 @@ try {
     );
   }
   if (!settingsHandlerSeen) {
-    warn('Could not locate the "not implemented" throw for show-settings. ' +
+    failRequiredPatch('Could not locate the "not implemented" throw for show-settings. ' +
          'Settings patch skipped (the app version may have changed).');
   }
 
@@ -2527,7 +2559,7 @@ try {
   } else if (featureOverridesConfigNamespaceAlreadyCorrect) {
     log('Feature override config namespace preservation already patched.');
   } else {
-    warn(
+    failRequiredPatch(
       'Could not locate feature override config merge function (app version may have changed). ' +
       'Computer Use may lose mcp_servers.node_repl before thread startup.',
     );
@@ -2660,7 +2692,7 @@ try {
   } else if (nodeReplDisableSandboxAlreadyCorrect) {
     log('Node REPL sandbox bypass argument already patched.');
   } else {
-    warn(
+    failRequiredPatch(
       'Could not locate Browser Use thread config generation to add ' +
       'node_repl --disable-sandbox for offline Windows Computer Use (app version may have changed).',
     );
@@ -2763,7 +2795,7 @@ try {
   } else if (computerUsePluginRootFallbackAlreadyCorrect) {
     log('Computer Use plugin root fallback already patched.');
   } else {
-    warn(
+    failRequiredPatch(
       'Could not locate Computer Use installed plugin path resolver (app version may have changed). ' +
       'node_repl may start without the packaged Computer Use plugin runtime paths.',
     );
@@ -3025,12 +3057,12 @@ try {
   } else if (bundledBrowserPluginsPatch.alreadyCorrect) {
     log('Bundled browser plugins runtime marketplace already patched.');
   } else if (!bundledBrowserPluginsPatch.seen) {
-    warn(
+    failRequiredPatch(
       'Bundled browser plugin descriptors were not found in main bundles. ' +
       '@chrome may be filtered from the runtime marketplace in this app version.',
     );
   } else {
-    warn(
+    failRequiredPatch(
       'Bundled browser plugin descriptors are present in main bundles, but ' +
       'no supported patch pattern matched (app version may have changed). ' +
       '@chrome may be filtered from the runtime marketplace in offline builds.',
@@ -3756,6 +3788,10 @@ try {
     }
   }
   log('Renderer Statsig gates handled by init.cjs IPC interception (no asar patching).');
+
+  // Fail the build before repacking if any required patch did not apply, so an
+  // upstream bundle restructure is caught here instead of by users at launch.
+  assertRequiredPatchesApplied();
 
   // Repack.
   log('Repacking asar…');
