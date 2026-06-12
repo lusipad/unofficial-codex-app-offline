@@ -1296,10 +1296,18 @@ try {
   }
 
   // Find main entry point.
+  //
+  // The main-process entry carries the load-bearing bootstrap patches
+  // (process.windowsStore, the MSIX updater binding stub, the Computer Use
+  // env default and the init.cjs require). Without them a standalone
+  // Codex.exe crashes at startup, so a missing entry must fail the build
+  // instead of silently shipping a broken package.
   const mainEntry = resolveMainEntry(tmpDir);
   if (!mainEntry) {
-    warn('Could not locate the main-process entry point. Patch skipped.');
-    process.exit(0);
+    throw new Error(
+      'Could not locate the main-process entry point. The bundle structure ' +
+      'likely changed; refusing to ship an unpatched (crash-on-launch) package.',
+    );
   }
 
   log(`Main entry: ${path.relative(tmpDir, mainEntry)}`);
