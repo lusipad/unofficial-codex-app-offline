@@ -210,6 +210,7 @@ const DESKTOP_ASAR_PATCH_MARKERS = Object.freeze([
   "/*codex-offline:renderer-known-statsig-gates*/",
   "/*codex-offline:codex-mobile-auth-relogin*/",
   "/*codex-offline:external-agent-config-import*/",
+  "/*codex-offline:electron-namespace-no-auto-updater*/",
 ]);
 
 const FAST_MODE_CONTRACT = Object.freeze({

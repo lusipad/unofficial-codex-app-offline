@@ -183,7 +183,7 @@ test("source data contract covers direct exe asar patch surfaces", () => {
     "/*codex-offline:context-usage-visible*/",
     "/*codex-offline:renderer-known-statsig-gates*/",
     "/*codex-offline:external-agent-config-import*/",
-    "/*codex-offline:disable-auto-updater-breadcrumb*/",
+    "/*codex-offline:electron-namespace-no-auto-updater*/",
   ]) {
     assert.ok(contractData.DESKTOP_ASAR_PATCH_MARKERS.includes(marker), marker);
   }
@@ -232,4 +232,82 @@ test("web gateway safely no-ops external agent import channels", async () => {
   assert.deepEqual(await handlers.handle("external-agent-imported-connectors", { hostId: "local" }), {
     connectors: [],
   });
+});
+
+test("web gateway lists archived threads from app-server", async () => {
+  const requests = [];
+  const archivedThread = {
+    id: "archived-thread-1",
+    name: "Archived",
+    cwd: "D:\\Repos\\example",
+    createdAt: 1,
+    updatedAt: 2,
+  };
+  const handlers = makeHandlers({
+    appServer: {
+      isConnected: () => true,
+      request: async (method, params) => {
+        requests.push({ method, params });
+        if (method === "thread/list") return { data: [archivedThread], nextCursor: null };
+        throw new Error(`unexpected method: ${method}`);
+      },
+    },
+    broadcast: () => {},
+    logger: { warn: () => {} },
+    isClientConnected: () => false,
+  });
+
+  const result = await handlers.handle("list-archived-threads", { hostId: "local" });
+
+  assert.ok(result.some((thread) => thread.id === archivedThread.id));
+  assert.deepEqual(requests, [
+    {
+      method: "thread/list",
+      params: {
+        archived: true,
+        cursor: null,
+        limit: 200,
+        modelProviders: null,
+        sortKey: "updated_at",
+      },
+    },
+  ]);
+});
+
+test("web gateway hydrates only unarchived pinned threads", async () => {
+  const requests = [];
+  const handlers = makeHandlers({
+    appServer: {
+      isConnected: () => true,
+      request: async (method, params) => {
+        requests.push({ method, params });
+        if (method === "thread/list") {
+          return { data: [{ id: "archived-thread-1", updatedAt: 2 }], nextCursor: null };
+        }
+        if (method === "thread/read") {
+          return { thread: { id: params.threadId, createdAt: 1, updatedAt: 2, turns: [] } };
+        }
+        throw new Error(`unexpected method: ${method}`);
+      },
+    },
+    broadcast: () => {},
+    logger: { warn: () => {} },
+    isClientConnected: () => false,
+  });
+
+  const result = await handlers.handle("hydrate-pinned-threads", {
+    hostId: "local",
+    threadIds: ["active-thread-1", "archived-thread-1"],
+  });
+
+  assert.deepEqual(result, { threadIds: ["active-thread-1"] });
+  assert.deepEqual(
+    requests.filter((request) => request.method === "thread/read"),
+    [
+      {
+        method: "thread/read",
+        params: { threadId: "active-thread-1", includeTurns: false },
+      },
+    ]
+  );
 });

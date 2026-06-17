@@ -357,6 +357,133 @@ function makeHandlers({ appServer, broadcast, logger, isClientConnected }) {
   }
   // ===== Hover Card / Pinned Threads END: 缓存刷新广播 =====
 
+  function payloadParams(payload) {
+    return payload && typeof payload === "object" && payload.params ? payload.params : payload;
+  }
+
+  function threadIdFromPayload(payload) {
+    const params = payloadParams(payload);
+    if (!params || typeof params !== "object") return null;
+    return params.conversationId || params.threadId || params.id || null;
+  }
+
+  function hostIdFromPayload(payload) {
+    const params = payloadParams(payload);
+    return params && typeof params === "object" && typeof params.hostId === "string" ? params.hostId : "local";
+  }
+
+  function threadIdsFromPayload(payload) {
+    const params = payloadParams(payload);
+    const source = params && typeof params === "object" && Array.isArray(params.threadIds) ? params.threadIds : [];
+    return source.filter((id) => typeof id === "string" && id);
+  }
+
+  function mergeArchivedThreads(primary, fallback) {
+    const merged = [];
+    const seen = new Set();
+    for (const item of [...(Array.isArray(primary) ? primary : []), ...(Array.isArray(fallback) ? fallback : [])]) {
+      if (!item || typeof item !== "object" || typeof item.id !== "string" || !item.id) continue;
+      if (seen.has(item.id)) continue;
+      seen.add(item.id);
+      merged.push(item);
+    }
+    return merged;
+  }
+
+  function broadcastArchivedThreadsChanged(hostId) {
+    if (typeof broadcast !== "function") return;
+    broadcast({
+      channel: "query-cache-invalidate",
+      payload: { type: "query-cache-invalidate", queryKey: ["archived-threads", hostId || "local"] },
+    });
+  }
+
+  async function listAppServerArchivedThreads() {
+    const threads = [];
+    let cursor = null;
+    do {
+      const result = await appServerBridge.callAppServer("thread/list", {
+        archived: true,
+        cursor,
+        limit: 200,
+        modelProviders: null,
+        sortKey: "updated_at",
+      });
+      if (Array.isArray(result && result.data)) threads.push(...result.data);
+      cursor = result && result.nextCursor != null ? result.nextCursor : null;
+    } while (cursor);
+    return threads;
+  }
+
+  async function listArchivedThreadsForPayload(payload) {
+    const desktopThreads = workspaceRuntime.listArchivedThreads();
+    try {
+      return mergeArchivedThreads(await listAppServerArchivedThreads(), desktopThreads);
+    } catch (error) {
+      logger && logger.warn("[ipc] app-server archived thread list failed; falling back to desktop state", error);
+      return desktopThreads;
+    }
+  }
+
+  async function archiveConversationForPayload(payload) {
+    const conversationId = threadIdFromPayload(payload);
+    const hostId = hostIdFromPayload(payload);
+    if (!conversationId) return true;
+    try {
+      await appServerBridge.callAppServer("thread/archive", { threadId: conversationId });
+    } catch (error) {
+      logger && logger.warn("[ipc] app-server thread/archive failed; preserving desktop archived state", error);
+      const archived = workspaceRuntime.listArchivedThreads();
+      if (!archived.some((item) => item && item.id === conversationId)) {
+        const params = payloadParams(payload) || {};
+        archived.unshift({
+          id: conversationId,
+          name: params.name || params.title || params.preview || null,
+          preview: params.preview || null,
+          cwd: params.cwd || null,
+          path: params.path || null,
+          hostId: params.hostId || null,
+          createdAt: Math.floor(Date.now() / 1000),
+          updatedAt: Math.floor(Date.now() / 1000),
+        });
+        workspaceRuntime.setArchivedThreads(archived);
+      }
+    }
+    broadcastArchivedThreadsChanged(hostId);
+    return true;
+  }
+
+  async function unarchiveConversationForPayload(payload) {
+    const conversationId = threadIdFromPayload(payload);
+    const hostId = hostIdFromPayload(payload);
+    if (!conversationId) return true;
+    try {
+      await appServerBridge.callAppServer("thread/unarchive", { threadId: conversationId });
+    } catch (error) {
+      logger && logger.warn("[ipc] app-server thread/unarchive failed; clearing desktop archived state", error);
+    }
+    workspaceRuntime.setArchivedThreads(workspaceRuntime.listArchivedThreads().filter((item) => item && item.id !== conversationId));
+    broadcastArchivedThreadsChanged(hostId);
+    return true;
+  }
+
+  async function hydratePinnedThreadsForPayload(payload) {
+    const threadIds = threadIdsFromPayload(payload);
+    if (threadIds.length === 0) return { threadIds: [] };
+    const archivedIds = new Set((await listArchivedThreadsForPayload(payload)).map((item) => item.id));
+    const hydratedThreadIds = [];
+    for (const threadId of threadIds) {
+      if (archivedIds.has(threadId)) continue;
+      try {
+        await appServerBridge.callAppServer("thread/read", { threadId, includeTurns: false });
+        hydratedThreadIds.push(threadId);
+      } catch (error) {
+        logger && logger.warn(`[ipc] failed to hydrate pinned thread: ${threadId}`, error);
+      }
+    }
+    return { threadIds: hydratedThreadIds };
+  }
+
   function runDetached(label, task) {
     Promise.resolve()
       .then(task)
@@ -648,39 +775,13 @@ function makeHandlers({ appServer, broadcast, logger, isClientConnected }) {
       case "settings:set":
         return desktopState.setSettingValue(payload, { callAppServer: appServerBridge.callAppServer });
       case "list-archived-threads":
-        return workspaceRuntime.listArchivedThreads();
-      case "archive-conversation": {
-        const archived = workspaceRuntime.listArchivedThreads();
-        const conversationId =
-          payload && typeof payload === "object"
-            ? payload.conversationId || payload.threadId || payload.id || null
-            : null;
-        if (conversationId && !archived.some((item) => item && item.id === conversationId)) {
-          archived.unshift({
-            id: conversationId,
-            name:
-              (payload && typeof payload === "object" && (payload.name || payload.title || payload.preview)) ||
-              null,
-            preview: (payload && typeof payload === "object" && payload.preview) || null,
-            cwd: (payload && typeof payload === "object" && payload.cwd) || null,
-            path: (payload && typeof payload === "object" && payload.path) || null,
-            hostId: (payload && typeof payload === "object" && payload.hostId) || null,
-            createdAt: Math.floor(Date.now() / 1000),
-            updatedAt: Math.floor(Date.now() / 1000),
-          });
-          workspaceRuntime.setArchivedThreads(archived);
-        }
-        return true;
-      }
-      case "unarchive-conversation": {
-        const conversationId =
-          payload && typeof payload === "object"
-            ? payload.conversationId || payload.threadId || payload.id || null
-            : null;
-        if (!conversationId) return true;
-        workspaceRuntime.setArchivedThreads(workspaceRuntime.listArchivedThreads().filter((item) => item && item.id !== conversationId));
-        return true;
-      }
+        return listArchivedThreadsForPayload(payload);
+      case "archive-conversation":
+        return archiveConversationForPayload(payload);
+      case "unarchive-conversation":
+        return unarchiveConversationForPayload(payload);
+      case "hydrate-pinned-threads":
+        return hydratePinnedThreadsForPayload(payload);
       case "worktree-delete":
         return true;
       case "window:setTitle":
