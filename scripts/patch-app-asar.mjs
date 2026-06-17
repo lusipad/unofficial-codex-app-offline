@@ -957,6 +957,9 @@ function patchChromeBrowserClient(filePath) {
     const currentDiagnosticsMatch = content.match(
       /let ([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*),([A-Za-z_$][\w$]*),([A-Za-z_$][\w$]*),([A-Za-z_$][\w$]*);try\{if\(([A-Za-z_$][\w$]*)\(\)==null\)throw new Error\(([A-Za-z_$][\w$]*)\(\)\);([A-Za-z_$][\w$]*)\(\);let ([A-Za-z_$][\w$]*)=new ([A-Za-z_$][\w$]*);\(\{browsers:([A-Za-z_$][\w$]*),diagnostics:([A-Za-z_$][\w$]*)\}=await ([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*)=>new ([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*),([A-Za-z_$][\w$]*),([A-Za-z_$][\w$]*)\)\)\),([A-Za-z_$][\w$]*)=await ([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*)\)\}/,
     );
+    const currentCandidateDiagnosticsMatch = content.match(
+      /,([A-Za-z_$][\w$]*)=\{backendCounts:[\s\S]*?pipeListingPipeCount:[A-Za-z_$][\w$]*\.pipes\.length\},([A-Za-z_$][\w$]*=)/,
+    );
 
     if (content.includes(legacyDiagnosticsNeedle)) {
       content = content.replace(legacyDiagnosticsNeedle, legacyDiagnosticsReplacement);
@@ -981,6 +984,19 @@ function patchChromeBrowserClient(filePath) {
       content = content.replace(diagnosticsNeedle, diagnosticsReplacement);
       void globalsParam;
       void browsersVar;
+    } else if (currentCandidateDiagnosticsMatch) {
+      const [diagnosticsNeedle, diagnosticsVar, nextBinding] =
+        currentCandidateDiagnosticsMatch;
+      const diagnosticsReplacement = diagnosticsNeedle.replace(
+        `,${nextBinding}`,
+        `;globalThis.__codexBrowserUseDiagnostics=${diagnosticsVar};${diagnosticsPatchMarker}let ${nextBinding}`,
+      );
+      if (!diagnosticsReplacement.includes(diagnosticsPatchMarker)) {
+        throw new Error(
+          'Could not prepare Chrome browser-client candidate diagnostics replacement.',
+        );
+      }
+      content = content.replace(diagnosticsNeedle, diagnosticsReplacement);
     } else {
       throw new Error(
         'Could not locate Chrome browser-client setup flow to expose discovery diagnostics.',
@@ -1046,7 +1062,7 @@ function patchChromeBrowserClient(filePath) {
       directSetupHelperNeedle +
       `function _codexOfflineCanUseNativePipeDirect(){return ${platformFunction}()==="win32"}`;
     const directSetupGuardMatch = content.match(
-      /if\(([A-Za-z_$][\w$]*)\(\)==null\)throw new Error\(([A-Za-z_$][\w$]*)\(\)\);/,
+      /if\(([A-Za-z_$][\w$]*)\(\)==null\)throw new Error\(([A-Za-z_$][\w$]*)\(\)\);?/,
     );
     if (!directSetupGuardMatch) {
       throw new Error(
@@ -1433,6 +1449,12 @@ try {
     'case`open-extension-settings`:case`open-keyboard-shortcuts`:' +
     'case`open-config-toml`:case`show-settings`:case`install-wsl`:' +
     'throw Error(`"${i.type}" is not implemented in Electron.`)';
+  // V4: message=n, webContents=e, electron=a (seen in builds ≥ 26.611.x)
+  const NOT_IMPLEMENTED_NEEDLE_V4 =
+    'case`navigate-in-new-editor-tab`:case`open-vscode-command`:' +
+    'case`open-extension-settings`:case`open-keyboard-shortcuts`:' +
+    'case`open-config-toml`:case`show-settings`:case`install-wsl`:' +
+    'throw Error(`"${n.type}" is not implemented in Electron.`)';
 
   // Helper: reload the renderer at a given settings route.
   const NAV_HELPER =
@@ -1523,6 +1545,33 @@ try {
     'case`navigate-in-new-editor-tab`:case`open-vscode-command`:' +
     'case`install-wsl`:' +
     'throw Error(`"${i.type}" is not implemented in Electron.`)';
+  const SETTINGS_REPLACEMENT_V4 =
+    'case`show-settings`:{' +
+      'let _win=a.BrowserWindow.fromWebContents(e);' +
+      'if(_win){let _url=new URL(_win.getURL());' +
+      buildSettingsRouteStatement('_url', 'n') +
+      '_win.loadURL(_url.toString())}' +
+      'break}' +
+    'case`open-extension-settings`:{' +
+      'let _win=a.BrowserWindow.fromWebContents(e);' +
+      'if(_win){let _url=new URL(_win.getURL());' +
+      '_url.searchParams.set("initialRoute","/settings/general-settings");' +
+      '_win.loadURL(_url.toString())}' +
+      'break}' +
+    'case`open-keyboard-shortcuts`:{' +
+      'let _win=a.BrowserWindow.fromWebContents(e);' +
+      'if(_win){let _url=new URL(_win.getURL());' +
+      '_url.searchParams.set("initialRoute","/settings/general-settings");' +
+      '_win.loadURL(_url.toString())}' +
+      'break}' +
+    'case`open-config-toml`:{' +
+      'let _cfg=require("path").join(require("os").homedir(),".codex","config.toml");' +
+      'require("fs").mkdirSync(require("path").dirname(_cfg),{recursive:true});' +
+      'if(!require("fs").existsSync(_cfg))require("fs").writeFileSync(_cfg,"# Codex config\\n",{encoding:"utf8"});' +
+      'a.shell.openPath(_cfg);break}' +
+    'case`navigate-in-new-editor-tab`:case`open-vscode-command`:' +
+    'case`install-wsl`:' +
+    'throw Error(`"${n.type}" is not implemented in Electron.`)';
   const AUTOMATION_CWD_NORMALIZER_INLINE =
     'e=>typeof e==`string`&&e.startsWith(`\\\\\\\\?\\\\`)&&/^[A-Za-z]:/.test(e.slice(4))?e.slice(4):e';
   const AUTOMATION_RUNTIME_CWD_RE =
@@ -2157,6 +2206,13 @@ try {
       content = content.replace(
         NOT_IMPLEMENTED_NEEDLE_V3,
         SETTINGS_REPLACEMENT_V3,
+      );
+      modified = true;
+      settingsPatchedFiles.push(path.relative(tmpDir, filePath));
+    } else if (content.includes(NOT_IMPLEMENTED_NEEDLE_V4)) {
+      content = content.replace(
+        NOT_IMPLEMENTED_NEEDLE_V4,
+        SETTINGS_REPLACEMENT_V4,
       );
       modified = true;
       settingsPatchedFiles.push(path.relative(tmpDir, filePath));
