@@ -1340,14 +1340,14 @@ if (!featureOverridesPreserveMcpConfigPatched) {
 if (!featureEnablementPreserveUnifiedExecPatched) {
   throw new Error('Renderer feature enablement refresh does not preserve unified_exec.');
 }
-if (!bundledPluginCacheLockNonfatalPatched) {
-  throw new Error('Bundled plugin cache lock failures can still abort plugin reconciliation.');
-}
 if (bundledPluginCacheLockFatalResiduals.length > 0) {
   throw new Error(
     'Bundled plugin cache lock failure handling still has fatal throw branches: ' +
     bundledPluginCacheLockFatalResiduals.join(', ')
   );
+}
+if (!bundledPluginCacheLockNonfatalPatched) {
+  info('Current app version does not expose the bundled plugin cache lock fatal branch; nonfatal marker is not required.');
 }
 if (allJavaScriptContent.some(content => /[A-Za-z_$][\w$]*=\{"features\.js_repl":!1\}/.test(content))) {
   throw new Error('Browser Use thread config still disables features.js_repl by default.');
