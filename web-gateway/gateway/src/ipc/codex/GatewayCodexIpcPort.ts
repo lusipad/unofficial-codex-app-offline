@@ -401,16 +401,23 @@ function makeHandlers({ appServer, broadcast, logger, isClientConnected }) {
   async function listAppServerArchivedThreads() {
     const threads = [];
     let cursor = null;
+    let pageIndex = 0;
     do {
-      const result = await appServerBridge.callAppServer("thread/list", {
-        archived: true,
-        cursor,
-        limit: 200,
-        modelProviders: null,
-        sortKey: "updated_at",
-      });
-      if (Array.isArray(result && result.data)) threads.push(...result.data);
-      cursor = result && result.nextCursor != null ? result.nextCursor : null;
+      try {
+        const result = await appServerBridge.callAppServer("thread/list", {
+          archived: true,
+          cursor,
+          limit: 200,
+          modelProviders: null,
+          sortKey: "updated_at",
+        });
+        if (Array.isArray(result && result.data)) threads.push(...result.data);
+        cursor = result && result.nextCursor != null ? result.nextCursor : null;
+        pageIndex++;
+      } catch (error) {
+        logger && logger.warn(`[ipc] app-server archived thread page ${pageIndex} failed; returning ${threads.length} partial results`, error);
+        break;
+      }
     } while (cursor);
     return threads;
   }
@@ -418,7 +425,12 @@ function makeHandlers({ appServer, broadcast, logger, isClientConnected }) {
   async function listArchivedThreadsForPayload(payload) {
     const desktopThreads = workspaceRuntime.listArchivedThreads();
     try {
-      return mergeArchivedThreads(await listAppServerArchivedThreads(), desktopThreads);
+      const appServerThreads = await listAppServerArchivedThreads();
+      const merged = mergeArchivedThreads(appServerThreads, desktopThreads);
+      if (appServerThreads.length > 0) {
+        workspaceRuntime.setArchivedThreads(merged);
+      }
+      return merged;
     } catch (error) {
       logger && logger.warn("[ipc] app-server archived thread list failed; falling back to desktop state", error);
       return desktopThreads;
@@ -433,21 +445,21 @@ function makeHandlers({ appServer, broadcast, logger, isClientConnected }) {
       await appServerBridge.callAppServer("thread/archive", { threadId: conversationId });
     } catch (error) {
       logger && logger.warn("[ipc] app-server thread/archive failed; preserving desktop archived state", error);
-      const archived = workspaceRuntime.listArchivedThreads();
-      if (!archived.some((item) => item && item.id === conversationId)) {
-        const params = payloadParams(payload) || {};
-        archived.unshift({
-          id: conversationId,
-          name: params.name || params.title || params.preview || null,
-          preview: params.preview || null,
-          cwd: params.cwd || null,
-          path: params.path || null,
-          hostId: params.hostId || null,
-          createdAt: Math.floor(Date.now() / 1000),
-          updatedAt: Math.floor(Date.now() / 1000),
-        });
-        workspaceRuntime.setArchivedThreads(archived);
-      }
+    }
+    const archived = workspaceRuntime.listArchivedThreads();
+    if (!archived.some((item) => item && item.id === conversationId)) {
+      const params = payloadParams(payload) || {};
+      archived.unshift({
+        id: conversationId,
+        name: params.name || params.title || params.preview || null,
+        preview: params.preview || null,
+        cwd: params.cwd || null,
+        path: params.path || null,
+        hostId: params.hostId || null,
+        createdAt: Math.floor(Date.now() / 1000),
+        updatedAt: Math.floor(Date.now() / 1000),
+      });
+      workspaceRuntime.setArchivedThreads(archived);
     }
     broadcastArchivedThreadsChanged(hostId);
     return true;

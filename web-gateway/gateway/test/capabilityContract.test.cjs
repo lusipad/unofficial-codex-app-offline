@@ -274,6 +274,93 @@ test("web gateway lists archived threads from app-server", async () => {
   ]);
 });
 
+test("web gateway returns partial archived threads when a page fails", async () => {
+  let pageCount = 0;
+  const handlers = makeHandlers({
+    appServer: {
+      isConnected: () => true,
+      request: async (method, params) => {
+        if (method === "thread/list") {
+          pageCount++;
+          if (pageCount === 1) {
+            return {
+              data: [{ id: "page1-thread", name: "Page 1", updatedAt: 2 }],
+              nextCursor: "cursor-2",
+            };
+          }
+          throw new Error("simulated timeout on page 2");
+        }
+        throw new Error(`unexpected method: ${method}`);
+      },
+    },
+    broadcast: () => {},
+    logger: { warn: () => {} },
+    isClientConnected: () => false,
+  });
+
+  const result = await handlers.handle("list-archived-threads", { hostId: "local" });
+
+  assert.ok(Array.isArray(result));
+  assert.ok(result.some((thread) => thread.id === "page1-thread"));
+});
+
+test("web gateway syncs archived threads to desktop state for fallback", async () => {
+  const syncThreadId = `_test_sync_${Date.now()}`;
+  let appServerAvailable = true;
+  const handlers = makeHandlers({
+    appServer: {
+      isConnected: () => true,
+      request: async (method) => {
+        if (!appServerAvailable) throw new Error("simulated app-server down");
+        if (method === "thread/list") {
+          return { data: [{ id: syncThreadId, name: "Sync Test", updatedAt: 2 }], nextCursor: null };
+        }
+        throw new Error(`unexpected method: ${method}`);
+      },
+    },
+    broadcast: () => {},
+    logger: { warn: () => {} },
+    isClientConnected: () => false,
+  });
+
+  await handlers.handle("list-archived-threads", { hostId: "local" });
+
+  appServerAvailable = false;
+  const fallbackResult = await handlers.handle("list-archived-threads", { hostId: "local" });
+
+  assert.ok(fallbackResult.some((thread) => thread.id === syncThreadId));
+});
+
+test("web gateway archives conversation to desktop state on success", async () => {
+  const archiveThreadId = `_test_archive_${Date.now()}`;
+  let callCount = 0;
+  const handlers = makeHandlers({
+    appServer: {
+      isConnected: () => true,
+      request: async (method) => {
+        callCount++;
+        if (method === "thread/archive") return true;
+        if (method === "thread/list") {
+          if (callCount <= 2) throw new Error("simulated failure");
+          throw new Error(`unexpected method: ${method}`);
+        }
+        throw new Error(`unexpected method: ${method}`);
+      },
+    },
+    broadcast: () => {},
+    logger: { warn: () => {} },
+    isClientConnected: () => false,
+  });
+
+  await handlers.handle("archive-conversation", {
+    params: { conversationId: archiveThreadId, name: "Archive Test" },
+  });
+
+  const result = await handlers.handle("list-archived-threads", { hostId: "local" });
+
+  assert.ok(result.some((thread) => thread.id === archiveThreadId));
+});
+
 test("web gateway hydrates only unarchived pinned threads", async () => {
   const requests = [];
   const handlers = makeHandlers({
