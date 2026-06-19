@@ -2004,6 +2004,8 @@ try {
     '({name:`js`,description:`Execute JavaScript in the persistent Node REPL used by Computer Use. This forwards to node_repl.js.`,inputSchema:{type:`object`,additionalProperties:!1,properties:{code:{type:`string`,description:`JavaScript source to execute in the persistent Node-backed kernel.`},timeout_ms:{type:`integer`,minimum:1,description:`Optional execution timeout in milliseconds.`},title:{type:`string`,minLength:1,maxLength:80,description:`Short user-facing description.`}},required:[`code`]}})';
   const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOLS_RETURN_RE =
     /return(\[\.\.\.[A-Za-z_$][\w$]*\?\[[A-Za-z_$][\w$]*\(\)\]:\[\],[\s\S]{0,900}?\]\.map\([A-Za-z_$][\w$]*=>\(\{\.\.\.[A-Za-z_$][\w$]*,namespace:[A-Za-z_$][\w$]*,[\s\S]{0,220}?\}\)\))/;
+  const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOLS_NAMESPACE_RE =
+    /(\]\.map\(([A-Za-z_$][\w$]*)=>\(\{type:`function`,\.\.\.\2,\.\.\.[A-Za-z_$][\w$]*\.has\(\2\.name\)\?\{\}:\{deferLoading:!0\}\}\)\))\}\]/;
   const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_COMPAT_MISSING_RE =
     /(\(\{namespace:`node_repl`,name:`js`,description:`Execute JavaScript in the persistent Node REPL used by Computer Use\.`,inputSchema:\{[\s\S]{0,700}?required:\[`code`\]\}\}\),)(?!\(\{name:`js`,description:`Execute JavaScript in the persistent Node REPL used by Computer Use\. This forwards to node_repl\.js\.`)/;
   const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_RE =
@@ -2088,18 +2090,38 @@ try {
       `}else ${groups.gate}`
     );
   }
+  const COMPUTER_USE_NODE_REPL_NAMESPACE_TOOL_SPEC =
+    '{type:`function`,name:`js`,description:`Execute JavaScript in the persistent Node REPL used by Computer Use.`,' +
+    'inputSchema:{type:`object`,additionalProperties:!1,properties:{code:{type:`string`,' +
+    'description:`JavaScript source to execute in the persistent Node-backed kernel.`},' +
+    'timeout_ms:{type:`integer`,minimum:1,description:`Optional execution timeout in milliseconds.`},' +
+    'title:{type:`string`,minLength:1,maxLength:80,description:`Short user-facing description.`}},' +
+    'required:[`code`]}}';
   function patchComputerUseNodeReplDynamicTools(content) {
     if (content.includes(COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_PATCH_MARKER)) {
       return { content, alreadyCorrect: true, patched: false };
     }
 
-    const next = content.replace(
+    let next = content.replace(
       COMPUTER_USE_NODE_REPL_DYNAMIC_TOOLS_RETURN_RE,
       (_match, toolListExpression) =>
         `return${toolListExpression}.concat([` +
         `${COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_SPEC},` +
         `${COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_COMPAT_SPEC}])` +
         COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_PATCH_MARKER,
+    );
+    if (next !== content) {
+      return { content: next, alreadyCorrect: false, patched: true };
+    }
+
+    next = content.replace(
+      COMPUTER_USE_NODE_REPL_DYNAMIC_TOOLS_NAMESPACE_RE,
+      (_match, mapExpression) =>
+        `${mapExpression}},{type:\`namespace\`,name:\`node_repl\`,` +
+        'description:`Node REPL tools for Computer Use.`,' +
+        `tools:[${COMPUTER_USE_NODE_REPL_NAMESPACE_TOOL_SPEC}]}` +
+        COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_PATCH_MARKER +
+        ']',
     );
     return { content: next, alreadyCorrect: false, patched: next !== content };
   }
@@ -2133,11 +2155,11 @@ try {
   const CHROME_DESCRIPTOR_PATCHED_RE =
     /\{installWhenMissing:!0,name:lt,isAvailable:\(\{buildFlavor:[A-Za-z_$][\w$]*,features:[A-Za-z_$][\w$]*\}\)=>\/\*codex-offline:bundled-browser-plugins-no-force-reload\*\/!0\}/;
   const BROWSER_USE_DESCRIPTOR_RE =
-    /(\{autoInstallOptOutKey:([A-Za-z_$][\w$]*)\.([A-Za-z_$][\w$]*)\(\2\.([A-Za-z_$][\w$]*)\),forceReload:!0,installWhenMissing:!0,name:\2\.\4,isAvailable:\(\{features:([A-Za-z_$][\w$]*)\}\)=>)(\5\.inAppBrowserUseAllowed)(,migrate:([A-Za-z_$][\w$]*)\})/;
+    /(\{autoInstallOptOutKey:([A-Za-z_$][\w$]*)\.([A-Za-z_$][\w$]*)\(\2\.([A-Za-z_$][\w$]*)\),(?:forceReload:!0,)?installWhenMissing:!0,name:\2\.\4,isAvailable:\(\{features:([A-Za-z_$][\w$]*)\}\)=>)(\5\.inAppBrowserUseAllowed)(,migrate:([A-Za-z_$][\w$]*)\})/;
   const BROWSER_USE_DESCRIPTOR_PATCHED_RE =
     /\{autoInstallOptOutKey:[A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*\([A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*\),installWhenMissing:!0,name:[A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*,isAvailable:\(\{features:[A-Za-z_$][\w$]*\}\)=>\/\*codex-offline:bundled-browser-plugins-no-force-reload\*\/!0,migrate:[A-Za-z_$][\w$]*\}/;
   const SYNC_EXTERNAL_BROWSER_DESCRIPTOR_RE =
-    /\{forceReload:!0,name:([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)?),syncInstallStateWithChromeExtension:!0,isAvailable:\(\{(buildFlavor:[A-Za-z_$][\w$]*(?:,env:[A-Za-z_$][\w$]*)?,features:([A-Za-z_$][\w$]*))\}\)=>(?:(?:[A-Za-z_$][\w$]*\([A-Za-z_$][\w$]*(?:,[A-Za-z_$][\w$]*)?\)&&\3\.externalBrowserUseAllowed)|(?:\3\.externalBrowserUseAllowed&&[A-Za-z_$][\w$]*\([A-Za-z_$][\w$]*\)))(\})/g;
+    /\{(?:forceReload:!0,)?name:([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)?),syncInstallStateWithChromeExtension:!0,isAvailable:\(\{(buildFlavor:[A-Za-z_$][\w$]*(?:,env:[A-Za-z_$][\w$]*)?,features:([A-Za-z_$][\w$]*))\}\)=>(?:(?:[A-Za-z_$][\w$]*\([A-Za-z_$][\w$]*(?:,[A-Za-z_$][\w$]*)?\)&&\3\.externalBrowserUseAllowed)|(?:\3\.externalBrowserUseAllowed&&[A-Za-z_$][\w$]*\([A-Za-z_$][\w$]*\)))(\})/g;
   const SYNC_EXTERNAL_BROWSER_DESCRIPTOR_PATCHED_RE =
     /\{installWhenMissing:!0,name:[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)?,syncInstallStateWithChromeExtension:!0,isAvailable:\(\{buildFlavor:[A-Za-z_$][\w$]*(?:,env:[A-Za-z_$][\w$]*)?,features:[A-Za-z_$][\w$]*\}\)=>\/\*codex-offline:bundled-browser-plugins-no-force-reload\*\/!0\}/;
   const IN_APP_BROWSER_DESCRIPTOR_RE =
