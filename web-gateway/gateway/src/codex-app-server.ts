@@ -196,6 +196,7 @@ function createCodexAppServerClient({ broadcast, logger, defaultCodexBinaryPath 
   let reconnectTimer = null;
   let reconnectAttempts = 0;
   let reconnectGivenUp = false;
+  let childSpawnedAtMs = 0;
   let disposed = false;
   const pendingTurnsByThreadId = new Map();
   const pendingTurnIdleTimers = new Map();
@@ -555,6 +556,7 @@ function createCodexAppServerClient({ broadcast, logger, defaultCodexBinaryPath 
   }
 
   function scheduleReconnect(error) {
+    if (reconnectGivenUp) return;
     if (disposed || !shouldReconnectAppServer()) return;
     lastError = error || lastError;
     if (reconnectTimer) clearTimeout(reconnectTimer);
@@ -840,6 +842,7 @@ function createCodexAppServerClient({ broadcast, logger, defaultCodexBinaryPath 
           .filter(Boolean);
         const childCwd = workspaceRoots.length > 0 ? workspaceRoots[0] : PROJECT_ROOT;
         logger && logger.info(`[app-server] cwd=${childCwd}`);
+        childSpawnedAtMs = Date.now();
         child = spawn(cmd, {
           shell: true,
           stdio: ["pipe", "pipe", "pipe"],
@@ -848,9 +851,16 @@ function createCodexAppServerClient({ broadcast, logger, defaultCodexBinaryPath 
           env: process.env,
         });
         child.on("exit", (code, signal) => {
-          logger && logger.info(`[app-server] child exited: code=${code} signal=${signal}`);
+          const elapsedMs = Date.now() - childSpawnedAtMs;
+          logger && logger.info("[app-server] child exited: code=" + String(code) + " signal=" + String(signal) + " elapsed=" + elapsedMs + "ms");
           child = null;
-          handleTransportClosed(new Error(`app-server child exited: code=${code} signal=${signal}`));
+          childSpawnedAtMs = 0;
+          // Fast-fail: binary exits within 2s with non-zero code => cannot start
+          if (elapsedMs < 2000 && code !== 0) {
+            reconnectGivenUp = true;
+            logger && logger.warn("[app-server] hard failure: binary cannot start, giving up permanently");
+          }
+          handleTransportClosed(new Error("app-server child exited: code=" + String(code) + " signal=" + String(signal)));
         });
         attachStdioChild(child).catch((error) => {
           connected = false;
