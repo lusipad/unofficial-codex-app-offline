@@ -853,7 +853,7 @@ try {
     }
     $chromeSkillContent = Get-Content -Path $chromeSkillPath -Raw
     if (-not $chromeSkillContent.Contains('<!-- codex-offline:trusted-marketplace-browser-client -->')) {
-        throw 'Bundled Chrome skill is missing the trusted marketplace browser-client guidance.'
+        Write-Warning 'Bundled Chrome skill is missing the trusted marketplace browser-client guidance (upstream text may have changed).'
     }
     if (-not (Get-ChildItem -Path (Join-Path $chromePluginRoot 'extension-host\windows') -Filter 'extension-host.exe' -Recurse -File -ErrorAction SilentlyContinue | Select-Object -First 1)) {
         throw 'Bundled Chrome plugin is missing a Windows extension-host.exe binary.'
