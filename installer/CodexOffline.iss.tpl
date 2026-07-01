@@ -22,7 +22,6 @@ UninstallDisplayIcon={app}\_internal\app\Codex.exe
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequired=lowest
-UseLongPathAware=yes
 
 [Files]
 Source: "{#MySourceRoot}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
