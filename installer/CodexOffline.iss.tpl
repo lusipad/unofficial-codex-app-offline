@@ -10,7 +10,7 @@ AppId={{A68E32B0-4AA6-4B16-9364-B668731F7062}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher=OpenAI
-DefaultDirName={autopf}\{#MyAppDirName}
+DefaultDirName={%USERPROFILE|{localappdata}}\Codex
 DefaultGroupName={#MyAppDirName}
 OutputDir={#MyOutputRoot}
 OutputBaseFilename={#MyOutputBaseName}
@@ -22,6 +22,7 @@ UninstallDisplayIcon={app}\_internal\app\Codex.exe
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequired=lowest
+UsePreviousAppDir=no
 
 [Files]
 Source: "{#MySourceRoot}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs

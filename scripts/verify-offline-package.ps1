@@ -123,6 +123,8 @@ if (-not (Test-Path $installerTemplatePath)) {
 }
 $installerTemplateContent = Get-Content -Path $installerTemplatePath -Raw
 foreach ($needle in @(
+    'DefaultDirName={%USERPROFILE|{localappdata}}\Codex',
+    'UsePreviousAppDir=no',
     'Filename: "{app}\Codex.cmd"; WorkingDir: "{app}"',
     'IconFilename: "{app}\_internal\app\Codex.exe"'
 )) {
@@ -255,6 +257,36 @@ try {
         $fullPath = Join-Path $portableRoot $relativePath
         if (-not (Test-Path $fullPath)) {
             throw "Portable zip is missing required file: $relativePath"
+        }
+    }
+
+    $installerBudgetRoot = 'C:\Users\123456789012345678901234567890\Codex'
+    $maxInstallerPathLength = 259
+    $longestInstallerPath = $null
+    foreach ($entry in Get-ChildItem -Path $portableRoot -Recurse -Force) {
+        $relativePath = [System.IO.Path]::GetRelativePath($portableRoot, $entry.FullName)
+        $projectedPath = Join-Path $installerBudgetRoot $relativePath
+        $projectedLength = $projectedPath.Length
+        if ($null -eq $longestInstallerPath -or $projectedLength -gt $longestInstallerPath.Length) {
+            $longestInstallerPath = [pscustomobject]@{
+                Length = $projectedLength
+                RelativePath = $relativePath
+                ProjectedPath = $projectedPath
+            }
+        }
+    }
+    if ($null -ne $longestInstallerPath -and $longestInstallerPath.Length -gt $maxInstallerPathLength) {
+        throw "Installer target path exceeds the MAX_PATH-safe budget ($($longestInstallerPath.Length) > $maxInstallerPathLength): $($longestInstallerPath.RelativePath)"
+    }
+
+    $asarUnpackedNodeModulesRoot = Join-Path $portableRoot '_internal\app\resources\app.asar.unpacked\node_modules'
+    if (Test-Path $asarUnpackedNodeModulesRoot) {
+        $encodedScopedPackageDirs = @(
+            Get-ChildItem -Path $asarUnpackedNodeModulesRoot -Directory -Recurse -Force |
+                Where-Object { $_.Name -like '*%40*' }
+        )
+        if ($encodedScopedPackageDirs.Count -gt 0) {
+            throw "app.asar.unpacked still contains URL-encoded scoped node_modules paths: $($encodedScopedPackageDirs[0].FullName)"
         }
     }
 
