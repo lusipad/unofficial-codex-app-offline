@@ -127,6 +127,9 @@ test("source data contract declares every required desktop asar marker", () => {
       assert.ok(declared.has(match[2]), `${path.relative(repoRoot, markerCall.path)}: ${match[2]}`);
     }
   }
+
+  assert.equal(declared.has("/*codex-offline:default-on-gate-wrapper*/"), false);
+  assert.equal(Object.hasOwn(contractData, "DESKTOP_GATE_DENYLIST"), false);
 });
 
 test("source data contract covers direct exe asar patch surfaces", () => {
@@ -184,7 +187,6 @@ test("source data contract covers direct exe asar patch surfaces", () => {
     "/*codex-offline:fast-mode-service-tier-options*/",
     "/*codex-offline:context-usage-visible*/",
     "/*codex-offline:renderer-known-statsig-gates*/",
-    "/*codex-offline:external-agent-config-import*/",
     "/*codex-offline:electron-namespace-no-auto-updater*/",
   ]) {
     assert.ok(contractData.DESKTOP_ASAR_PATCH_MARKERS.includes(marker), marker);
@@ -271,9 +273,19 @@ test("web gateway lists archived threads from app-server", async () => {
         limit: 200,
         modelProviders: null,
         sortKey: "updated_at",
+        useStateDbOnly: true,
       },
     },
   ]);
+});
+
+test("archived thread listing avoids workspace scans", () => {
+  const repoRoot = path.resolve(__dirname, "../../..");
+  const patcherSource = fs.readFileSync(path.join(repoRoot, "scripts", "patch-app-asar.mjs"), "utf8");
+  const verifierSource = fs.readFileSync(path.join(repoRoot, "scripts", "verify-offline-package.ps1"), "utf8");
+
+  assert.ok(patcherSource.includes("useStateDbOnly:${archived}?!0:${useStateDbOnly}"));
+  assert.ok(verifierSource.includes("Archived thread list does not force useStateDbOnly for archived queries."));
 });
 
 test("web gateway returns partial archived threads when a page fails", async () => {

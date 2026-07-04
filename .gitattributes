@@ -1,2 +1,44 @@
-# Shell scripts must use LF line endings for Linux/macOS compatibility
-*.sh text eol=lf
+# Line-ending policy
+#
+# Every tracked file in this repo is text. Store all text as LF in the
+# repository (git blobs) regardless of the checkout platform. Windows working
+# trees may still show CRLF locally, but committed blobs stay LF so shell
+# scripts run on Linux/macOS and diffs stay clean.
+#
+# After adding/updating this file, run once to normalize the index:
+#     git add --renormalize .
+#     git commit -m "Normalize line endings to LF"
+
+# Default: auto-detect text vs binary; normalize text to LF in the repo.
+* text=auto eol=lf
+
+# Explicit LF for source, config and scripts (documents intent).
+*.sh   text eol=lf
+*.mjs  text eol=lf
+*.cjs  text eol=lf
+*.js   text eol=lf
+*.ts   text eol=lf
+*.ps1  text eol=lf
+*.json text eol=lf
+*.yml  text eol=lf
+*.yaml text eol=lf
+*.md   text eol=lf
+*.html text eol=lf
+*.tpl  text eol=lf
+
+# Windows-only launchers (generated at build time) keep CRLF if ever tracked.
+*.bat  text eol=crlf
+*.cmd  text eol=crlf
+
+# Known binaries: never touch line endings.
+*.png      binary
+*.jpg      binary
+*.jpeg     binary
+*.gif      binary
+*.ico      binary
+*.zip      binary
+*.exe      binary
+*.dll      binary
+*.asar     binary
+*.msixbundle binary
+*.pdf      binary

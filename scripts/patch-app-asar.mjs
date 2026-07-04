@@ -32,39 +32,13 @@
  *    builds should default to the system locale instead.  We unify
  *    enable_i18n to true and switch the locale-source default to SYSTEM.
  *
- * 4. Enable settings page entry for offline builds
- *    The settings menu item is gated behind a Statsig experiment that
- *    defaults to off when there is no network.  We bypass the gate so the
- *    entry is always visible in offline builds.  Older builds use the pattern
- *    `4166894088`...;let X=func(Y); newer builds call $f(`4166894088`)
- *    directly.
- *
- * 5. Enable Automations entry for offline builds
- *    The Automations sidebar item is gated behind Statsig experiment
- *    3075919032.  In offline mode Statsig cannot reach its servers, so the
- *    gate defaults to false and the entry is hidden even though all
- *    Automations UI is fully bundled.  We bypass the gate so the sidebar
- *    item is always visible in offline builds.  Newer builds use the
- *    $f(`3075919032`) inline call pattern.
- *
- * 6. Enable pull requests sidebar entry for offline builds
- *    The pull requests nav link is also gated behind a Statsig experiment in
- *    newer builds.  We bypass that gate so the offline build does not hide
- *    the bundled route when Statsig cannot resolve experiments.  Older builds
- *    embed the gate check inline; ≥ 26.429.x extract it to a standalone hook
- *    (function name(){return $f(`3789238711`)}) that we replace with !0.
- *
- * 7. Enable scratchpad sidebar entry for offline builds
- *    Scratchpad is bundled in newer builds but hidden behind a separate
- *    Statsig gate.  We bypass that gate so the offline build exposes the
- *    same route and sidebar nav entry as the official package.
- *
- * 16. Enable slash commands menu for offline builds
- *    The slash command menu in the composer is gated behind Statsig
- *    experiment 1609556872.  In offline mode Statsig cannot reach its
- *    servers, so the menu never opens even though the bundled app contains
- *    the full slash command UI and built-in commands.  We bypass the gate
- *    so typing `/` shows the same menu as the official package.
+ * 4-34. Renderer Statsig feature-gate unlocks (settings, automations, pull
+ *    requests, scratchpad, slash commands, avatar overlay, artifacts,
+ *    memories, dictation, chronicle, remote connections, etc.)
+ *    Migrated to init.cjs runtime interception + the generic
+ *    patchDirectStatsigGateCalls(..., DESKTOP_ASAR_KNOWN_GATE_IDS) pass. The
+ *    per-gate asar needles were removed; each gate id lives in init.cjs
+ *    STATSIG_GATE_OVERRIDES. See docs/plan-b-patch-migration-inventory.md.
  *
  * 35. Enable Fast mode speed selector for offline builds
  *    The "Fast / Standard" speed selector button in the model picker is
@@ -91,17 +65,12 @@
  *    gate can be false even after the bundled Chrome plugin and native host
  *    are installed, so we bypass that renderer gate.
  *
- * 38. Enable external agent config import in Settings > General
- *    Newer builds hide the "Import external agent config" row behind the
- *    external-agent-config gates.  Offline Statsig defaults can leave those
- *    gates false, so we bypass the local calls while keeping the migration
- *    IPC handlers safe to no-op in Web gateway builds.
- *
- * 39. Enable Plugins navigation for API-key/offline sessions
- *    The desktop sidebar shows a disabled Plugins item for API-key users when
- *    gate 533078438 is on, even though the bundled runtime marketplace can be
- *    used offline. We disable that API-key-only lockout and keep the bundled
- *    Plugins route visible for offline builds.
+ * 38-39. External agent config import & Plugins nav (API-key/offline)
+ *    Renderer gates migrated to init.cjs; the per-gate asar needles were
+ *    removed. verify-offline-package.ps1 keeps a dormant conditional tripwire
+ *    (plugins-api-key-nav/route, codex-mobile-auth-relogin) that fails the
+ *    build only if a future upstream bundle reintroduces the gated branch,
+ *    signalling a rewrite against the new seam is due.
  *
  * 40. Keep offline runtime plugins in the materialized marketplace
  *    The desktop runtime copies only enabled bundled plugin descriptors into
@@ -173,6 +142,7 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import crypto from 'crypto';
+import { assertGateOverrideSync } from './check-gate-override-sync.mjs';
 
 const require = createRequire(import.meta.url);
 const asar = require('@electron/asar');
@@ -1368,6 +1338,17 @@ async function extractAsarForPatch(archivePath, destinationPath) {
 
 // ── Main ──────────────────────────────────────────────────────────────────────
 
+// Fail fast if the asar-side known-gate list (DESKTOP_ASAR_KNOWN_GATE_IDS)
+// and the init.cjs runtime override list (STATSIG_GATE_OVERRIDES) have
+// drifted — a new gate added to one but not the other leaves an offline
+// coverage hole. Run before touching the asar so the build fails clearly.
+try {
+  assertGateOverrideSync();
+} catch (error) {
+  console.error(`[patch-app-asar] ${error.message}`);
+  process.exit(1);
+}
+
 const asarPath = path.resolve(appDir, 'resources', 'app.asar');
 
 if (!fs.existsSync(asarPath)) {
@@ -2182,9 +2163,9 @@ try {
         `archived:${archived}=!1,sourceKinds:${sourceKinds}=${defaultSourceKinds},` +
         `useStateDbOnly:${useStateDbOnly}=!1}){let ${threads}=[],${failed}=!1,${loadPage}=async ${cursor}=>{` +
         `let ${page};try{${page}=await ${requestClient}.sendRequest(\`thread/list\`,{limit:200,` +
-        `cursor:${cursor},sortKey:${requestClient}.recentConversationsSortKey,` +
-        `modelProviders:${modelProviders},sourceKinds:${sourceKinds},archived:${archived},` +
-        `useStateDbOnly:${useStateDbOnly}})}catch(_codexOfflineArchiveListError){` +
+          `cursor:${cursor},sortKey:${requestClient}.recentConversationsSortKey,` +
+          `modelProviders:${modelProviders},sourceKinds:${sourceKinds},archived:${archived},` +
+          `useStateDbOnly:${archived}?!0:${useStateDbOnly}})}catch(_codexOfflineArchiveListError){` +
         `if(${archived}){${failed}=!0;return}throw _codexOfflineArchiveListError}` +
         `${threads}.push(...(${page}.data??[])),${page}.nextCursor&&await ${loadPage}(${page}.nextCursor)` +
         `};return await ${loadPage}(null),${archivedThreadsReturnExpression(archived, failed, threads)}}` +
@@ -2218,7 +2199,7 @@ try {
           `useStateDbOnly:${useStateDbOnly}=!1}){let ${threads}=[],${failed}=!1,${loadPage}=async ${cursor}=>{` +
           `let ${query}={limit:200,cursor:${cursor},sortKey:${requestClient}.recentConversationsSortKey,` +
           `modelProviders:${modelProviders},sourceKinds:${sourceKinds},archived:${archived},` +
-          `useStateDbOnly:${useStateDbOnly}},${page};try{${page}=await ${requestClient}.sendRequest(\`thread/list\`,${query})` +
+          `useStateDbOnly:${archived}?!0:${useStateDbOnly}},${page};try{${page}=await ${requestClient}.sendRequest(\`thread/list\`,${query})` +
           `}catch(_codexOfflineArchiveListError){if(${archived}){${failed}=!0;return}throw _codexOfflineArchiveListError}` +
           `${threads}.push(...(${page}.data??[])),${page}.nextCursor&&await ${loadPage}(${page}.nextCursor)` +
           `};return await ${loadPage}(null),${archivedThreadsReturnExpression(archived, failed, threads)}}` +
@@ -2251,9 +2232,9 @@ try {
           `archived:${archived}=!1,sourceKinds:${sourceKinds}=${defaultSourceKinds},` +
           `useStateDbOnly:${useStateDbOnly}=!1}){let ${threads}=[],${failed}=!1,${loadPage}=async ${cursor}=>{` +
           `let ${page};try{${page}=await ${requestClient}.sendRequest(\`thread/list\`,{limit:200,` +
-          `cursor:${cursor},sortKey:${requestClient}.recentConversationsSortKey,` +
-          `modelProviders:${modelProviders},sourceKinds:${sourceKinds},archived:${archived},` +
-          `useStateDbOnly:${useStateDbOnly}})}catch(_codexOfflineArchiveListError){` +
+        `cursor:${cursor},sortKey:${requestClient}.recentConversationsSortKey,` +
+        `modelProviders:${modelProviders},sourceKinds:${sourceKinds},archived:${archived},` +
+        `useStateDbOnly:${archived}?!0:${useStateDbOnly}})}catch(_codexOfflineArchiveListError){` +
           `if(${archived}){${failed}=!0;return}throw _codexOfflineArchiveListError}` +
           `${threads}.push(...(${page}.data??[])),${page}.nextCursor&&await ${loadPage}(${page}.nextCursor)` +
           `};return await ${loadPage}(null),${archivedThreadsReturnExpression(archived, failed, threads)}}` +
@@ -2288,7 +2269,7 @@ try {
           `useStateDbOnly:${useStateDbOnly}=!1}){let ${threads}=[],${failed}=!1,${loadPage}=async ${cursor}=>{` +
           `let ${query}={limit:200,cursor:${cursor},sortKey:${requestClient}.recentConversationsSortKey,` +
           `modelProviders:${modelProviders},sourceKinds:${sourceKinds},archived:${archived},` +
-          `useStateDbOnly:${useStateDbOnly}},${page};try{${page}=await ${requestClient}.sendRequest(\`thread/list\`,${query})` +
+          `useStateDbOnly:${archived}?!0:${useStateDbOnly}},${page};try{${page}=await ${requestClient}.sendRequest(\`thread/list\`,${query})` +
           `}catch(_codexOfflineArchiveListError){if(${archived}){${failed}=!0;return}throw _codexOfflineArchiveListError}` +
           `${threads}.push(...(${page}.data??[])),${page}.nextCursor&&await ${loadPage}(${page}.nextCursor)` +
           `};return await ${loadPage}(null),${archivedThreadsReturnExpression(archived, failed, threads)}}` +
@@ -3369,422 +3350,17 @@ try {
   const LOCALE_SOURCE_ALREADY_CORRECT_MARKER =
     '.get(`locale_source`,`SYSTEM`)';
 
-  // ── Patch 4: Enable settings page entry for offline builds ─────────
+  // ── Renderer Statsig feature gates (former Patches 4-34) ──────
   //
-  // The settings menu item in the profile dropdown is gated behind
-  // Statsig experiment 4166894088.  In offline mode Statsig cannot reach
-  // its servers, so the gate defaults to false and the entry is hidden
-  // even though the settings pages are fully bundled.  We replace the
-  // gate check result with `true` so the entry is always visible.
-  const SETTINGS_GATE_ID_MARKER = '`4166894088`';
-
-  const SETTINGS_GATE_RE =
-    /(`4166894088`[^;]*;let\s+)(\w+)\s*=\s*\w+\((\w+)\)/;
-  // ≥ 26.422.8496.0: gate is called inline with a minified helper such as
-  // $f(...) or Qf(...), with no surrounding let-statement pattern.
-  const SETTINGS_GATE_INLINE_RE =
-    /([,;]\s*\w+\s*=)\s*[$\w]+\(`4166894088`\)/;
-
-  // ── Patch 5: Enable Automations sidebar entry for offline builds ────
-  //
-  // The Automations nav item in the sidebar is gated behind Statsig
-  // experiment 3075919032.  Offline builds cannot reach Statsig servers,
-  // so the gate defaults to false and the Automations entry disappears
-  // even though the full Automations UI is bundled.  We bypass the gate
-  // so the sidebar item is always visible in offline builds.
-  const AUTOMATIONS_GATE_ID_MARKER = '`3075919032`';
-
-  const AUTOMATIONS_GATE_RE =
-    /(`3075919032`[^;]*;let\s+)(\w+)\s*=\s*\w+\((\w+)\)/;
-  // [$\w]+ instead of \w+ so that minified names like $f are also matched.
-  const AUTOMATIONS_GATE_INLINE_RE =
-    /([,;]\s*\w+\s*=)\s*[$\w]+\(`3075919032`\)/;
-  const PULL_REQUESTS_GATE_ID_MARKER = '`3789238711`';
-  const PULL_REQUESTS_GATE_RE =
-    /(`3789238711`[^;]*;let\s+)(\w+)\s*=\s*\w+\((\w+)\)/;
-  const PULL_REQUESTS_GATE_INLINE_RE =
-    /([,;]\s*\w+\s*=)\s*[$\w]+\(`3789238711`\)/;
-  // ≥ 26.429.x: sidebar gate extracted to a standalone hook that directly
-  // returns the gate result, matching the pattern of other recently-extracted
-  // gate hooks (e.g. background-subagents, chronicle, artifact-electron).
-  const PULL_REQUESTS_GATE_FUNCTION_RE =
-    /function\s+(\w+)\(\)\{return\s+[$\w]+\(`3789238711`\)\}/;
-  const PULL_REQUESTS_ROUTE_GATE_FUNCTION_RE =
-    /function\s+(\w+)\(\)\{let\s+e=\(0,Q\.c\)\(3\),t;if\(e\[0\]===Symbol\.for\(`react\.memo_cache_sentinel`\)\?\(t=`3789238711`,e\[0\]=t\):t=e\[0\],!xu\(t\)\)\{let\s+t;return\s+e\[1\]===Symbol\.for\(`react\.memo_cache_sentinel`\)\?\(t=\(0,([$\w]+)\.jsx\)\(b,\{to:`\/`,replace:!0\}\),e\[1\]=t\):t=e\[1\],t\}let\s+n;return\s+e\[2\]===Symbol\.for\(`react\.memo_cache_sentinel`\)\?\(n=\(0,\2\.jsx\)\((\w+),\{\}\),e\[2\]=n\):n=e\[2\],n\}/;
-  // ≥ 26.422.8496.0: 2-slot memo cache and direct $f() call.
-  const PULL_REQUESTS_ROUTE_GATE_FUNCTION_RE_V2 =
-    /function\s+(\w+)\(\)\{let\s+\w+=\(0,Q\.c\)\(2\);if\(![$\w]+\(`3789238711`\)\)\{let\s+\w+;return\s+\w+\[0\]===Symbol\.for\(`react\.memo_cache_sentinel`\)\?\(\w+=\(0,([$\w]+)\.jsx\)\(\w+,\{to:`\/`,replace:!0\}\),\w+\[0\]=\w+\):\w+=\w+\[0\],\w+\}let\s+\w+;return\s+\w+\[1\]===Symbol\.for\(`react\.memo_cache_sentinel`\)\?\(\w+=\(0,\2\.jsx\)\((\w+),\{\}\),\w+\[1\]=\w+\):\w+=\w+\[1\],\w+\}/;
-  // ≥ 26.429.2026.0: same route guard, but React compiler now emits
-  // Symbol.for(...) checks directly rather than comparing memo slots first.
-  const PULL_REQUESTS_ROUTE_GATE_FUNCTION_RE_V3 =
-    /function\s+(\w+)\(\)\{let\s+\w+=\(0,\w+\.c\)\(2\);if\(![$\w]+\(`3789238711`\)\)\{let\s+\w+;return\s+\w+\[0\]===Symbol\.for\(`react\.memo_cache_sentinel`\)\?\(\w+=\(0,([$\w]+)\.jsx\)\(\w+,\{to:`\/`,replace:!0\}\),\w+\[0\]=\w+\):\w+=\w+\[0\],\w+\}let\s+\w+;return\s+\w+\[1\]===Symbol\.for\(`react\.memo_cache_sentinel`\)\?\(\w+=\(0,\2\.jsx\)\((\w+),\{\}\),\w+\[1\]=\w+\):\w+=\w+\[1\],\w+\}/;
-  const SCRATCHPAD_GATE_FUNCTION_RE =
-    /function\s+(\w+)\(\)\{let\s+\w+=\(0,\w+\.c\)\(1\),\w+;return\s+\w+\[0\]===Symbol\.for\(`react\.memo_cache_sentinel`\)\?\(\w+=`2302560359`,\w+\[0\]=\w+\):\w+=\w+\[0\],\w+\(\w+\)\}/;
-  // ≥ 26.422.8496.0: gate function reduced to a direct call, possibly in a
-  // separate chunk (e.g. use-navigate-to-local-conversation-*.js).
-  const SCRATCHPAD_GATE_FUNCTION_RE_V2 =
-    /function\s+(\w+)\(\)\{return\s+[$\w]+\(`2302560359`\)\}/;
-
-  // ── Patch 10: Enable Avatar Overlay for offline builds ─────────────────
-  //
-  // The avatar/mascot overlay component is wrapped in a gate function that
-  // returns an empty React Fragment when gate 2679188970 is false.  Bypass
-  // the gate so the overlay is always rendered in offline builds.
-  const AVATAR_OVERLAY_GATE_ID_MARKER = '`2679188970`';
-  const AVATAR_OVERLAY_GATE_FUNCTION_RE =
-    /function\s+(\w+)\(\)\{let\s+\w+=\(0,Q\.c\)\(2\);if\(![$\w]+\(`2679188970`\)\)\{let\s+\w+;return\s+\w+\[0\]===Symbol\.for\(`react\.memo_cache_sentinel`\)\?\(\w+=\(0,\$\.jsx\)\(\$\.Fragment,\{\}\),\w+\[0\]=\w+\):\w+=\w+\[0\],\w+\}let\s+\w+;return\s+\w+\[1\]===Symbol\.for\(`react\.memo_cache_sentinel`\)\?\(\w+=\(0,\$\.jsx\)\((\w+),\{\}\),\w+\[1\]=\w+\):\w+=\w+\[1\],\w+\}/;
-  // ≥ 26.429.x: gate extracted to a standalone hook that directly returns the
-  // gate result (same pattern seen for background-subagents, chronicle, etc.).
-  const AVATAR_OVERLAY_GATE_FUNCTION_RE_V2 =
-    /function\s+(\w+)\(\)\{return\s+[$\w]+\(`2679188970`\)\}/;
-  const AVATAR_OVERLAY_GATE_INLINE_RE =
-    /([,;]\s*\w+\s*=)\s*[$\w]+\(`2679188970`\)/g;
-
-  // ── Patch 11: Enable Heartbeat Automations for offline builds ──────────
-  //
-  // Gate 1488233300 controls whether the "heartbeat" schedule type is
-  // available when creating automations.  When false only "cron" is
-  // offered.  Replace all gate calls with !0 so heartbeat triggers are
-  // always available.
-  const HEARTBEAT_GATE_ID_MARKER = '`1488233300`';
-  const HEARTBEAT_GATE_NEEDLE = '$f(`1488233300`)';
-  const HEARTBEAT_GATE_INLINE_RE =
-    /([,;]\s*[$\w]+\s*=)\s*[$\w]+\(`1488233300`\)/g;
-  const HEARTBEAT_GATE_REPLACEMENT = '!0';
-  // ≥ 26.429.x: extracted to a standalone hook.
-  const HEARTBEAT_GATE_FUNCTION_RE =
-    /function\s+(\w+)\(\)\{return\s+[$\w]+\(`1488233300`\)\}/;
-
-  // ── Patch 12: Enable Ambient Suggestions for offline builds ────────────
-  //
-  // Gate 2425897452 controls the ambient suggestions feature.  Replace all
-  // gate calls with !0 so the feature is always active.
-  const AMBIENT_SUGGESTIONS_GATE_ID_MARKER = '`2425897452`';
-  const AMBIENT_SUGGESTIONS_GATE_NEEDLE = '$f(`2425897452`)';
-  const AMBIENT_SUGGESTIONS_GATE_INLINE_RE =
-    /([,;]\s*\w+\s*=)\s*[$\w]+\(`2425897452`\)/g;
-  const AMBIENT_SUGGESTIONS_GATE_REPLACEMENT = '!0';
-  // ≥ 26.429.x: extracted to a standalone hook.
-  const AMBIENT_SUGGESTIONS_GATE_FUNCTION_RE =
-    /function\s+(\w+)\(\)\{return\s+[$\w]+\(`2425897452`\)\}/;
-
-  // ── Patch 13: Enable Artifacts Pane for offline builds ─────────────────
-  //
-  // Gate 3903742690 controls the artifacts side pane feature.  Replace all
-  // gate calls with !0.
-  const ARTIFACTS_PANE_GATE_ID_MARKER = '`3903742690`';
-  const ARTIFACTS_PANE_GATE_NEEDLE = '$f(`3903742690`)';
-  const ARTIFACTS_PANE_GATE_INLINE_RE =
-    /([,;]\s*\w+\s*=)\s*[$\w]+\(`3903742690`\)/;
-  const ARTIFACTS_PANE_GATE_FUNCTION_RE =
-    /function\s+(\w+)\(\)\{return\s+[$\w]+\(`3903742690`\)\}/;
-  const ARTIFACTS_PANE_GATE_REPLACEMENT = '!0';
-
-  // ── Patch 14: Enable PR Badge Icons for offline builds ─────────────────
-  //
-  // Gate 2553306736 controls PR status badge icons shown on conversation
-  // list items.  Enabling it complements the already-unlocked PR sidebar
-  // entry.  Replace all gate calls with !0.
-  const PR_ICONS_GATE_ID_MARKER = '`2553306736`';
-  const PR_ICONS_GATE_NEEDLE = '$f(`2553306736`)';
-  const PR_ICONS_GATE_INLINE_RE =
-    /([,;]\s*\w+\s*=)\s*[$\w]+\(`2553306736`\)/;
-  const PR_ICONS_GATE_HOOK_RE =
-    /([,;]\s*\w+=)\s*[$\w]+\([$\w]+,`2553306736`\)/g;
-  const PR_ICONS_GATE_STORE_GET_RE =
-    /[$\w]+\([$\w]+\([$\w]+,`2553306736`\)\)/g;
-  const PR_ICONS_GATE_DEFAULT_VALUE_RE =
-    /([,;{]\s*let\s+[A-Za-z_$][\w$]*=)\s*[$\w]+\([$\w]+,`2553306736`\)/g;
-  const PR_ICONS_GATE_REPLACEMENT = '!0';
-  // ≥ 26.429.x: extracted to a standalone hook.
-  const PR_ICONS_GATE_FUNCTION_RE =
-    /function\s+(\w+)\(\)\{return\s+[$\w]+\(`2553306736`\)\}/;
-
-  // ── Patch 15: Enable Memories for offline builds ────────────────────────
-  //
-  // Gate 875176429 controls the memories feature in the conversation
-  // composer.  Replace the inline gate assignment with !0.
-  const MEMORIES_GATE_CURRENT_PATTERN =
-    '[$s]:Ue(e,ec)&&We(e,Qs).groupName===`Test`';
-  // [$\w]+ instead of \w+ so that minified names like $f are also matched.
-  const MEMORIES_GATE_INLINE_RE =
-    /([,;]\s*\w+\s*=)\s*[$\w]+\(`875176429`\)/;
-  // ≥ 26.429.x: extracted to a standalone hook.
-  const MEMORIES_GATE_FUNCTION_RE =
-    /function\s+(\w+)\(\)\{return\s+[$\w]+\(`875176429`\)\}/;
-
-  // ── Patch 16: Enable slash commands menu for offline builds ───────────
-  //
-  // Gate 1609556872 controls whether the composer slash command menu is
-  // mounted.  Replace all gate calls with !0 so typing `/` opens the menu.
-  const SLASH_COMMANDS_GATE_ID_MARKER = '`1609556872`';
-  const SLASH_COMMANDS_GATE_NEEDLE = '$f(`1609556872`)';
-  const SLASH_COMMANDS_GATE_INLINE_RE =
-    /([,;]\s*\w+\s*=)\s*[$\w]+\(`1609556872`\)/;
-  const SLASH_COMMANDS_GATE_REPLACEMENT = '!0';
-  const SLASH_COMMANDS_GATE_ALREADY_CORRECT_MARKER =
-    'a=i.pathname===`/hotkey-window`,o=!0,s=wo()';
-  // ≥ 26.429.x: extracted to a standalone hook.
-  const SLASH_COMMANDS_GATE_FUNCTION_RE =
-    /function\s+(\w+)\(\)\{return\s+[$\w]+\(`1609556872`\)\}/;
-
-  // ── Patch 17: Enable Worktree mode for offline builds ────────────────
-  //
-  // Gate 505458 controls whether worktree mode can be selected in the
-  // environment picker. Replace inline gate calls with !0.
-  const WORKTREE_MODE_GATE_ID_MARKER = '`505458`';
-  const WORKTREE_MODE_GATE_INLINE_RE =
-    /([,;]\s*\w+\s*=)\s*[$\w]+\(`505458`\)/g;
-  // ≥ 26.429.x: extracted to a standalone hook.
-  const WORKTREE_MODE_GATE_FUNCTION_RE =
-    /function\s+(\w+)\(\)\{return\s+[$\w]+\(`505458`\)\}/;
-
-  // ── Patch 18: Enable local environments cloud onboarding for offline ─
-  //
-  // Gate 1907601843 controls the cloud onboarding path shown when no local
-  // environments are available. Replace inline gate calls with !0.
-  const CLOUD_ENVIRONMENT_GATE_ID_MARKER = '`1907601843`';
-  const CLOUD_ENVIRONMENT_GATE_INLINE_RE =
-    /([,;]\s*\w+\s*=)\s*[$\w]+\(`1907601843`\)/g;
-  // ≥ 26.429.x: extracted to a standalone hook.
-  const CLOUD_ENVIRONMENT_GATE_FUNCTION_RE =
-    /function\s+(\w+)\(\)\{return\s+[$\w]+\(`1907601843`\)\}/;
-
-  // ── Patch 19: Enable Browser Use for offline builds ───────────────────
-  //
-  // Gate 410262010 controls browser agent availability. Replace inline
-  // gate calls with !0 while preserving the remaining config checks.
-  const BROWSER_USE_GATE_ID_MARKER = '`410262010`';
-  const BROWSER_USE_GATE_INLINE_RE =
-    /([,;]\s*\w+\s*=)\s*[$\w]+\(`410262010`\)/g;
-  // ≥ 26.429.x: extracted to a standalone hook.
-  const BROWSER_USE_GATE_FUNCTION_RE =
-    /function\s+(\w+)\(\)\{return\s+[$\w]+\(`410262010`\)\}/;
-
-  // ── Patch 20: Enable in-app browser for offline builds ────────────────
-  //
-  // Gate 4250630194 controls in-app browser availability. Replace inline
-  // gate calls with !0 while preserving the host/config checks.
-  const IN_APP_BROWSER_GATE_ID_MARKER = '`4250630194`';
-  const IN_APP_BROWSER_GATE_INLINE_RE =
-    /([,;]\s*\w+\s*=)\s*[$\w]+\(`4250630194`\)/g;
-  // ≥ 26.429.x: extracted to a standalone hook.
-  const IN_APP_BROWSER_GATE_FUNCTION_RE =
-    /function\s+(\w+)\(\)\{return\s+[$\w]+\(`4250630194`\)\}/;
-
-  // ── Patch 21: Enable bundled plugins marketplace for offline builds ──
-  //
-  // Gate 588076040 controls whether the OpenAI bundled marketplace is
-  // merged into the plugins page. Replace inline gate calls with !0.
-  const PLUGINS_BUNDLED_MARKETPLACE_GATE_ID_MARKER = '`588076040`';
-  const PLUGINS_BUNDLED_MARKETPLACE_GATE_INLINE_RE =
-    /([,;}]\s*[$\w]+\s*=)\s*[$\w]+\(`588076040`\)/g;
-  // ≥ 26.429.x: extracted to a standalone hook.
-  const PLUGINS_BUNDLED_MARKETPLACE_GATE_FUNCTION_RE =
-    /function\s+(\w+)\(\)\{return\s+[$\w]+\(`588076040`\)\}/;
-
-  // ── Patch 37: Enable external Chrome plugin mentions offline ─────────
-  //
-  // Gate 410065390 controls the renderer-side external browser availability
-  // used by the composer/plugin filters. Without this, @chrome can be
-  // installed but still hidden from mention suggestions in offline/API mode.
-  const EXTERNAL_BROWSER_USE_GATE_ID_MARKER = '`410065390`';
-  const EXTERNAL_BROWSER_USE_GATE_INLINE_RE =
-    /([,;]\s*\w+\s*=)\s*[$\w]+\(`410065390`\)/g;
-  const EXTERNAL_BROWSER_USE_GATE_FUNCTION_RE =
-    /function\s+(\w+)\(\)\{return\s+[$\w]+\(`410065390`\)\}/;
-
-  // ── Patch 38: Enable external agent config import for offline builds ──
-  //
-  // The Settings > General "Import external agent config" row is controlled
-  // by the external-agent-config-gates chunk.  The chunk exports gate ids
-  // 3326157269 / 2900529421 / 2711149772 / 816842483; consumers import those
-  // ids under minified aliases and call the Statsig hook on the aliases.
-  // Replace those local hook calls with !0 so the row is not hidden offline.
-  const EXTERNAL_AGENT_CONFIG_IMPORT_PATCH_MARKER =
-    contractPatchMarker('/*codex-offline:external-agent-config-import*/');
-  const EXTERNAL_AGENT_CONFIG_GATE_IDS = [
-    '3326157269',
-    '2900529421',
-    '2711149772',
-    '816842483',
-  ];
-  const EXTERNAL_AGENT_CONFIG_GATE_ID_MARKERS =
-    EXTERNAL_AGENT_CONFIG_GATE_IDS.map(id => '`' + id + '`');
-
-  // ── Patch 39: Enable Plugins navigation for API-key/offline sessions ──
-  //
-  // Gate 533078438 enables a disabled "Please sign in with ChatGPT to use
-  // plugins" sidebar item for API-key users. The same sidebar block also hides
-  // the real Plugins/Skills+Apps route behind an auth-method check. Disable the
-  // lockout while preserving the bundled marketplace feature check.
-  const PLUGINS_API_KEY_NAV_PATCH_MARKER =
-    '/*codex-offline:plugins-api-key-nav*/';
-  const PLUGINS_API_KEY_ROUTE_PATCH_MARKER =
-    '/*codex-offline:plugins-api-key-route*/';
-  const PLUGINS_API_KEY_DISABLED_GATE_ID_MARKER = '`533078438`';
-  const PLUGINS_API_KEY_DISABLED_GATE_INLINE_RE =
-    /([,;]\s*[A-Za-z_$][\w$]*=)\s*[$\w]+\(`533078438`\)/g;
-  const PLUGINS_ROUTE_FEATURE_AND_AUTH_RE =
-    /([,;])([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\(\{hostId:([A-Za-z_$][\w$]*)\}\),([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)&&\2&&!([A-Za-z_$][\w$]*)/g;
-  const PLUGINS_ROUTE_FEATURE_AUTH_RE =
-    /([,;])([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\(\{hostId:([A-Za-z_$][\w$]*)\}\)&&!([A-Za-z_$][\w$]*)/g;
-  const PLUGINS_DETAIL_AUTH_REDIRECT_RE =
-    /(\{authMethod:([A-Za-z_$][\w$]*)\}=[A-Za-z_$][\w$]*\(\);)if\([A-Za-z_$][\w$]*\(\2\)\)\{let ([A-Za-z_$][\w$]*);return/g;
-
-  // ── Patch 22: Enable Background Subagents for offline builds ───────────
-  //
-  // Gate 1221508807 controls whether background subagents are enabled.
-  // A standalone file exports a hook that returns this gate result.  When
-  // false the background agents panel in the composer is permanently hidden.
-  // Bypass so the panel is always available in offline builds.
-  const BACKGROUND_SUBAGENTS_GATE_ID_MARKER = '`1221508807`';
-  const BACKGROUND_SUBAGENTS_GATE_FUNCTION_RE =
-    /function\s+(\w+)\(\)\{return\s+[$\w]+\(`1221508807`\)\}/;
-  const BACKGROUND_SUBAGENTS_GATE_INLINE_RE =
-    /([,;]\s*\w+\s*=)\s*[$\w]+\(`1221508807`\)/g;
-
-  // ── Patch 23: Enable Thread Overlay for offline builds ─────────────────
-  //
-  // Gate 1060282072 (combined with gate 459748632) controls whether
-  // conversations can be opened in an overlay window.  Replace inline gate
-  // calls with !0 so the thread overlay is always available in Electron.
-  const THREAD_OVERLAY_GATE_ID_MARKER = '`1060282072`';
-  const THREAD_OVERLAY_GATE_INLINE_RE =
-    /([,;]\s*\w+\s*=)\s*[$\w]+\(`1060282072`\)/g;
-
-  // ── Patch 24: Enable Multi-Window for offline builds ───────────────────
-  //
-  // Gate 459748632 controls multi-window support and (together with
-  // 1060282072) the thread overlay feature.  Replace inline gate calls with
-  // !0 to enable both capabilities in offline builds.
-  const MULTI_WINDOW_GATE_ID_MARKER = '`459748632`';
-  const MULTI_WINDOW_GATE_INLINE_RE =
-    /([,;]\s*\w+\s*=)\s*[$\w]+\(`459748632`\)/g;
-
-  // ── Patch 25: Enable Computer Use for offline builds ───────────────────
-  //
-  // Gate 1506311413 controls the computer-use capability flag that is
-  // reported to the Electron main process via the
-  // electron-desktop-features-changed IPC message.  Replace inline gate
-  // calls with !0 so computer-use is always reported as available.
-  const COMPUTER_USE_GATE_ID_MARKER = '`1506311413`';
-  const COMPUTER_USE_GATE_INLINE_RE =
-    /([,;]\s*\w+\s*=)\s*[$\w]+\(`1506311413`\)/g;
-
-  // ── Patch 26: Enable Control desktop feature for offline builds ─────────
-  //
-  // Gate 2171042036 controls the "control" flag in the desktop features
-  // IPC message.  Replace inline gate calls with !0.
-  const CONTROL_GATE_ID_MARKER = '`2171042036`';
-  const CONTROL_GATE_INLINE_RE =
-    /([,;]\s*\w+\s*=)\s*[$\w]+\(`2171042036`\)/g;
-  const CONTROL_GATE_UNPATCHED_RE =
-    /[$\w]+\(`2171042036`\)/;
-
-  // ── Patch 27: Enable Global Dictation for offline builds ───────────────
-  //
-  // Gates 1244621283 and 4100906017 together control the global dictation
-  // (voice input) feature.  Both must be true to enable dictation and its
-  // associated settings.  Replace all inline gate calls in every asset file
-  // (general-settings, use-model-settings, main index) with !0.
-  const DICTATION_GATE_1_ID_MARKER = '`1244621283`';
-  const DICTATION_GATE_1_INLINE_RE =
-    /([,;]\s*\w+\s*=)\s*[$\w]+\(`1244621283`\)/g;
-  const DICTATION_GATE_2_ID_MARKER = '`4100906017`';
-  const DICTATION_GATE_2_INLINE_RE =
-    /([,;]\s*\w+\s*=)\s*[$\w]+\(`4100906017`\)/g;
-
-  // ── Patch 28: Enable Browser non-local sites for offline builds ─────────
-  //
-  // Gate 3903563814 controls whether the browser agent is permitted to
-  // access non-local (internet) websites.  When false the browser agent is
-  // restricted to localhost/LAN only.  Replace inline gate calls with !0.
-  const BROWSER_NONLOCAL_GATE_ID_MARKER = '`3903563814`';
-  const BROWSER_NONLOCAL_GATE_INLINE_RE =
-    /([,;]\s*\w+\s*=)\s*[$\w]+\(`3903563814`\)/g;
-
-  // ── Patch 29: Enable Thread Hover Cards for offline builds ─────────────
-  //
-  // Gate 3032432888 controls whether the conversation list items in the
-  // sidebar show hover-card project labels.  Replace inline gate calls with
-  // !0 so hover cards always appear in Electron offline builds.
-  const THREAD_HOVER_CARDS_GATE_ID_MARKER = '`3032432888`';
-  const THREAD_HOVER_CARDS_GATE_INLINE_RE =
-    /([,;]\s*\w+\s*=)\s*[$\w]+\(`3032432888`\)/g;
-
-  // ── Patch 30: Enable Chronicle for offline builds ──────────────────────
-  //
-  // Gate 2574306096 controls the Chronicle feature (agent journal/history).
-  // A standalone function in the chronicle-setup-state chunk exports the
-  // gate result.  Replace that function to always return !0.
-  const CHRONICLE_GATE_ID_MARKER = '`2574306096`';
-  const CHRONICLE_GATE_FUNCTION_RE =
-    /function\s+(\w+)\(\)\{return\s+[$\w]+\(`2574306096`\)\}/;
-  const CHRONICLE_GATE_INLINE_RE =
-    /([,;]\s*\w+\s*=)\s*[$\w]+\(`2574306096`\)/g;
-
-  // ── Patch 31: Enable Agent Personality for offline builds ──────────────
-  //
-  // Gate 1444479692 controls the agent personality feature in the Chronicle
-  // chunk.  Replace inline gate calls with !0 so personality configuration
-  // is always available.
-  const PERSONALITY_GATE_ID_MARKER = '`1444479692`';
-  const PERSONALITY_GATE_INLINE_RE =
-    /([,;]\s*\w+\s*=)\s*[$\w]+\(`1444479692`\)/g;
-  const PERSONALITY_GATE_UNPATCHED_RE =
-    /[$\w]+\(`1444479692`\)/;
-
-  // ── Patch 32: Enable Remote Connections for offline builds ─────────────
-  //
-  // Gate 1042620455 controls remote Codex instance connections.  A
-  // standalone function in the app-server-manager-hooks chunk exports the
-  // gate result.  Replace to always return !0.
-  const REMOTE_CONNECTIONS_GATE_ID_MARKER = '`1042620455`';
-  const REMOTE_CONNECTIONS_GATE_FUNCTION_RE =
-    /function\s+(\w+)\(\)\{return\s+[$\w]+\(`1042620455`\)\}/;
-  const REMOTE_CONNECTIONS_GATE_INLINE_RE =
-    /([,;]\s*\w+\s*=)\s*[$\w]+\(`1042620455`\)/g;
-
-  // ── Patch 33: Enable Remote Connections feature flag for offline ─────────
-  //
-  // Gate 4114442250 is used in the app-server-manager-hooks feature check
-  // function alongside the config check for features.remote_connections.
-  // Replace inline gate calls with !0.
-  const REMOTE_CONNECTIONS_FEATURE_GATE_ID_MARKER = '`4114442250`';
-  const REMOTE_CONNECTIONS_FEATURE_GATE_INLINE_RE =
-    /([,;]\s*\w+\s*=)\s*[$\w]+\(`4114442250`\)/g;
-  const REMOTE_CONNECTIONS_FEATURE_GATE_CONFIG_RE =
-    /([,;]\s*[$\w]+\s*=)\s*[$\w]+\([$\w]+\([$\w]+,`4114442250`\)\)/g;
-  const REMOTE_CONNECTIONS_FEATURE_GATE_UNPATCHED_RE =
-    /[$\w]+\(`4114442250`\)|[$\w]+\([$\w]+,`4114442250`\)/;
-
-  // ── Patch 33b: Route Codex Mobile auth refresh through desktop login ────
-  //
-  // Codex Mobile's remote-control security check maps 401 responses through
-  // chatgpt-token-auth.browser, which only redirects on chatgpt.com origins.
-  // In the Electron desktop shell that helper is a no-op, so online users see
-  // the generic "Couldn't check security requirements" error instead of the
-  // existing desktop ChatGPT sign-in flow.  Import the desktop login action and
-  // retry the original remote-control request after login completes.
-  const CODEX_MOBILE_AUTH_RELOGIN_PATCH_MARKER =
-    '/*codex-offline:codex-mobile-auth-relogin*/';
-  const CODEX_MOBILE_SETUP_CHUNK_RE = /^codex-mobile-setup-flow-.*\.js$/;
-  const ONBOARDING_LOGIN_CHUNK_RE = /^onboarding-login-content-.*\.js$/;
-  const CODEX_MOBILE_CHATGPT_TOKEN_AUTH_IMPORT_RE =
-    /import\{t as ([A-Za-z_$][\w$]*)\}from"\.\/chatgpt-token-auth\.browser-[^"]+\.js";/;
-  const CODEX_MOBILE_REMOTE_CONTROL_AUTH_HANDLER_RE =
-    /async function ([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*)\)\{try\{return await \2\(\)\}catch\(([A-Za-z_$][\w$]*)\)\{throw \3 instanceof ([A-Za-z_$][\w$]*)\?\3\.status===404\?new ([A-Za-z_$][\w$]*):\3\.status===403\?new ([A-Za-z_$][\w$]*)\(\3\.message\):\3\.status===401\?\(([A-Za-z_$][\w$]*)\(\),new ([A-Za-z_$][\w$]*)\(`ChatGPT auth is required to load remote control environments\.`\)\):Error\(`Remote control request failed \(\$\{\3\.status\}\): \$\{\3\.message\}`\):\3\}\}/;
-
-  // ── Patch 34: Enable Artifact Electron native functionality ────────────
-  //
-  // Gate 839469903 controls the native Windows artifact viewer (Walnut
-  // WinRT assembly) in the artifact-tab-content.electron chunk.  The
-  // standalone function exports the gate result.  Replace to always return
-  // !0 so the native artifact viewer is always active in offline builds.
-  const ARTIFACT_ELECTRON_GATE_ID_MARKER = '`839469903`';
-  const ARTIFACT_ELECTRON_GATE_FUNCTION_RE =
-    /function\s+(\w+)\(\)\{return\s+[$\w]+\(`839469903`\)\}/;
+  // Settings entry, Automations, Pull Requests, Scratchpad, slash commands,
+  // avatar overlay, artifacts, memories, dictation, chronicle, remote
+  // connections and the other renderer feature-gate unlocks are now handled
+  // at runtime by init.cjs (session.webRequest redirect of
+  // ab.chatgpt.com/v1/initialize + ipcMain shared-object injection) plus the
+  // generic patchDirectStatsigGateCalls(..., DESKTOP_ASAR_KNOWN_GATE_IDS)
+  // pass below. Every gate id lives in init.cjs STATSIG_GATE_OVERRIDES, so the
+  // per-gate asar needles were removed. See
+  // docs/plan-b-patch-migration-inventory.md.
 
   // ── Patch 35: Enable Fast mode speed selector for offline builds ────────
   //
@@ -3796,7 +3372,6 @@ try {
   // after Fast is selected, hiding the only UI that can switch back to
   // Standard.  Patch only the selector visibility helper; the service-tier
   // setter still writes null/"fast" exactly as upstream does.
-  const FAST_MODE_STORE_MARKER = FAST_MODE_CONTRACT.statsigStoreKey;
   const FAST_MODE_KEY_MARKER = FAST_MODE_CONTRACT.featureKey;
   const FAST_MODE_SELECTOR_PATCH_MARKER =
     contractPatchMarker(FAST_MODE_CONTRACT.selectorPatchMarker);

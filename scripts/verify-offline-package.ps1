@@ -1166,6 +1166,7 @@ let computerUseNodeReplDynamicToolPatched = false;
 let computerUseNodeReplDynamicToolCallPatched = false;
 let archivedThreadsPartialListPatched = false;
 let archivedThreadsCacheFallbackPatched = false;
+let archivedThreadsStateDbOnlyPatched = false;
 let featureOverridesPreserveMcpConfigPatched = false;
 let featureEnablementPreserveUnifiedExecPatched = false;
 let bundledPluginCacheLockNonfatalPatched = false;
@@ -1265,6 +1266,9 @@ for (const entry of javaScriptEntries) {
     content.includes('__codexOfflineArchivedThreadsCache') &&
     content.includes('_codexOfflineArchiveListFailed') &&
     content.includes('globalThis.__codexOfflineArchivedThreadsCache');
+  archivedThreadsStateDbOnlyPatched ||=
+    content.includes(ARCHIVED_THREADS_PARTIAL_LIST_PATCH_MARKER) &&
+    /useStateDbOnly:[A-Za-z_$][\w$]*\?!0:[A-Za-z_$][\w$]*/.test(content);
   featureOverridesPreserveMcpConfigPatched ||=
     content.includes(FEATURE_OVERRIDES_PRESERVE_MCP_CONFIG_PATCH_MARKER) &&
     content.includes('`features.unified_exec`]=!0') &&
@@ -1464,6 +1468,9 @@ if (!archivedThreadsPartialListPatched) {
 }
 if (!archivedThreadsCacheFallbackPatched) {
   throw new Error('Archived thread list cache fallback marker is missing.');
+}
+if (!archivedThreadsStateDbOnlyPatched) {
+  throw new Error('Archived thread list does not force useStateDbOnly for archived queries.');
 }
 if (codexMobileRemoteControlMfaEndpointSeen && !codexMobileAuthReloginPatched) {
   info('Codex Mobile remote-control auth relogin is a legacy renderer patch outside the current Computer Use gate.');

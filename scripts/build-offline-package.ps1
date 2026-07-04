@@ -825,6 +825,13 @@ if ($LASTEXITCODE -ne 0) {
 $chromeExtensionInfo = ($chromeExtensionJson -join [Environment]::NewLine) | ConvertFrom-Json
 Write-BuildTrace 'Chrome extension offline assets bundled.'
 
+# Keep the desktop offline gate-override lists in sync before patching.
+Write-BuildTrace 'Checking gate-override list sync.'
+node (Join-Path $scriptRoot 'check-gate-override-sync.mjs')
+if ($LASTEXITCODE -ne 0) {
+    throw 'check-gate-override-sync.mjs failed: gate override lists are out of sync.'
+}
+
 # Patch app.asar so Codex runs correctly outside the MSIX container.
 $patchScript = Join-Path $scriptRoot 'patch-app-asar.mjs'
 $stagedAppDir = Join-Path $internalRoot 'app'

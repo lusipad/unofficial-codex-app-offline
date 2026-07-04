@@ -410,6 +410,7 @@ function makeHandlers({ appServer, broadcast, logger, isClientConnected }) {
           limit: 200,
           modelProviders: null,
           sortKey: "updated_at",
+          useStateDbOnly: true,
         });
         if (Array.isArray(result && result.data)) threads.push(...result.data);
         cursor = result && result.nextCursor != null ? result.nextCursor : null;
