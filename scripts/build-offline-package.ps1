@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [string]$ConfigPath = 'config/offline-package.json',
     [switch]$SkipInstaller,

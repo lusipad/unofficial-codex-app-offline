@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [string]$PackageId = 'OpenAI.Codex',
     [string]$Destination = 'build/source-app'

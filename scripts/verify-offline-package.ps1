@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [string]$BuildMetadataPath = 'build-metadata.json',
     [string]$ConfigPath = 'config/offline-package.json',
@@ -338,6 +338,24 @@ try {
     )) {
         if (Test-Path (Join-Path $portableRoot $relativePath)) {
             throw "Portable zip still exposes legacy root launcher: $relativePath"
+        }
+    }
+
+    # Windows PowerShell 5.1 reads BOM-less scripts in the system ANSI code page,
+    # so non-ASCII text corrupts and can break parsing on localized systems (#68).
+    foreach ($packagedScript in @(Get-ChildItem -Path (Join-Path $portableRoot '_internal') -Filter '*.ps1' -File)) {
+        $packagedScriptBytes = [System.IO.File]::ReadAllBytes($packagedScript.FullName)
+        $hasUtf8Bom = $packagedScriptBytes.Length -ge 3 -and
+            $packagedScriptBytes[0] -eq 0xEF -and
+            $packagedScriptBytes[1] -eq 0xBB -and
+            $packagedScriptBytes[2] -eq 0xBF
+        if ($hasUtf8Bom) {
+            continue
+        }
+        foreach ($packagedScriptByte in $packagedScriptBytes) {
+            if ($packagedScriptByte -gt 0x7F) {
+                throw "Packaged PowerShell script contains non-ASCII text without a UTF-8 BOM, which Windows PowerShell 5.1 misparses: $($packagedScript.Name)"
+            }
         }
     }
 
