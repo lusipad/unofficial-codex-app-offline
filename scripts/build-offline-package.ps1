@@ -750,6 +750,12 @@ Copy-Item -Path (Join-Path $scriptRoot 'bootstrap-codex-skills.ps1') -Destinatio
 Copy-Item -Path (Join-Path $scriptRoot 'repair-chrome-host.ps1') -Destination (Join-Path $internalRoot 'repair-chrome-host.ps1') -Force
 Copy-Item -Path (Join-Path $scriptRoot 'setup-codex-offline.ps1') -Destination (Join-Path $internalRoot 'setup-codex-offline.ps1') -Force
 
+Write-BuildTrace 'Copying PowerShell shim for CLI /app discovery.'
+$shimSource = Join-Path $scriptRoot 'powershell-shim\CodexOfflineShim'
+$shimDest = Join-Path $internalRoot 'powershell-shim\CodexOfflineShim'
+New-Item -ItemType Directory -Force -Path $shimDest | Out-Null
+Copy-Item -Path (Join-Path $shimSource '*') -Destination $shimDest -Force
+
 Write-BuildTrace 'Copying desktop IPC interception patches.'
 $desktopPatchesSource = Join-Path $scriptRoot 'desktop-patches'
 if (Test-Path $desktopPatchesSource) {

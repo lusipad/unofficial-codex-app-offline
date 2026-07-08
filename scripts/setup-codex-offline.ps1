@@ -7,6 +7,8 @@ param(
     [switch]$SkipSkillSync,
     [switch]$RegisterChromeHost,
     [switch]$RegisterCodexLinks,
+    [switch]$InstallAppShim,
+    [switch]$RemoveAppShim,
     [switch]$RepairComputerUse,
     [switch]$OpenChromeGuide,
     [switch]$SkipChromeGuide,
@@ -131,6 +133,48 @@ $script:SetupMessages = @{
     LinksSkipped = @{
         en = 'codex:// registration skipped. CLI /app will use whichever Codex handler is already registered.'
         zh = '已跳过 codex:// 注册。CLI /app 会使用系统当前已有的 Codex 处理程序。'
+    }
+    StepAppShim = @{
+        en = 'Optional PowerShell shim for CLI /app'
+        zh = '可选 CLI /app 补丁（PowerShell shim）'
+    }
+    AppShimPrompt = @{
+        en = @"
+Install a PowerShell shim so the official Codex CLI /app command can discover
+this offline package? (Without it, /app only finds the Microsoft Store version.)
+The shim is a small module placed in your PowerShell user modules folder.
+It transparently wraps Get-AppxPackage: real MSIX results pass through unchanged;
+only when no MSIX is found does it fall back to this offline installation.
+Install the shim?
+"@
+        zh = @"
+安装 PowerShell shim 让官方 Codex CLI 的 /app 命令能发现此离线包？
+（不安装的话，/app 只能找到 Microsoft Store 版本。）
+该 shim 是一个小型 PowerShell 模块，安装到用户模块目录。
+它透明地包装 Get-AppxPackage：真正的 MSIX 结果原样返回；
+仅在未找到 MSIX 时，才回退到此离线安装路径。
+安装该 shim 吗？
+"@
+    }
+    AppShimInstalled = @{
+        en = 'PowerShell shim installed. CLI /app will now discover this offline package.'
+        zh = 'PowerShell shim 已安装。CLI /app 现在可以发现此离线包。'
+    }
+    AppShimSkipped = @{
+        en = 'PowerShell shim skipped. CLI /app will only work with the Microsoft Store version.'
+        zh = '已跳过 PowerShell shim。CLI /app 只能配合 Microsoft Store 版使用。'
+    }
+    AppShimRemoved = @{
+        en = 'PowerShell shim removed.'
+        zh = 'PowerShell shim 已移除。'
+    }
+    AppShimNotFound = @{
+        en = 'PowerShell shim is not installed; nothing to remove.'
+        zh = 'PowerShell shim 未安装，无需移除。'
+    }
+    AppShimSourceMissing = @{
+        en = 'PowerShell shim source files not found in this package; skipping.'
+        zh = '未在包内找到 PowerShell shim 源文件，已跳过。'
     }
     StepComputerUse = @{
         en = 'Optional Computer Use plugin repair'
@@ -343,6 +387,52 @@ function Register-CodexUrlProtocol {
     New-ItemProperty -Path $protocolRoot -Name 'URL Protocol' -Value '' -PropertyType String -Force | Out-Null
     Set-Item -Path $iconRoot -Value "`"$appLauncher`",0"
     Set-Item -Path $commandRoot -Value "`"$LauncherPath`" `"%1`""
+}
+
+function Get-AppxShimTargetPaths {
+    $docs = [System.Environment]::GetFolderPath('MyDocuments')
+    @(
+        (Join-Path $docs 'WindowsPowerShell\Modules\CodexOfflineShim'),
+        (Join-Path $docs 'PowerShell\Modules\CodexOfflineShim')
+    )
+}
+
+function Test-AppxShimInstalled {
+    foreach ($target in Get-AppxShimTargetPaths) {
+        if (Test-Path -LiteralPath (Join-Path $target 'CodexOfflineShim.psm1') -PathType Leaf) {
+            return $true
+        }
+    }
+    return $false
+}
+
+function Install-AppxDiscoveryShim {
+    param([Parameter(Mandatory = $true)][string]$PackageRoot)
+
+    $shimSource = Join-Path $PackageRoot '_internal\powershell-shim\CodexOfflineShim'
+    if (-not (Test-Path -LiteralPath $shimSource -PathType Container)) {
+        Write-Host (Get-SetupText 'AppShimSourceMissing') -ForegroundColor Yellow
+        return
+    }
+
+    foreach ($shimDest in Get-AppxShimTargetPaths) {
+        New-Item -ItemType Directory -Force -Path $shimDest | Out-Null
+        Copy-Item -Path (Join-Path $shimSource '*') -Destination $shimDest -Force
+    }
+}
+
+function Uninstall-AppxDiscoveryShim {
+    if (-not (Test-AppxShimInstalled)) {
+        Write-Host (Get-SetupText 'AppShimNotFound') -ForegroundColor Yellow
+        return
+    }
+
+    foreach ($shimDest in Get-AppxShimTargetPaths) {
+        if (Test-Path -LiteralPath $shimDest) {
+            Remove-Item -LiteralPath $shimDest -Recurse -Force
+        }
+    }
+    Write-Host (Get-SetupText 'AppShimRemoved') -ForegroundColor Green
 }
 
 function Repair-EncodedScopedNodeModules {
@@ -559,7 +649,14 @@ if (-not (Test-Path -LiteralPath $repairChromeHostScript -PathType Leaf)) {
     throw "Chrome host repair script was not found: $repairChromeHostScript"
 }
 
+if ($RemoveAppShim) {
+    $script:SetupLanguage = Resolve-SetupLanguage
+    Uninstall-AppxDiscoveryShim
+    exit 0
+}
+
 $script:SetupLanguage = Read-SetupLanguage
+
 Write-SetupHeader
 Write-Host ("{0}: {1}" -f (Get-SetupText 'PackageRoot'), $packageRoot)
 Write-Host ("{0}: {1}" -f (Get-SetupText 'DailyLauncher'), $dailyLauncher)
@@ -611,7 +708,16 @@ else {
     Write-Host (Get-SetupText 'LinksSkipped') -ForegroundColor Yellow
 }
 
-Write-SetupStep -Number 4 -Title (Get-SetupText 'StepComputerUse')
+Write-SetupStep -Number 4 -Title (Get-SetupText 'StepAppShim')
+if ($InstallAppShim -or (Read-SetupYesNo -Prompt (Get-SetupText 'AppShimPrompt') -DefaultYes $false)) {
+    Install-AppxDiscoveryShim -PackageRoot $packageRoot
+    Write-Host (Get-SetupText 'AppShimInstalled') -ForegroundColor Green
+}
+else {
+    Write-Host (Get-SetupText 'AppShimSkipped') -ForegroundColor Yellow
+}
+
+Write-SetupStep -Number 5 -Title (Get-SetupText 'StepComputerUse')
 if ($RepairComputerUse -or (Read-SetupYesNo -Prompt (Get-SetupText 'ComputerUsePrompt') -DefaultYes $false)) {
     $computerUseRepairCount = Repair-ComputerUsePluginLayout -PackageRoot $packageRoot -CodexHomePath $resolvedCodexHome
     if ($computerUseRepairCount -gt 0) {
@@ -632,7 +738,7 @@ else {
     (Get-SetupText 'AppLauncherMessage') -f $appLauncher
 }
 
-Write-SetupStep -Number 5 -Title (Get-SetupText 'StepChromeExtension')
+Write-SetupStep -Number 6 -Title (Get-SetupText 'StepChromeExtension')
 if (-not $SkipChromeGuide -and (Test-Path -LiteralPath $unpackedExtensionPath -PathType Container)) {
     Write-Host (Get-SetupText 'ChromeExtensionNeed')
     Write-Host ("{0}: {1}" -f (Get-SetupText 'ExtensionPath'), $unpackedExtensionPath) -ForegroundColor Green
@@ -653,7 +759,7 @@ else {
     Write-Host ((Get-SetupText 'ChromeExtensionMissing') -f $unpackedExtensionPath) -ForegroundColor Yellow
 }
 
-Write-SetupStep -Number 6 -Title (Get-SetupText 'StepFinish')
+Write-SetupStep -Number 7 -Title (Get-SetupText 'StepFinish')
 Write-Host (Get-SetupText 'SetupComplete') -ForegroundColor Green
 Write-Host $dailyLauncherMessage
 Write-Host (Get-SetupText 'AfterSetup')
