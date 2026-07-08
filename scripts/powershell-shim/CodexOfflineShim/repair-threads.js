@@ -110,6 +110,12 @@ const desktopCols = desktopDb
   .all()
   .map((r) => r.name);
 
+const DEFAULTS = {
+  title: "",
+  sandbox_policy: '{"type":"disabled"}',
+  approval_mode: "never",
+};
+
 const insertCols = [
   "id",
   "rollout_path",
@@ -119,6 +125,8 @@ const insertCols = [
   "model_provider",
   "cwd",
   "title",
+  "sandbox_policy",
+  "approval_mode",
   "cli_version",
   "git_branch",
 ].filter((c) => desktopCols.includes(c));
@@ -129,7 +137,7 @@ const insertStmt = desktopDb.prepare(
 );
 
 for (const m of missing) {
-  insertStmt.run(...insertCols.map((c) => m[c] ?? null));
+  insertStmt.run(...insertCols.map((c) => m[c] ?? DEFAULTS[c] ?? null));
 }
 
 console.log(`Imported ${missing.length} threads into Desktop DB.`);
