@@ -30,12 +30,14 @@ Name: "en"; MessagesFile: "compiler:Default.isl"
 Name: "zh"; MessagesFile: "{#MyInstallerRoot}\ChineseSimplified.isl"
 
 [CustomMessages]
-en.TaskSkills=Install default offline skills
-zh.TaskSkills=安装默认离线技能
+en.TaskSkills=Install default offline skills (most skills require internet and will not work offline)
+zh.TaskSkills=安装默认离线技能（大部分技能需要联网，离线环境下无法使用）
 en.TaskChromeHost=Register @chrome native host
 zh.TaskChromeHost=注册 @chrome 本机桥接
 en.TaskCodexLinks=Register codex:// links for CLI /app
 zh.TaskCodexLinks=注册用于 CLI /app 的 codex:// 链接
+en.TaskAppShim=Install PowerShell shim for CLI /app (adds a module to your PowerShell user modules folder that overrides Get-AppxPackage on every session)
+zh.TaskAppShim=安装 CLI /app 的 PowerShell shim（会在用户 PowerShell 模块目录添加模块，每次启动 PowerShell 时覆盖 Get-AppxPackage 命令）
 en.TaskComputerUse=Repair Computer Use plugin layout
 zh.TaskComputerUse=修复 Computer Use 插件布局
 en.TaskChromeGuide=Open Chrome extension setup guide
@@ -50,6 +52,7 @@ Source: "{#MySourceRoot}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdi
 Name: "skills"; Description: "{cm:TaskSkills}"; Flags: unchecked
 Name: "chromehost"; Description: "{cm:TaskChromeHost}"; Flags: unchecked
 Name: "codexlinks"; Description: "{cm:TaskCodexLinks}"; Flags: unchecked
+Name: "appshim"; Description: "{cm:TaskAppShim}"; Flags: unchecked
 Name: "computeruse"; Description: "{cm:TaskComputerUse}"; Flags: unchecked
 Name: "chromeguide"; Description: "{cm:TaskChromeGuide}"; Flags: unchecked
 
@@ -58,6 +61,16 @@ Root: HKCU; Subkey: "Software\Classes\codex"; ValueType: string; ValueName: ""; 
 Root: HKCU; Subkey: "Software\Classes\codex"; ValueType: string; ValueName: "URL Protocol"; ValueData: ""; Flags: uninsdeletekey; Tasks: codexlinks
 Root: HKCU; Subkey: "Software\Classes\codex\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: """{app}\_internal\app\Codex.exe"",0"; Flags: uninsdeletekey; Tasks: codexlinks
 Root: HKCU; Subkey: "Software\Classes\codex\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\Codex.cmd"" ""%1"""; Flags: uninsdeletekey; Tasks: codexlinks
+
+[UninstallDelete]
+Type: files; Name: "{userdocs}\WindowsPowerShell\Modules\CodexOfflineShim\CodexOfflineShim.psm1"
+Type: files; Name: "{userdocs}\WindowsPowerShell\Modules\CodexOfflineShim\CodexOfflineShim.psd1"
+Type: files; Name: "{userdocs}\WindowsPowerShell\Modules\CodexOfflineShim\sync-thread.js"
+Type: dirifempty; Name: "{userdocs}\WindowsPowerShell\Modules\CodexOfflineShim"
+Type: files; Name: "{userdocs}\PowerShell\Modules\CodexOfflineShim\CodexOfflineShim.psm1"
+Type: files; Name: "{userdocs}\PowerShell\Modules\CodexOfflineShim\CodexOfflineShim.psd1"
+Type: files; Name: "{userdocs}\PowerShell\Modules\CodexOfflineShim\sync-thread.js"
+Type: dirifempty; Name: "{userdocs}\PowerShell\Modules\CodexOfflineShim"
 
 [InstallDelete]
 Type: files; Name: "{app}\Codex.exe"
@@ -89,6 +102,8 @@ begin
     Result := Result + ' -RegisterChromeHost';
   if WizardIsTaskSelected('codexlinks') then
     Result := Result + ' -RegisterCodexLinks';
+  if WizardIsTaskSelected('appshim') then
+    Result := Result + ' -InstallAppShim';
   if WizardIsTaskSelected('computeruse') then
     Result := Result + ' -RepairComputerUse';
   if WizardIsTaskSelected('chromeguide') then

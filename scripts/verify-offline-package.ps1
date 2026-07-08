@@ -285,7 +285,10 @@ try {
         '_internal\app\Codex.exe',
         '_internal\app\resources\app.asar',
         '_internal\patches\init.cjs',
-        '_internal\app\patches\init.cjs'
+        '_internal\app\patches\init.cjs',
+        '_internal\powershell-shim\CodexOfflineShim\CodexOfflineShim.psd1',
+        '_internal\powershell-shim\CodexOfflineShim\CodexOfflineShim.psm1',
+        '_internal\powershell-shim\CodexOfflineShim\sync-thread.js'
     )
 
     foreach ($relativePath in $requiredPortableFiles) {
