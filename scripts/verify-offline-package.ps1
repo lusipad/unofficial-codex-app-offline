@@ -1106,6 +1106,7 @@ const LEGACY_ELECTRON_NAMESPACE_PATCH_MARKER =
 const BUNDLED_BROWSER_PLUGINS_PATCH_MARKER = requiredPatchMarker('/*codex-offline:bundled-browser-plugins-no-force-reload*/');
 const BUNDLED_RUNTIME_PLUGINS_PATCH_MARKER = requiredPatchMarker('/*codex-offline:bundled-runtime-plugins*/');
 const WINDOWS_BROWSER_USE_CAPABILITY_PATCH_MARKER = requiredPatchMarker('/*codex-offline:windows-browser-use-capability*/');
+const APP_SERVER_SANDBOX_OVERRIDE = '`-c`,`windows.sandbox=\'unelevated\'`,`app-server`,`--analytics-default-enabled`';
 const NODE_REPL_FEATURE_ENABLED_PATCH_MARKER = requiredPatchMarker('/*codex-offline:node-repl-feature-enabled*/');
 const NODE_REPL_CONFIG_RECONCILE_FINALLY_PATCH_MARKER =
   requiredPatchMarker('/*codex-offline:node-repl-config-reconcile-finally*/');
@@ -1234,6 +1235,7 @@ let bundledRuntimePluginsPatched = false;
 let browserUseDescriptorPatched = false;
 let bundledBrowserPluginDescriptorSeen = false;
 let windowsBrowserUseCapabilityPatched = false;
+let appServerSandboxOverridePatched = false;
 let nodeReplFeatureConfigPatched = false;
 let nodeReplConfigReconcileFinallyPatched = false;
 let nodeReplDisableSandboxPatched = false;
@@ -1292,6 +1294,7 @@ for (const entry of javaScriptEntries) {
   bundledBrowserPluginsPatched ||= content.includes(BUNDLED_BROWSER_PLUGINS_PATCH_MARKER);
   bundledRuntimePluginsPatched ||= content.includes(BUNDLED_RUNTIME_PLUGINS_PATCH_MARKER);
   windowsBrowserUseCapabilityPatched ||= content.includes(WINDOWS_BROWSER_USE_CAPABILITY_PATCH_MARKER);
+  appServerSandboxOverridePatched ||= content.includes(APP_SERVER_SANDBOX_OVERRIDE);
   nodeReplFeatureConfigPatched ||= content.includes(NODE_REPL_FEATURE_ENABLED_PATCH_MARKER);
   nodeReplConfigReconcileFinallyPatched ||=
     content.includes(NODE_REPL_CONFIG_RECONCILE_FINALLY_PATCH_MARKER);
@@ -1461,6 +1464,9 @@ if (hasDesktopFeatureAvailability && !windowsBrowserUseCapabilityPatched) {
 }
 if (!nodeReplFeatureConfigPatched) {
   throw new Error('Browser Use thread config still lacks the node_repl feature enable patch.');
+}
+if (!appServerSandboxOverridePatched) {
+  throw new Error('Desktop app-server launch does not force windows.sandbox=\'unelevated\'.');
 }
 if (!nodeReplConfigReconcileFinallyPatched) {
   info('Current app version does not require the bundled plugin reconcile finalizer marker; required node_repl gates are verified separately.');

@@ -1563,10 +1563,16 @@ try {
     `let $1=$2.cwds.map(${AUTOMATION_CWD_NORMALIZER_INLINE});if($1.length===0)`;
   const AUTOMATION_RUNTIME_CWD_PATCH_MARKER =
     `.cwds.map(${AUTOMATION_CWD_NORMALIZER_INLINE})`;
-  const APP_SERVER_SANDBOX_OVERRIDE_NEEDLE =
-    'args:[`app-server`,`--analytics-default-enabled`]';
-  const APP_SERVER_SANDBOX_OVERRIDE_REPLACEMENT =
-    'args:[`-c`,`windows.sandbox=\'unelevated\'`,`app-server`,`--analytics-default-enabled`]';
+  const APP_SERVER_SANDBOX_OVERRIDE_PATCHES = [
+    {
+      needle: 'args:[`app-server`,`--analytics-default-enabled`]',
+      replacement: 'args:[`-c`,`windows.sandbox=\'unelevated\'`,`app-server`,`--analytics-default-enabled`]',
+    },
+    {
+      needle: '[`-c`,`features.code_mode_host=true`,`app-server`,`--analytics-default-enabled`]',
+      replacement: '[`-c`,`features.code_mode_host=true`,`-c`,`windows.sandbox=\'unelevated\'`,`app-server`,`--analytics-default-enabled`]',
+    },
+  ];
   const WINDOWS_BROWSER_USE_CAPABILITY_PATCH_MARKER =
     contractPatchMarker('/*codex-offline:windows-browser-use-capability*/');
   const WINDOWS_BROWSER_USE_CAPABILITY_LEGACY_RE =
@@ -1995,6 +2001,8 @@ try {
     /return(\[\.\.\.[A-Za-z_$][\w$]*\?\[[A-Za-z_$][\w$]*\(\)\]:\[\],[\s\S]{0,900}?\]\.map\([A-Za-z_$][\w$]*=>\(\{\.\.\.[A-Za-z_$][\w$]*,namespace:[A-Za-z_$][\w$]*,[\s\S]{0,220}?\}\)\))/;
   const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOLS_NAMESPACE_RE =
     /(\]\.map\(([A-Za-z_$][\w$]*)=>\(\{type:`function`,\.\.\.\2,\.\.\.[A-Za-z_$][\w$]*\.has\(\2\.name\)\?\{\}:\{deferLoading:!0\}\}\)\))\}\]/;
+  const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOLS_ARRAY_RE =
+    /\]\.map\(e=>\(\{type:`function`,\.\.\.e,\.\.\.[A-Za-z_$][\w$]*\.has\(e\.name\)\?\{\}:\{deferLoading:!0\}\}\)\);return/;
   const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_COMPAT_MISSING_RE =
     /(\(\{namespace:`node_repl`,name:`js`,description:`Execute JavaScript in the persistent Node REPL used by Computer Use\.`,inputSchema:\{[\s\S]{0,700}?required:\[`code`\]\}\}\),)(?!\(\{name:`js`,description:`Execute JavaScript in the persistent Node REPL used by Computer Use\. This forwards to node_repl\.js\.`)/;
   const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_RE =
@@ -2003,6 +2011,8 @@ try {
     /(async function [A-Za-z_$][\w$]*\(\{scope:([A-Za-z_$][\w$]*),serverRequest:([A-Za-z_$][\w$]*),hostId:([A-Za-z_$][\w$]*),queryClient:([A-Za-z_$][\w$]*)\}\)\{let [A-Za-z_$][\w$]*=\2\.get\([A-Za-z_$][\w$]*\),\{id:([A-Za-z_$][\w$]*),params:([A-Za-z_$][\w$]*)\}=\3,\{threadId:([A-Za-z_$][\w$]*),tool:([A-Za-z_$][\w$]*)\}=\7;if\(!\8\)\{[\s\S]{0,260}?return\})/;
   const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_CURRENT_V2_RE =
     /(?<prefix>async function [A-Za-z_$][\w$]*\(\{scope:(?<scope>[A-Za-z_$][\w$]*),serverRequest:(?<serverRequest>[A-Za-z_$][\w$]*),hostId:(?<hostId>[A-Za-z_$][\w$]*),queryClient:(?<queryClient>[A-Za-z_$][\w$]*)\}\)\{(?:let [^;{}]+;)?let\{id:(?<requestId>[A-Za-z_$][\w$]*),params:(?<params>[A-Za-z_$][\w$]*)\}=\k<serverRequest>,\{threadId:(?<threadId>[A-Za-z_$][\w$]*),tool:(?<tool>[A-Za-z_$][\w$]*)\}=\k<params>;if\(!\k<threadId>\)\{(?<logger>[A-Za-z_$][\w$]*)\.error\(`Missing threadId for dynamic tool call request`,\{safe:\{\},sensitive:\{id:\k<requestId>,params:\k<params>\}\}\);return\}let (?<result>[A-Za-z_$][\w$]*),(?<namespaceOk>[A-Za-z_$][\w$]*)=\k<params>\.namespace===[^,;]+,(?<compatOk>[A-Za-z_$][\w$]*)=\k<params>\.namespace==null&&[^;]+;)(?<gate>if\(!\k<namespaceOk>&&!\k<compatOk>\)\k<result>=(?<failureFn>[A-Za-z_$][\w$]*)\(`Unsupported dynamic tool namespace: \$\{\k<params>\.namespace\}`\);else)/;
+  const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_CURRENT_V3_RE =
+    /(?<prefix>async function [A-Za-z_$][\w$]*\(\{scope:(?<scope>[A-Za-z_$][\w$]*),serverRequest:(?<serverRequest>[A-Za-z_$][\w$]*),hostId:(?<hostId>[A-Za-z_$][\w$]*),queryClient:(?<queryClient>[A-Za-z_$][\w$]*)\}\)\{let\{id:(?<requestId>[A-Za-z_$][\w$]*),params:(?<params>[A-Za-z_$][\w$]*)\}=\k<serverRequest>,\{threadId:(?<threadId>[A-Za-z_$][\w$]*),tool:(?<tool>[A-Za-z_$][\w$]*)\}=\k<params>;if\(!\k<threadId>\)\{(?<logger>[A-Za-z_$][\w$]*)\.error\(`Missing threadId for dynamic tool call request`,\{safe:\{\},sensitive:\{id:\k<requestId>,params:\k<params>\}\}\);return\}let (?<result>[A-Za-z_$][\w$]*),(?<namespaceOk>[A-Za-z_$][\w$]*)=\k<params>\.namespace===[^,;]+,(?<compatOk>[A-Za-z_$][\w$]*)=\k<params>\.namespace==null&&[^;]+;)(?<gate>if\([A-Za-z_$][\w$]*!=null\)\k<result>=[A-Za-z_$][\w$]*;else if\(!\k<namespaceOk>&&!\k<compatOk>\)\k<result>=(?<failureFn>[A-Za-z_$][\w$]*)\(`Unsupported dynamic tool namespace: \$\{\k<params>\.namespace\}`\);else)/;
   const COMPUTER_USE_NODE_REPL_RESULT_TEXT_CODE =
     'let _codexOfflineNodeReplStringify=e=>{try{return JSON.stringify(e)}catch{return String(e)}};' +
     'let _codexOfflineNodeReplContentText=e=>Array.isArray(e)?e.map(e=>(e?.type===`text`||e?.type===`inputText`)?String(e.text??``):e?.text!=null?String(e.text):_codexOfflineNodeReplStringify(e)).join(`\\n`):``;' +
@@ -2112,6 +2122,16 @@ try {
         COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_PATCH_MARKER +
         ']',
     );
+    if (next !== content) {
+      return { content: next, alreadyCorrect: false, patched: true };
+    }
+
+    next = content.replace(
+      COMPUTER_USE_NODE_REPL_DYNAMIC_TOOLS_ARRAY_RE,
+      (match) =>
+        `,{type:\`namespace\`,name:\`node_repl\`,description:\`Node REPL tools for Computer Use.\`,` +
+        `tools:[${COMPUTER_USE_NODE_REPL_NAMESPACE_TOOL_SPEC}]}${COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_PATCH_MARKER}${match}`,
+    );
     return { content: next, alreadyCorrect: false, patched: next !== content };
   }
   function patchComputerUseNodeReplDynamicToolCall(content) {
@@ -2119,10 +2139,16 @@ try {
       return { content, alreadyCorrect: true, patched: false };
     }
 
-    const next = content.replace(
+    let next = content.replace(
       COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_CURRENT_V2_RE,
       computerUseNodeReplDynamicToolCallCurrentV2Replacement,
     );
+    if (next === content) {
+      next = content.replace(
+        COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_CURRENT_V3_RE,
+        computerUseNodeReplDynamicToolCallCurrentV2Replacement,
+      );
+    }
     return { content: next, alreadyCorrect: false, patched: next !== content };
   }
   const ARCHIVED_THREADS_LIST_ALL_DIRECT_RE =
@@ -2133,6 +2159,8 @@ try {
     /async function ([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*),\{modelProviders:([A-Za-z_$][\w$]*),archived:([A-Za-z_$][\w$]*)=!1,sourceKinds:([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*),useStateDbOnly:([A-Za-z_$][\w$]*)=!1\}\)\{let ([A-Za-z_$][\w$]*)=\[\],([A-Za-z_$][\w$]*)=async ([A-Za-z_$][\w$]*)=>\{let ([A-Za-z_$][\w$]*);try\{\11=await \2\.sendRequest\(`thread\/list`,\{limit:200,cursor:\10,sortKey:\2\.recentConversationsSortKey,modelProviders:\3,sourceKinds:\5,archived:\4,useStateDbOnly:\7\}\)\}catch\(_codexOfflineArchiveListError\)\{if\(\4\)return;throw _codexOfflineArchiveListError\}\8\.push\(\.\.\.\(\11\.data\?\?\[\]\)\),\11\.nextCursor&&await \9\(\11\.nextCursor\)\};return await \9\(null\),\8\}\/\*codex-offline:archived-threads-partial-list\*\//;
   const ARCHIVED_THREADS_LIST_ALL_PATCHED_QUERY_RE =
     /async function ([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*),\{modelProviders:([A-Za-z_$][\w$]*),archived:([A-Za-z_$][\w$]*)=!1,sourceKinds:([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*),useStateDbOnly:([A-Za-z_$][\w$]*)=!1\}\)\{let ([A-Za-z_$][\w$]*)=\[\],([A-Za-z_$][\w$]*)=async ([A-Za-z_$][\w$]*)=>\{let ([A-Za-z_$][\w$]*)=\{limit:200,cursor:\10,sortKey:\2\.recentConversationsSortKey,modelProviders:\3,sourceKinds:\5,archived:\4,useStateDbOnly:\7\},([A-Za-z_$][\w$]*);try\{\12=await \2\.sendRequest\(`thread\/list`,\11\)\}catch\(_codexOfflineArchiveListError\)\{if\(\4\)return;throw _codexOfflineArchiveListError\}\8\.push\(\.\.\.\(\12\.data\?\?\[\]\)\),\12\.nextCursor&&await \9\(\12\.nextCursor\)\};return await \9\(null\),\8\}\/\*codex-offline:archived-threads-partial-list\*\//;
+  const ARCHIVED_THREADS_LIST_ALL_CURRENT_RE =
+    /function (?<functionName>[A-Za-z_$][\w$]*)\((?<requestClient>[A-Za-z_$][\w$]*),\{modelProviders:(?<modelProviders>[A-Za-z_$][\w$]*),archived:(?<archived>[A-Za-z_$][\w$]*)=!1,sourceKinds:(?<sourceKinds>[A-Za-z_$][\w$]*)=(?<defaultSourceKinds>[A-Za-z_$][\w$]*),useStateDbOnly:(?<useStateDbOnly>[A-Za-z_$][\w$]*)=!1\}\)\{let (?<threads>[A-Za-z_$][\w$]*)=\[\],(?<loadPage>[A-Za-z_$][\w$]*)=async (?<cursor>[A-Za-z_$][\w$]*)=>\{let (?<query>[A-Za-z_$][\w$]*)=\{limit:100,cursor:\k<cursor>,sortKey:\k<requestClient>\.recentConversationsSortKey,modelProviders:\k<modelProviders>,sourceKinds:\k<sourceKinds>,archived:\k<archived>,useStateDbOnly:\k<useStateDbOnly>\},(?<page>[A-Za-z_$][\w$]*)=await \k<requestClient>\.sendRequest\(`thread\/list`,\k<query>,\{priority:`background`,source:`thread_list`\}\);\k<threads>\.push\(\.\.\.\k<page>\.data\),\k<page>\.nextCursor&&await \k<loadPage>\(\k<page>\.nextCursor\)\};return await \k<loadPage>\(null\),\k<threads>\}/;
   function archivedThreadsReturnExpression(archived, failed, threads) {
     return `${archived}?(${failed}&&${threads}.length===0?` +
       `(globalThis.__codexOfflineArchivedThreadsCache??${threads}):` +
@@ -2275,6 +2303,43 @@ try {
           `}catch(_codexOfflineArchiveListError){if(${archived}){${failed}=!0;return}throw _codexOfflineArchiveListError}` +
           `${threads}.push(...(${page}.data??[])),${page}.nextCursor&&await ${loadPage}(${page}.nextCursor)` +
           `};return await ${loadPage}(null),${archivedThreadsReturnExpression(archived, failed, threads)}}` +
+          ARCHIVED_THREADS_PARTIAL_LIST_PATCH_MARKER +
+          ARCHIVED_THREADS_CACHE_FALLBACK_PATCH_MARKER
+          );
+        },
+      );
+    }
+    if (next === content) {
+      next = content.replace(
+        ARCHIVED_THREADS_LIST_ALL_CURRENT_RE,
+        (
+          _match,
+          functionName,
+          requestClient,
+          modelProviders,
+          archived,
+          sourceKinds,
+          defaultSourceKinds,
+          useStateDbOnly,
+          threads,
+          loadPage,
+          cursor,
+          query,
+          page,
+        ) => {
+          const failed = '_codexOfflineArchiveListFailed';
+          return (
+          `function ${functionName}(${requestClient},{modelProviders:${modelProviders},` +
+          `archived:${archived}=!1,sourceKinds:${sourceKinds}=${defaultSourceKinds},` +
+          `useStateDbOnly:${useStateDbOnly}=!1}){let ${threads}=[],${failed}=!1,${loadPage}=async ${cursor}=>{` +
+          `let ${query}={limit:100,cursor:${cursor},sortKey:${requestClient}.recentConversationsSortKey,` +
+          `modelProviders:${modelProviders},sourceKinds:${sourceKinds},archived:${archived},` +
+          `useStateDbOnly:${archived}?!0:${useStateDbOnly}},${page};try{${page}=await ${requestClient}.sendRequest(` +
+          `\`thread/list\`,${query},{priority:\`background\`,source:\`thread_list\`})` +
+          `}catch(_codexOfflineArchiveListError){if(${archived}){${failed}=!0;return}` +
+          `throw _codexOfflineArchiveListError}${threads}.push(...(${page}.data??[])),` +
+          `${page}.nextCursor&&await ${loadPage}(${page}.nextCursor)};return await ${loadPage}(null),` +
+          `${archivedThreadsReturnExpression(archived, failed, threads)}}` +
           ARCHIVED_THREADS_PARTIAL_LIST_PATCH_MARKER +
           ARCHIVED_THREADS_CACHE_FALLBACK_PATCH_MARKER
           );
@@ -2588,25 +2653,32 @@ try {
 
   for (const filePath of mainBundleFiles) {
     let content = fs.readFileSync(filePath, 'utf8');
-    const alreadyPatchedCount = countOccurrences(
-      content,
-      APP_SERVER_SANDBOX_OVERRIDE_REPLACEMENT,
-    );
-    if (alreadyPatchedCount > 0) {
-      appServerSandboxOverrideDetected += alreadyPatchedCount;
-      appServerSandboxOverridePatchedFiles.push(path.relative(tmpDir, filePath));
-      continue;
+    let fileChanged = false;
+    let fileDetected = false;
+
+    for (const { needle, replacement } of APP_SERVER_SANDBOX_OVERRIDE_PATCHES) {
+      const alreadyPatchedCount = countOccurrences(content, replacement);
+      if (alreadyPatchedCount > 0) {
+        appServerSandboxOverrideDetected += alreadyPatchedCount;
+        fileDetected = true;
+      }
+
+      const needleCount = countOccurrences(content, needle);
+      if (needleCount === 0) continue;
+
+      content = content.split(needle).join(replacement);
+      appServerSandboxOverrideCount += needleCount;
+      appServerSandboxOverrideDetected += needleCount;
+      fileChanged = true;
+      fileDetected = true;
     }
 
-    const needleCount = countOccurrences(content, APP_SERVER_SANDBOX_OVERRIDE_NEEDLE);
-    if (needleCount === 0) continue;
-
-    content = content.split(APP_SERVER_SANDBOX_OVERRIDE_NEEDLE)
-      .join(APP_SERVER_SANDBOX_OVERRIDE_REPLACEMENT);
-    fs.writeFileSync(filePath, content, 'utf8');
-    appServerSandboxOverrideCount += needleCount;
-    appServerSandboxOverrideDetected += needleCount;
-    appServerSandboxOverridePatchedFiles.push(path.relative(tmpDir, filePath));
+    if (fileChanged) {
+      fs.writeFileSync(filePath, content, 'utf8');
+    }
+    if (fileDetected) {
+      appServerSandboxOverridePatchedFiles.push(path.relative(tmpDir, filePath));
+    }
   }
 
   if (appServerSandboxOverrideDetected === 0) {
