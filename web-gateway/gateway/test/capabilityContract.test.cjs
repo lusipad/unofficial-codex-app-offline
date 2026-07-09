@@ -6,6 +6,7 @@ const test = require("node:test");
 const contract = require("../dist/ipc/codex/capabilityContract.js");
 const { filterUnsupportedFeatureEnablements } = require("../dist/ipc/codex/featurePatches.js");
 const { makeHandlers } = require("../dist/ipc/codex/GatewayCodexIpcPort.js");
+const { createConversationIpcHandlers } = require("../dist/ipc/codex/conversation.js");
 const contractData = require("../src/ipc/codex/capabilityContractData.cjs");
 
 test("capability contract exports required statsig defaults", () => {
@@ -236,6 +237,44 @@ test("web gateway safely no-ops external agent import channels", async () => {
   assert.deepEqual(await handlers.handle("external-agent-imported-connectors", { hostId: "local" }), {
     connectors: [],
   });
+});
+
+test("project conversation turn/start keeps selected full-access permissions", async () => {
+  const requests = [];
+  const cwd = "D:\\Repos\\example";
+  const sandboxPolicy = { type: "dangerFullAccess" };
+  const conversation = createConversationIpcHandlers({
+    appServerBridge: {
+      callAppServer: async (method, params) => {
+        requests.push({ method, params });
+        if (method === "thread/start") return { threadId: "thread-full-access" };
+        if (method === "turn/start") return true;
+        throw new Error(`unexpected method: ${method}`);
+      },
+    },
+    workspaceRuntime: {
+      normalizeStartConversationRoots: () => ({ cwd, workspaceRoots: [cwd] }),
+      permissionsForAppServer: () => ({
+        approvalPolicy: "never",
+        approvalsReviewer: "user",
+        sandboxMode: "danger-full-access",
+        sandboxPolicy,
+        permissionProfile: "full-access",
+      }),
+      recordThreadStartMetadata: (result) => result.threadId,
+    },
+  });
+
+  await conversation.startConversation({
+    cwd,
+    workspaceKind: "project",
+    input: [{ type: "input_text", text: "hi" }],
+  });
+
+  assert.deepEqual(requests.map((request) => request.method), ["thread/start", "turn/start"]);
+  assert.equal(requests[1].params.approvalPolicy, "never");
+  assert.equal(requests[1].params.sandboxPolicy, sandboxPolicy);
+  assert.equal(requests[1].params.permissionProfile, "full-access");
 });
 
 test("web gateway lists archived threads from app-server", async () => {
