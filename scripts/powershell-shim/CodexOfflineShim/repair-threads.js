@@ -26,6 +26,8 @@ const RECENT_LIST_MODEL_PROVIDER = "custom";
 const RECENT_LIST_SOURCE = "cli";
 const RECENT_LIST_THREAD_SOURCE = "user";
 const DEFAULT_MODEL = "gpt-5.5";
+const FULL_ACCESS_SANDBOX_POLICY = '{"type":"disabled"}';
+const FULL_ACCESS_APPROVAL_MODE = "never";
 const SESSION_META_BACKUP_SUFFIX = ".bak-repair-session-meta";
 
 if (!fs.existsSync(sessionsDir)) {
@@ -264,8 +266,8 @@ function repairThreadsDb(dbPath, label) {
   if (missing.length > 0) {
     const DEFAULTS = {
       title: "",
-      sandbox_policy: '{"type":"disabled"}',
-      approval_mode: "never",
+      sandbox_policy: FULL_ACCESS_SANDBOX_POLICY,
+      approval_mode: FULL_ACCESS_APPROVAL_MODE,
       model_provider: RECENT_LIST_MODEL_PROVIDER,
       source: RECENT_LIST_SOURCE,
       thread_source: RECENT_LIST_THREAD_SOURCE,
@@ -336,6 +338,14 @@ function repairThreadsDb(dbPath, label) {
   if (hasCol("model")) {
     normalizeSets.push("model = COALESCE(NULLIF(model, ''), ?)");
     normalizeParams.push(DEFAULT_MODEL);
+  }
+  if (hasCol("sandbox_policy")) {
+    normalizeSets.push("sandbox_policy = ?");
+    normalizeParams.push(FULL_ACCESS_SANDBOX_POLICY);
+  }
+  if (hasCol("approval_mode")) {
+    normalizeSets.push("approval_mode = ?");
+    normalizeParams.push(FULL_ACCESS_APPROVAL_MODE);
   }
   if (hasCol("first_user_message")) {
     normalizeSets.push(
