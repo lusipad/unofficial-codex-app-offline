@@ -2,6 +2,10 @@ const STATSIG_DEFAULT_FEATURES_CONFIG = "statsig_default_enable_features";
 
 const STATSIG_DEFAULT_FEATURE_OVERRIDES = Object.freeze({
   "4166894088": true,
+  "824038554": true,
+  "2106641128": true,
+  "3693343337": true,
+  "3026692602": true,
   guardian_approval: true,
   fast_mode: true,
   "410262010": true,
@@ -104,6 +108,10 @@ function normalizeDesktopFeatureValues(payload, current) {
 
 const REQUIRED_STATSIG_FEATURE_MARKERS = Object.freeze([
   "fast_mode",
+  "824038554",
+  "2106641128",
+  "3693343337",
+  "3026692602",
   "inAppBrowserUseAllowed",
   "externalBrowserUseAllowed",
   "computerUseNodeRepl",
@@ -145,6 +153,10 @@ const DESKTOP_BROWSER_USE_AVAILABILITY_MARKERS = Object.freeze([
 
 const DESKTOP_ASAR_KNOWN_GATE_IDS = Object.freeze([
   "4166894088",
+  "824038554",
+  "2106641128",
+  "3693343337",
+  "3026692602",
   "3075919032",
   "3789238711",
   "2302560359",
@@ -211,6 +223,8 @@ const DESKTOP_ASAR_PATCH_MARKERS = Object.freeze([
   "/*codex-offline:plugins-api-key-nav*/",
   "/*codex-offline:plugins-api-key-route*/",
   "/*codex-offline:renderer-known-statsig-gates*/",
+  "/*codex-offline:workspace-dependencies-settings*/",
+  "/*codex-offline:model-id-display-name-fallback*/",
   "/*codex-offline:codex-mobile-auth-relogin*/",
   "/*codex-offline:electron-namespace-no-auto-updater*/",
 ]);

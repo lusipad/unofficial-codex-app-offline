@@ -688,6 +688,90 @@ function patchDirectStatsigGateCalls(content, gateIds, patchMarker) {
   return { content: next, count };
 }
 
+function patchWorkspaceDependenciesSettingsGate(
+  content,
+  patchMarker,
+  rendererPatchMarker,
+) {
+  const surfaceMarker = 'defaultMessage:`Workspace Dependencies`';
+  if (!content.includes(surfaceMarker)) {
+    return { content, seen: false, patched: false, alreadyCorrect: false };
+  }
+  if (content.includes(patchMarker)) {
+    return { content, seen: true, patched: false, alreadyCorrect: true };
+  }
+
+  const directGateCall = gateId =>
+    `(?:\\(0,[$\\w]+\\)|[$\\w]+)\\(\\\`${gateId}\\\`\\)`;
+  const enabledGate = gateId =>
+    `(?:${directGateCall(gateId)}|!0${escapeRegExp(rendererPatchMarker)})`;
+  const importedWorkspaceGateRe = new RegExp(
+    `([A-Za-z_$][\\w$]*)=(?:\\(0,[$\\w]+\\)|[$\\w]+)` +
+      `\\([A-Za-z_$][\\w$]*\\),` +
+      `(?=[A-Za-z_$][\\w$]*=${enabledGate('2106641128')},` +
+      `[A-Za-z_$][\\w$]*=${enabledGate('3693343337')}(?:,|;))`,
+  );
+  const next = content.replace(
+    importedWorkspaceGateRe,
+    `$1=!0${patchMarker},`,
+  );
+  return {
+    content: next,
+    seen: true,
+    patched: next !== content,
+    alreadyCorrect: false,
+  };
+}
+// end patchWorkspaceDependenciesSettingsGate
+
+const MODEL_DISPLAY_NAME_FALLBACK_PATCH_MARKER =
+  contractPatchMarker('/*codex-offline:model-id-display-name-fallback*/');
+
+function patchModelDisplayNameFallback(content) {
+  const patchMarker = MODEL_DISPLAY_NAME_FALLBACK_PATCH_MARKER;
+  if (content.includes(patchMarker)) {
+    return { content, patched: false, alreadyCorrect: true };
+  }
+
+  const descriptor =
+    'id:`composer.mode.local.model.custom`,defaultMessage:`Custom`,' +
+    'description:`Custom model from config`}';
+  const descriptorIndex = content.indexOf(descriptor);
+  if (descriptorIndex < 0) {
+    return { content, patched: false, alreadyCorrect: false };
+  }
+
+  const functionStart = content.lastIndexOf('function ', descriptorIndex);
+  const nextFunction = content.indexOf('function ', descriptorIndex);
+  if (functionStart < 0) {
+    return { content, patched: false, alreadyCorrect: false };
+  }
+  const functionEnd = nextFunction < 0 ? content.length : nextFunction;
+  const functionContent = content.slice(functionStart, functionEnd);
+  const formatterMatch = functionContent.match(
+    /let\s+[A-Za-z_$][\w$]*=([A-Za-z_$][\w$]*)\([A-Za-z_$][\w$]*\);/,
+  );
+  const fallbackPattern =
+    /else if\(([A-Za-z_$][\w$]*)\)\{let ([A-Za-z_$][\w$]*);[\s\S]{0,500}?id:`composer\.mode\.local\.model\.custom`,defaultMessage:`Custom`,description:`Custom model from config`\}[\s\S]{0,250}?,([A-Za-z_$][\w$]*)=\2\}else \3=\1/;
+  if (!formatterMatch || !fallbackPattern.test(functionContent)) {
+    return { content, patched: false, alreadyCorrect: false };
+  }
+
+  const formatter = formatterMatch[1];
+  const patchedFunction = functionContent.replace(
+    fallbackPattern,
+    (_match, model, _message, label) =>
+      `else if(${model})${label}=${formatter}(${model})${patchMarker};else ${label}=${model}`,
+  );
+  return {
+    content:
+      content.slice(0, functionStart) + patchedFunction + content.slice(functionEnd),
+    patched: true,
+    alreadyCorrect: false,
+  };
+}
+// end patchModelDisplayNameFallback
+
 function patchExternalAgentConfigGateIdLiterals(content, gateIds, patchMarker) {
   let next = content;
   let count = 0;
@@ -3559,6 +3643,8 @@ try {
   );
   const RENDERER_KNOWN_STATSIG_GATES_PATCH_MARKER =
     contractPatchMarker('/*codex-offline:renderer-known-statsig-gates*/');
+  const WORKSPACE_DEPENDENCIES_SETTINGS_PATCH_MARKER =
+    contractPatchMarker('/*codex-offline:workspace-dependencies-settings*/');
   const FEATURE_ENABLEMENT_PRESERVE_UNIFIED_EXEC_PATCH_MARKER =
     contractPatchMarker('/*codex-offline:feature-enablement-preserve-unified-exec*/');
   const FEATURE_ENABLEMENT_LOCAL_STATE_RE =
@@ -3612,14 +3698,19 @@ try {
     let fastModeAuthPatched = false;
     let fastModeServiceTierPatched = false;
     let rendererKnownStatsigGatePatchCount = 0;
+    let workspaceDependenciesSettingsSeen = false;
+    const workspaceDependenciesSettingsPatchedFiles = [];
     const computerUseNodeReplDynamicToolPatchedFiles = [];
     const computerUseNodeReplDynamicToolCallPatchedFiles = [];
     const archivedThreadsPartialListPatchedFiles = [];
     const archivedSettingsOfflineVisibilityPatchedFiles = [];
+    const modelDisplayNamePatchedFiles = [];
     let computerUseNodeReplDynamicToolAlreadyCorrect = false;
     let computerUseNodeReplDynamicToolCallAlreadyCorrect = false;
     let archivedThreadsPartialListAlreadyCorrect = false;
     let archivedSettingsOfflineVisibilityAlreadyCorrect = false;
+    let workspaceDependenciesSettingsAlreadyCorrect = false;
+    let modelDisplayNameAlreadyCorrect = false;
 
     for (const filePath of webviewJsFiles) {
       let content = fs.readFileSync(filePath, 'utf8');
@@ -3662,6 +3753,30 @@ try {
         changed = true;
       } else if (archivedSettingsOfflineVisibilityPatch.alreadyCorrect) {
         archivedSettingsOfflineVisibilityAlreadyCorrect = true;
+      }
+
+      const modelDisplayNamePatch = patchModelDisplayNameFallback(content);
+      if (modelDisplayNamePatch.patched) {
+        content = modelDisplayNamePatch.content;
+        modelDisplayNamePatchedFiles.push(path.relative(tmpDir, filePath));
+        changed = true;
+      } else if (modelDisplayNamePatch.alreadyCorrect) {
+        modelDisplayNameAlreadyCorrect = true;
+      }
+
+      const workspaceDependenciesSettingsPatch =
+        patchWorkspaceDependenciesSettingsGate(
+          content,
+          WORKSPACE_DEPENDENCIES_SETTINGS_PATCH_MARKER,
+          RENDERER_KNOWN_STATSIG_GATES_PATCH_MARKER,
+        );
+      workspaceDependenciesSettingsSeen ||= workspaceDependenciesSettingsPatch.seen;
+      if (workspaceDependenciesSettingsPatch.patched) {
+        content = workspaceDependenciesSettingsPatch.content;
+        workspaceDependenciesSettingsPatchedFiles.push(path.relative(tmpDir, filePath));
+        changed = true;
+      } else if (workspaceDependenciesSettingsPatch.alreadyCorrect) {
+        workspaceDependenciesSettingsAlreadyCorrect = true;
       }
 
       const rendererKnownStatsigGatePatch = patchDirectStatsigGateCalls(
@@ -3780,6 +3895,30 @@ try {
       throw new Error(
         'Could not locate archived settings panel isError to keep local ' +
         'archived chats visible offline.',
+      );
+    }
+    if (workspaceDependenciesSettingsPatchedFiles.length > 0) {
+      log('Workspace Dependencies settings gate patched in ' +
+        `${workspaceDependenciesSettingsPatchedFiles.join(', ')}.`);
+    } else if (workspaceDependenciesSettingsAlreadyCorrect) {
+      log('Workspace Dependencies settings gate already patched.');
+    } else if (workspaceDependenciesSettingsSeen) {
+      failRequiredPatch(
+        'Could not locate the imported Workspace Dependencies settings gate.',
+      );
+    } else {
+      failRequiredPatch(
+        'Could not locate the Workspace Dependencies settings surface.',
+      );
+    }
+    if (modelDisplayNamePatchedFiles.length > 0) {
+      log('Missing model display names now fall back to formatted model IDs in ' +
+        `${modelDisplayNamePatchedFiles.join(', ')}.`);
+    } else if (modelDisplayNameAlreadyCorrect) {
+      log('Missing model display-name fallback already patched.');
+    } else {
+      failRequiredPatch(
+        'Could not locate the renderer Custom model-label fallback to show the model ID.',
       );
     }
   }

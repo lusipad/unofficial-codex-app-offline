@@ -299,6 +299,22 @@ try {
         }
     }
 
+    $desktopModelAvailabilityMarkers = @(
+        "var STATSIG_MODEL_AVAILABILITY_CONFIG = '107580212';",
+        'available_models: []',
+        'use_hidden_models: false',
+        "var configContainerKeys = ['dynamic_configs', 'dynamicConfigs', 'configs'];",
+        'result.key === STATSIG_MODEL_AVAILABILITY_CONFIG'
+    )
+    foreach ($relativePath in @('_internal\patches\init.cjs', '_internal\app\patches\init.cjs')) {
+        $initPatchContent = Get-Content -LiteralPath (Join-Path $portableRoot $relativePath) -Raw
+        foreach ($marker in $desktopModelAvailabilityMarkers) {
+            if (-not $initPatchContent.Contains($marker)) {
+                throw "Packaged init.cjs is missing model availability override '$marker': $relativePath"
+            }
+        }
+    }
+
     $installerBudgetRoot = 'C:\Users\123456789012345678901234567890\Codex'
     $maxInstallerPathLength = 259
     $longestInstallerPath = $null
@@ -1142,6 +1158,10 @@ const BUNDLED_PLUGIN_CACHE_LOCK_NONFATAL_PATCH_MARKER =
   requiredPatchMarker('/*codex-offline:bundled-plugin-cache-lock-nonfatal*/');
 const RENDERER_KNOWN_STATSIG_GATES_PATCH_MARKER =
   requiredPatchMarker('/*codex-offline:renderer-known-statsig-gates*/');
+const WORKSPACE_DEPENDENCIES_SETTINGS_PATCH_MARKER =
+  requiredPatchMarker('/*codex-offline:workspace-dependencies-settings*/');
+const MODEL_DISPLAY_NAME_FALLBACK_PATCH_MARKER =
+  requiredPatchMarker('/*codex-offline:model-id-display-name-fallback*/');
 const bundledPluginCacheLockFatalResultRe =
   /if\([A-Za-z_$][\w$]*!=null\)\{if\([A-Za-z_$][\w$]*\.warning\(`bundled_plugins_marketplace_install_failed`,\{safe:\{errorCategory:[A-Za-z_$][\w$]*\(\{error:[A-Za-z_$][\w$]*\.error,platformFamily:e\.platformFamily\}\),marketplaceName:t,platformFamily:e\.platformFamily,\.\.\.[A-Za-z_$][\w$]*\.safe\},sensitive:\{error:[A-Za-z_$][\w$]*\.error,marketplaceRoot:e\.materializedMarketplace\.marketplaceRoot,\.\.\.[A-Za-z_$][\w$]*\.sensitive\}\}\),n\)throw [A-Za-z_$][\w$]*\.error;return!1\}return!0\}/;
 const bundledPluginCacheLockFatalCatchRe =
@@ -1258,6 +1278,9 @@ let bundledPluginCacheLockNonfatalPatched = false;
 let pluginsApiKeyNavPatched = false;
 let pluginsApiKeyRoutePatched = false;
 let rendererKnownStatsigGatesPatched = false;
+let workspaceDependenciesSettingsSurfaceSeen = false;
+let workspaceDependenciesSettingsPatched = false;
+let modelDisplayNameFallbackPatched = false;
 let codexMobileRemoteControlMfaEndpointSeen = false;
 let codexMobileAuthReloginPatched = false;
 const bundledBrowserPluginForceReloadResiduals = [];
@@ -1279,6 +1302,15 @@ for (const entry of javaScriptEntries) {
   if (isWebviewAsset) {
     if (content.includes(RENDERER_KNOWN_STATSIG_GATES_PATCH_MARKER)) {
       rendererKnownStatsigGatesPatched = true;
+    }
+    if (content.includes('defaultMessage:`Workspace Dependencies`')) {
+      workspaceDependenciesSettingsSurfaceSeen = true;
+      if (content.includes(WORKSPACE_DEPENDENCIES_SETTINGS_PATCH_MARKER)) {
+        workspaceDependenciesSettingsPatched = true;
+      }
+    }
+    if (content.includes(MODEL_DISPLAY_NAME_FALLBACK_PATCH_MARKER)) {
+      modelDisplayNameFallbackPatched = true;
     }
     const literalGateIds = [];
     for (const gateId of DESKTOP_ASAR_KNOWN_GATE_IDS) {
@@ -1447,6 +1479,15 @@ if (!rendererKnownStatsigGatesPatched && rendererKnownStatsigGateLiteralEntries.
     'Renderer webview assets contain offline-known Statsig gate literals but no direct-gate patch marker: ' +
     rendererKnownStatsigGateLiteralEntries.join(', ')
   );
+}
+if (!workspaceDependenciesSettingsSurfaceSeen) {
+  throw new Error('Workspace Dependencies settings surface is missing from app.asar.');
+}
+if (!workspaceDependenciesSettingsPatched) {
+  throw new Error('Workspace Dependencies imported gate patch marker is missing from app.asar.');
+}
+if (!modelDisplayNameFallbackPatched) {
+  throw new Error('Renderer formatted model-ID fallback marker is missing from app.asar.');
 }
 if (legacyElectronNamespacePatchResiduals.length > 0) {
   throw new Error(

@@ -102,11 +102,16 @@
   // ═══════════════════════════════════════════════════════════════════════
 
   var STATSIG_DEFAULT_FEATURES_CONFIG = 'statsig_default_enable_features';
+  var STATSIG_MODEL_AVAILABILITY_CONFIG = '107580212';
 
   /** Every Statsig gate that should be unconditionally enabled offline. */
   var STATSIG_GATE_OVERRIDES = {
     // From STATSIG_DEFAULT_FEATURE_OVERRIDES
     '4166894088': true,   // Settings page
+    '824038554': true,    // Codex/Work mode selector
+    '2106641128': true,   // Experimental features settings
+    '3693343337': true,   // Model features settings
+    '3026692602': true,   // Workspace dependencies settings
     '410262010': true,    // Browser use agent
     '410065390': true,    // External Chrome plugin @mentions
     '4250630194': true,   // In-app browser
@@ -182,6 +187,28 @@
     return v !== null && typeof v === 'object' && !Array.isArray(v);
   }
 
+  function clearedModelAvailabilityValue() {
+    return { available_models: [], use_hidden_models: false };
+  }
+
+  function overwriteModelAvailabilityConfig(configs) {
+    if (!isPlainObject(configs)) return false;
+    var existing = configs[STATSIG_MODEL_AVAILABILITY_CONFIG];
+    var nextValue = clearedModelAvailabilityValue();
+    if (isPlainObject(existing) &&
+        ('value' in existing || existing.name === STATSIG_MODEL_AVAILABILITY_CONFIG)) {
+      if (JSON.stringify(existing.value) === JSON.stringify(nextValue)) return false;
+      existing.value = nextValue;
+    } else {
+      configs[STATSIG_MODEL_AVAILABILITY_CONFIG] = {
+        name: STATSIG_MODEL_AVAILABILITY_CONFIG,
+        rule_id: 'desktop_override',
+        value: nextValue,
+      };
+    }
+    return true;
+  }
+
   /** Deep-merge source into target. */
   function deepAssign(target, source) {
     if (!isPlainObject(target) || !isPlainObject(source)) return target;
@@ -249,6 +276,7 @@
           changed = true;
         }
       }
+      if (overwriteModelAvailabilityConfig(configs)) changed = true;
     }
 
     return changed;
@@ -350,12 +378,20 @@
     if (!isPlainObject(result)) return result;
     var patched = false;
     // Direct Statsig snapshot object
-    if (result.feature_gates || result.featureGates || result.gates) {
+    if (result.feature_gates || result.featureGates || result.gates ||
+        result.dynamic_configs || result.dynamicConfigs || result.configs) {
       patched = injectStatsigGatesIntoObject(result);
     }
     // Single key/value pair — inject overrides for statsig keys
     if (typeof result.key === 'string' && isPlainObject(result.value)) {
-      if (result.key === STATSIG_DEFAULT_FEATURES_CONFIG ||
+      if (result.key === STATSIG_MODEL_AVAILABILITY_CONFIG) {
+        if ('value' in result.value || result.value.name === STATSIG_MODEL_AVAILABILITY_CONFIG) {
+          result.value.value = clearedModelAvailabilityValue();
+        } else {
+          result.value = clearedModelAvailabilityValue();
+        }
+        patched = true;
+      } else if (result.key === STATSIG_DEFAULT_FEATURES_CONFIG ||
           result.key.indexOf('statsig') === 0 ||
           result.key.indexOf('feature') === 0) {
         deepAssign(result.value, STATSIG_GATE_OVERRIDES);
