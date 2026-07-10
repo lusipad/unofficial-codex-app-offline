@@ -2002,10 +2002,14 @@ try {
     '({name:`js`,description:`Execute JavaScript in the persistent Node REPL used by Computer Use. This forwards to node_repl.js.`,inputSchema:{type:`object`,additionalProperties:!1,properties:{code:{type:`string`,description:`JavaScript source to execute in the persistent Node-backed kernel.`},timeout_ms:{type:`integer`,minimum:1,description:`Optional execution timeout in milliseconds.`},title:{type:`string`,minLength:1,maxLength:80,description:`Short user-facing description.`}},required:[`code`]}})';
   const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOLS_RETURN_RE =
     /return(\[\.\.\.[A-Za-z_$][\w$]*\?\[[A-Za-z_$][\w$]*\(\)\]:\[\],[\s\S]{0,900}?\]\.map\([A-Za-z_$][\w$]*=>\(\{\.\.\.[A-Za-z_$][\w$]*,namespace:[A-Za-z_$][\w$]*,[\s\S]{0,220}?\}\)\))/;
-  const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOLS_NAMESPACE_RE =
-    /(\]\.map\(([A-Za-z_$][\w$]*)=>\(\{type:`function`,\.\.\.\2,\.\.\.[A-Za-z_$][\w$]*\.has\(\2\.name\)\?\{\}:\{deferLoading:!0\}\}\)\))\}\]/;
-  const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOLS_ARRAY_RE =
-    /\]\.map\(e=>\(\{type:`function`,\.\.\.e,\.\.\.[A-Za-z_$][\w$]*\.has\(e\.name\)\?\{\}:\{deferLoading:!0\}\}\)\);return/;
+  // 26.707+ builds a function-only tool list and then, when the app-server
+  // advertises namespace support, nests it under a single "Codex app" group.
+  // The node_repl tool has to join the sibling namespace groups, never the
+  // inner tools array: that array deserializes as function-only on the
+  // app-server, so a namespace entry there fails thread/start with
+  // "unknown variant `namespace`, expected `function`".
+  const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOLS_TOP_LEVEL_RE =
+    /\]\.map\((?<item>[A-Za-z_$][\w$]*)=>\(\{type:`function`,\.\.\.\k<item>,\.\.\.(?<eager>[A-Za-z_$][\w$]*)\.has\(\k<item>\.name\)\?\{\}:\{deferLoading:!0\}\}\)\);return (?<supportsNamespaces>[A-Za-z_$][\w$]*)\?\[\{type:`namespace`,name:(?<appNamespace>[A-Za-z_$][\w$]*),description:`Tools provided by the Codex app\.`,tools:(?<functionTools>[A-Za-z_$][\w$]*)\},\.\.\.(?<namespaceGroups>[A-Za-z_$][\w$]*)\]:\k<functionTools>/;
   const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_COMPAT_MISSING_RE =
     /(\(\{namespace:`node_repl`,name:`js`,description:`Execute JavaScript in the persistent Node REPL used by Computer Use\.`,inputSchema:\{[\s\S]{0,700}?required:\[`code`\]\}\}\),)(?!\(\{name:`js`,description:`Execute JavaScript in the persistent Node REPL used by Computer Use\. This forwards to node_repl\.js\.`)/;
   const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_RE =
@@ -2099,6 +2103,28 @@ try {
     'timeout_ms:{type:`integer`,minimum:1,description:`Optional execution timeout in milliseconds.`},' +
     'title:{type:`string`,minLength:1,maxLength:80,description:`Short user-facing description.`}},' +
     'required:[`code`]}}';
+  const COMPUTER_USE_NODE_REPL_NAMESPACE_GROUP_SPEC =
+    '{type:`namespace`,name:`node_repl`,description:`Node REPL tools for Computer Use.`,' +
+    `tools:[${COMPUTER_USE_NODE_REPL_NAMESPACE_TOOL_SPEC}]}`;
+  function computerUseNodeReplDynamicToolsTopLevelReplacement(...args) {
+    const {
+      item,
+      eager,
+      supportsNamespaces,
+      appNamespace,
+      functionTools,
+      namespaceGroups,
+    } = args.at(-1);
+    return (
+      `].map(${item}=>({type:\`function\`,...${item},` +
+      `...${eager}.has(${item}.name)?{}:{deferLoading:!0}}));` +
+      `return ${supportsNamespaces}?[{type:\`namespace\`,name:${appNamespace},` +
+      `description:\`Tools provided by the Codex app.\`,tools:${functionTools}},` +
+      `...${namespaceGroups},${COMPUTER_USE_NODE_REPL_NAMESPACE_GROUP_SPEC}]` +
+      `:${functionTools}.concat([${COMPUTER_USE_NODE_REPL_NAMESPACE_TOOL_SPEC}])` +
+      COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_PATCH_MARKER
+    );
+  }
   function patchComputerUseNodeReplDynamicTools(content) {
     if (content.includes(COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_PATCH_MARKER)) {
       return { content, alreadyCorrect: true, patched: false };
@@ -2117,23 +2143,8 @@ try {
     }
 
     next = content.replace(
-      COMPUTER_USE_NODE_REPL_DYNAMIC_TOOLS_NAMESPACE_RE,
-      (_match, mapExpression) =>
-        `${mapExpression}},{type:\`namespace\`,name:\`node_repl\`,` +
-        'description:`Node REPL tools for Computer Use.`,' +
-        `tools:[${COMPUTER_USE_NODE_REPL_NAMESPACE_TOOL_SPEC}]}` +
-        COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_PATCH_MARKER +
-        ']',
-    );
-    if (next !== content) {
-      return { content: next, alreadyCorrect: false, patched: true };
-    }
-
-    next = content.replace(
-      COMPUTER_USE_NODE_REPL_DYNAMIC_TOOLS_ARRAY_RE,
-      (match) =>
-        `,{type:\`namespace\`,name:\`node_repl\`,description:\`Node REPL tools for Computer Use.\`,` +
-        `tools:[${COMPUTER_USE_NODE_REPL_NAMESPACE_TOOL_SPEC}]}${COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_PATCH_MARKER}${match}`,
+      COMPUTER_USE_NODE_REPL_DYNAMIC_TOOLS_TOP_LEVEL_RE,
+      computerUseNodeReplDynamicToolsTopLevelReplacement,
     );
     return { content: next, alreadyCorrect: false, patched: next !== content };
   }

@@ -1245,6 +1245,8 @@ let computerUseInputMentionPatched = false;
 let computerUseInputSkillPatched = false;
 let computerUseThreadStartToolSearchPatched = false;
 let computerUseNodeReplDynamicToolPatched = false;
+let computerUseNodeReplNamespaceGroupSeen = false;
+let computerUseNodeReplNamespaceGroupTopLevel = false;
 let computerUseNodeReplDynamicToolCallPatched = false;
 let archivedThreadsPartialListPatched = false;
 let archivedThreadsCacheFallbackPatched = false;
@@ -1336,6 +1338,13 @@ for (const entry of javaScriptEntries) {
     content.includes('name:`js`') &&
     (content.includes('This forwards to node_repl.js') || content.includes('type:`namespace`,name:`node_repl`')) &&
     content.includes('persistent Node REPL');
+  // A namespace group is only legal alongside the sibling groups the app-server
+  // deserializes as namespaces. Nested inside a group's `tools:` array it fails
+  // thread/start with "unknown variant `namespace`, expected `function`".
+  computerUseNodeReplNamespaceGroupSeen ||=
+    content.includes('type:`namespace`,name:`node_repl`');
+  computerUseNodeReplNamespaceGroupTopLevel ||=
+    /\{type:`namespace`,name:`node_repl`,description:`Node REPL tools for Computer Use\.`,tools:\[\{type:`function`,name:`js`[\s\S]{0,900}?\}\]\}\]:[A-Za-z_$][\w$]*\.concat\(\[\{type:`function`,name:`js`/.test(content);
   computerUseNodeReplDynamicToolCallPatched ||=
     content.includes(COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_PATCH_MARKER) &&
     hasComputerUseNodeReplDynamicToolCallBridge(content) &&
@@ -1552,6 +1561,12 @@ if (!computerUseThreadStartToolSearchPatched) {
 }
 if (!computerUseNodeReplDynamicToolPatched) {
   throw new Error('Computer Use node_repl.js dynamic tool exposure marker is missing.');
+}
+if (computerUseNodeReplNamespaceGroupSeen && !computerUseNodeReplNamespaceGroupTopLevel) {
+  throw new Error(
+    'Computer Use node_repl namespace group is nested inside a function-only tools array; ' +
+    'app-server rejects thread/start with "unknown variant `namespace`, expected `function`".',
+  );
 }
 if (!computerUseNodeReplDynamicToolCallPatched) {
   throw new Error('Computer Use node_repl.js dynamic tool call bridge marker is missing.');
