@@ -12,7 +12,7 @@
  *    Electron exposes this flag only inside MSIX containers.  Codex checks it
  *    for telemetry and build-type reporting.  We inject it at the top of the
  *    main-process entry point.  The same bootstrap patch also defaults the
- *    Windows Computer Use process environment gate so direct Codex.exe
+ *    Windows Computer Use process environment gate so direct ChatGPT.exe
  *    launches get the same runtime features as the provided launchers, and
  *    stubs the electron_browser_msix_updater native binding so that reading
  *    electron.autoUpdater (which windowsStore=true routes to the MSIX updater)
@@ -283,7 +283,7 @@ const COMPUTER_USE_ENV_DEFAULT =
 // the MSIX updater (lib/browser/api/auto-updater/auto-updater-msix.ts), whose
 // module load calls process._linkedBinding("electron_browser_msix_updater").
 // That binding is only linked inside a real MSIX container, so a standalone
-// Codex.exe aborts at bootstrap with "No such binding was linked". Newer builds
+// ChatGPT.exe aborts at bootstrap with "No such binding was linked". Newer builds
 // (>= 26.609) read electron.autoUpdater during startup via a __toESM namespace
 // copy that the Sentry-breadcrumb needle patch does not cover, so we stub the
 // binding itself: any electron_browser_msix_updater lookup returns a chainable
@@ -1380,7 +1380,7 @@ try {
   // The main-process entry carries the load-bearing bootstrap patches
   // (process.windowsStore, the MSIX updater binding stub, the Computer Use
   // env default and the init.cjs require). Without them a standalone
-  // Codex.exe crashes at startup, so a missing entry must fail the build
+  // ChatGPT.exe crashes at startup, so a missing entry must fail the build
   // instead of silently shipping a broken package.
   const mainEntry = resolveMainEntry(tmpDir);
   if (!mainEntry) {
@@ -1394,7 +1394,7 @@ try {
 
   if (isAlreadyPatched(mainEntry)) {
     if (refreshMainEntryPatch(mainEntry)) {
-      log('Main entry patch refreshed for direct Codex.exe Computer Use launch.');
+      log(`Main entry patch refreshed for direct ${MAIN_EXECUTABLE_NAME} Computer Use launch.`);
     } else {
       log('Main entry already patched.');
     }
