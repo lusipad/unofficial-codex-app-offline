@@ -1,84 +1,160 @@
-// Scan ~/.codex/sessions/ for JSONL session files and import any
-// threads missing from the Desktop's databases.  Also ensure every
-// thread in state_5.sqlite has a catalog entry with a high
-// observation_sequence so Desktop's cold-full-sweep cannot hide it.
+// Import session files that are genuinely missing from Codex databases.
+// This is a risky recovery tool and must never be run implicitly.
 //
-// Usage: node repair-threads.js
-// Exit 0 on success, 1 on error.
+// Usage:
+//   node repair-threads.js --confirm-risk
+//   node repair-threads.js --restore --confirm-risk
 
 "use strict";
-const { DatabaseSync } = require("node:sqlite");
-const path = require("node:path");
+
+const sqlite = require("node:sqlite");
+const { DatabaseSync } = sqlite;
 const fs = require("node:fs");
-const os = require("os");
+const os = require("node:os");
+const path = require("node:path");
+const { isDeepStrictEqual } = require("node:util");
 
-const home = process.env.CODEX_HOME || path.join(os.homedir(), ".codex");
-const sessionsDir = path.join(home, "sessions");
-const sqliteDir = path.join(home, "sqlite");
-const appServerDbPath = path.join(home, "state_5.sqlite");
-const desktopDbPath = path.join(sqliteDir, "state_5.sqlite");
-
-// observation_sequence ceiling — must be far higher than any value the
-// Desktop's nextObservationSequence() will ever reach, so completeScan's
-// "observation_sequence <= ?" check never matches our pinned entries.
-const PINNED_SEQ = 2147483647;
-const RECENT_LIST_MODEL_PROVIDER = "custom";
-const RECENT_LIST_SOURCE = "cli";
-const RECENT_LIST_THREAD_SOURCE = "user";
-const DEFAULT_MODEL = "gpt-5.5";
-const FULL_ACCESS_SANDBOX_POLICY = '{"type":"disabled"}';
-const FULL_ACCESS_APPROVAL_MODE = "never";
 const SESSION_META_BACKUP_SUFFIX = ".bak-repair-session-meta";
+const UUID_JSONL_RE =
+  /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/i;
+const CONSERVATIVE_APPROVAL_MODE = "on-request";
+const CONSERVATIVE_SANDBOX_POLICY = JSON.stringify({
+  type: "managed",
+  file_system: {
+    type: "restricted",
+    entries: [
+      {
+        path: { type: "special", value: { kind: "root" } },
+        access: "read",
+      },
+    ],
+  },
+  network: "restricted",
+});
 
-if (!fs.existsSync(sessionsDir)) {
-  console.log("No sessions directory found.");
-  process.exit(0);
+function printUsage() {
+  console.error("用法 / Usage:");
+  console.error("  node repair-threads.js --confirm-risk");
+  console.error("  node repair-threads.js --restore --confirm-risk");
 }
-if (!fs.existsSync(appServerDbPath)) {
-  console.log("App-server database not found.");
-  process.exit(1);
-}
 
-// ---- 1. Collect thread metadata from JSONL files --------------------------
-
-const UUID_RE =
-  /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/;
-
-function walkSessionFiles(dir) {
-  const results = [];
-  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-    const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) {
-      results.push(...walkSessionFiles(full));
-    } else if (entry.name.endsWith(".jsonl") && UUID_RE.test(entry.name)) {
-      results.push(full);
+function parseArguments(argv) {
+  const options = { confirmRisk: false, restore: false };
+  for (const argument of argv) {
+    if (argument === "--confirm-risk") {
+      options.confirmRisk = true;
+    } else if (argument === "--restore") {
+      options.restore = true;
+    } else {
+      throw new Error(`未知参数 / Unknown argument: ${argument}`);
     }
   }
-  return results;
+  return options;
+}
+
+let options;
+try {
+  options = parseArguments(process.argv.slice(2));
+} catch (error) {
+  console.error(error.message);
+  printUsage();
+  process.exitCode = 2;
+}
+
+if (options && !options.confirmRisk) {
+  console.error(
+    "风险警告 / Risk warning: 此工具会修改本地会话数据库；请先自行备份并确认理解风险。"
+  );
+  console.error(
+    "This tool modifies local session databases. Back up your data and use it with caution."
+  );
+  console.error(
+    "运行前请关闭 Codex App 和所有 Codex CLI 进程 / Close Codex App and all Codex CLI processes before running."
+  );
+  printUsage();
+  process.exitCode = 2;
+} else if (options) {
+  console.error(
+    "风险警告 / Risk warning: 已显式确认，仍请慎用；工具将先创建完整 SQLite 快照。"
+  );
+  console.error(
+    "请确认 Codex App 和所有 Codex CLI 进程均已关闭，避免数据库句柄或 WAL 阻止恢复。 / Ensure all Codex App and CLI processes are closed so open handles or WAL files cannot block recovery."
+  );
+  main(options).catch((error) => {
+    console.error(`会话修复失败 / Thread repair failed: ${error.message}`);
+    process.exitCode = 1;
+  });
+}
+
+async function main({ restore }) {
+  // Do not resolve or inspect CODEX_HOME until the explicit confirmation above.
+  const home = process.env.CODEX_HOME || path.join(os.homedir(), ".codex");
+  const paths = {
+    sessions: path.join(home, "sessions"),
+    appServer: path.join(home, "state_5.sqlite"),
+    desktop: path.join(home, "sqlite", "state_5.sqlite"),
+    sqliteDir: path.join(home, "sqlite"),
+  };
+
+  if (restore) {
+    await restoreLegacyRepair(paths);
+  } else {
+    await importMissingThreads(paths);
+  }
+}
+
+function quoteIdentifier(value) {
+  return `"${String(value).replaceAll('"', '""')}"`;
+}
+
+function tableInfo(db, tableName) {
+  return db.prepare(`PRAGMA table_info(${quoteIdentifier(tableName)})`).all();
+}
+
+function tableExists(db, tableName) {
+  return Boolean(
+    db
+      .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?")
+      .get(tableName)
+  );
+}
+
+function withImmediateTransaction(db, callback) {
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    const result = callback();
+    db.exec("COMMIT");
+    return result;
+  } catch (error) {
+    try {
+      db.exec("ROLLBACK");
+    } catch {}
+    throw error;
+  }
 }
 
 function readFirstLine(filePath) {
-  const CHUNK = 256 * 1024;
+  const chunkSize = 256 * 1024;
   const fd = fs.openSync(filePath, "r");
   try {
-    const buf = Buffer.alloc(CHUNK);
-    const n = fs.readSync(fd, buf, 0, CHUNK, 0);
-    const text = buf.toString("utf8", 0, n);
-    const nl = text.indexOf("\n");
-    return nl === -1 ? text : text.slice(0, nl);
+    const buffer = Buffer.alloc(chunkSize);
+    const bytesRead = fs.readSync(fd, buffer, 0, chunkSize, 0);
+    const text = buffer.toString("utf8", 0, bytesRead);
+    const newline = text.indexOf("\n");
+    return newline === -1 ? text : text.slice(0, newline);
   } finally {
     fs.closeSync(fd);
   }
 }
 
 function readInitialLines(filePath, maxLines = 80) {
-  const CHUNK = 1024 * 1024;
+  const chunkSize = 1024 * 1024;
   const fd = fs.openSync(filePath, "r");
   try {
-    const buf = Buffer.alloc(CHUNK);
-    const n = fs.readSync(fd, buf, 0, CHUNK, 0);
-    return buf
-      .toString("utf8", 0, n)
+    const buffer = Buffer.alloc(chunkSize);
+    const bytesRead = fs.readSync(fd, buffer, 0, chunkSize, 0);
+    return buffer
+      .toString("utf8", 0, bytesRead)
       .split(/\r?\n/)
       .slice(0, maxLines)
       .filter(Boolean);
@@ -87,7 +163,21 @@ function readInitialLines(filePath, maxLines = 80) {
   }
 }
 
-function toEpochMs(value) {
+function walkFiles(dir, predicate) {
+  if (!fs.existsSync(dir)) return [];
+  const results = [];
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const fullPath = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      results.push(...walkFiles(fullPath, predicate));
+    } else if (predicate(entry.name)) {
+      results.push(fullPath);
+    }
+  }
+  return results;
+}
+
+function toEpochMs(value, fallback = Date.now()) {
   if (typeof value === "number" && Number.isFinite(value)) {
     return value > 20_000_000_000 ? value : value * 1000;
   }
@@ -95,11 +185,7 @@ function toEpochMs(value) {
     const parsed = Date.parse(value);
     if (Number.isFinite(parsed)) return parsed;
   }
-  return Date.now();
-}
-
-function toEpochSeconds(value) {
-  return Math.floor(toEpochMs(value) / 1000);
+  return fallback;
 }
 
 function firstTextFromInput(input) {
@@ -119,15 +205,18 @@ function firstTextFromInput(input) {
 function readFirstUserMessage(filePath) {
   try {
     for (const line of readInitialLines(filePath)) {
-      const obj = JSON.parse(line);
-      if (obj.type === "event_msg" && obj.payload?.type === "user_message") {
-        return String(obj.payload.message || "").trim();
+      const record = JSON.parse(line);
+      if (
+        record.type === "event_msg" &&
+        record.payload?.type === "user_message"
+      ) {
+        return String(record.payload.message || "").trim();
       }
-      if (obj.type === "user_message") {
-        return String(obj.payload?.message || obj.message || "").trim();
+      if (record.type === "user_message") {
+        return String(record.payload?.message || record.message || "").trim();
       }
-      if (obj.type === "turn_context" || obj.type === "response_item") {
-        const text = firstTextFromInput(obj.payload?.input || obj.input);
+      if (record.type === "turn_context" || record.type === "response_item") {
+        const text = firstTextFromInput(record.payload?.input || record.input);
         if (text) return text;
       }
     }
@@ -135,426 +224,817 @@ function readFirstUserMessage(filePath) {
   return "";
 }
 
-function makeShortText(text, fallback) {
-  const raw = String(text || fallback || "").replace(/\s+/g, " ").trim();
-  if (!raw) return "";
-  return raw.length <= 80 ? raw : raw.slice(0, 79).trimEnd() + "…";
+function shortText(value, fallback) {
+  const text = String(value || fallback || "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return text.length <= 80 ? text : `${text.slice(0, 79).trimEnd()}…`;
+}
+
+function serializeSource(source) {
+  if (typeof source === "string") return source;
+  if (source !== undefined) return JSON.stringify(source);
+  return "unknown";
+}
+
+function serializeOptionalValue(value) {
+  if (value == null || typeof value === "string") return value;
+  return JSON.stringify(value);
+}
+
+function sourceCatalogValues(source) {
+  const serialized = serializeSource(source);
+  if (typeof source === "string") {
+    const trimmed = source.trim();
+    if (!trimmed.startsWith("{")) {
+      return { kind: trimmed || "unknown", detail: null };
+    }
+    try {
+      source = JSON.parse(trimmed);
+    } catch {
+      return { kind: "unknown", detail: serialized };
+    }
+  }
+  if (source && typeof source === "object" && !Array.isArray(source)) {
+    const keys = Object.keys(source);
+    const kind = keys.includes("subagent")
+      ? "subagent"
+      : keys.includes("custom")
+        ? "custom"
+        : keys[0] || "unknown";
+    return { kind, detail: serialized };
+  }
+  return { kind: "unknown", detail: serialized };
 }
 
 function parseSessionMeta(filePath) {
   try {
-    const firstLine = readFirstLine(filePath);
-    const obj = JSON.parse(firstLine);
-    if (obj.type !== "session_meta") return null;
-    const p = obj.payload;
-    const createdMs = toEpochMs(p.timestamp);
-    const updatedMs = fs.statSync(filePath).mtimeMs;
+    const record = JSON.parse(readFirstLine(filePath));
+    if (record.type !== "session_meta" || !record.payload?.id) return null;
+    const payload = record.payload;
+    const stat = fs.statSync(filePath);
+    const createdAtMs = toEpochMs(payload.timestamp || record.timestamp, stat.mtimeMs);
+    const updatedAtMs = Math.round(stat.mtimeMs);
     const firstUserMessage = readFirstUserMessage(filePath);
-    const title = makeShortText(firstUserMessage, p.cwd || p.id);
     return {
-      id: p.id,
+      id: payload.id,
       rollout_path: filePath,
-      created_at: Math.floor(createdMs / 1000),
-      updated_at: Math.floor(updatedMs / 1000),
-      created_at_ms: Math.round(createdMs),
-      updated_at_ms: Math.round(updatedMs),
-      source: RECENT_LIST_SOURCE,
-      model_provider: RECENT_LIST_MODEL_PROVIDER,
-      cwd: p.cwd || "",
-      title,
-      cli_version: p.cli_version || null,
-      git_branch: null,
+      created_at: Math.floor(createdAtMs / 1000),
+      updated_at: Math.floor(updatedAtMs / 1000),
+      created_at_ms: Math.round(createdAtMs),
+      updated_at_ms: updatedAtMs,
+      source: serializeSource(payload.source),
+      model_provider:
+        payload.model_provider == null ? "" : String(payload.model_provider),
+      cwd: payload.cwd || "",
+      title: shortText(firstUserMessage, payload.cwd || payload.id),
+      sandbox_policy: CONSERVATIVE_SANDBOX_POLICY,
+      approval_mode: CONSERVATIVE_APPROVAL_MODE,
+      cli_version: payload.cli_version || "",
+      git_branch: payload.git_branch || null,
       first_user_message: firstUserMessage,
       preview: firstUserMessage,
-      model: p.model || DEFAULT_MODEL,
-      thread_source: p.thread_source || RECENT_LIST_THREAD_SOURCE,
+      model: payload.model == null ? null : String(payload.model),
+      thread_source: serializeOptionalValue(payload.thread_source),
     };
   } catch {
     return null;
   }
 }
 
-const jsonlFiles = walkSessionFiles(sessionsDir);
-const sessionMetas = [];
-for (const f of jsonlFiles) {
-  const meta = parseSessionMeta(f);
-  if (meta) sessionMetas.push(meta);
+function collectSessionMetas(sessionsDir) {
+  const byId = new Map();
+  for (const filePath of walkFiles(sessionsDir, (name) => UUID_JSONL_RE.test(name))) {
+    const meta = parseSessionMeta(filePath);
+    if (!meta) continue;
+    const previous = byId.get(meta.id);
+    if (!previous || meta.updated_at_ms > previous.updated_at_ms) {
+      byId.set(meta.id, meta);
+    }
+  }
+  return [...byId.values()];
 }
 
-console.log(`Found ${sessionMetas.length} session files.`);
+function rowsById(db, columns = ["*"]) {
+  const selection =
+    columns.length === 1 && columns[0] === "*"
+      ? "*"
+      : columns.map(quoteIdentifier).join(", ");
+  return new Map(
+    db
+      .prepare(`SELECT ${selection} FROM threads`)
+      .all()
+      .map((row) => [row.id, row])
+  );
+}
 
-function readVisibleThreadIds(dbPath) {
-  const db = new DatabaseSync(dbPath, { readOnly: true });
+function makeInsertSpec(info, values, label) {
+  const columns = [];
+  const parameters = [];
+  for (const column of info) {
+    if (Object.hasOwn(values, column.name) && values[column.name] !== undefined) {
+      columns.push(column.name);
+      parameters.push(values[column.name]);
+    }
+  }
+
+  for (const column of info) {
+    if (
+      column.pk === 0 &&
+      column.notnull === 1 &&
+      column.dflt_value == null &&
+      !columns.includes(column.name)
+    ) {
+      throw new Error(`${label} 缺少必填列 / missing required column: ${column.name}`);
+    }
+  }
+  if (!columns.includes("id")) {
+    throw new Error(`${label} 缺少 id / missing id`);
+  }
+  return { columns, parameters };
+}
+
+function insertIfMissing(db, spec) {
+  const columnList = spec.columns.map(quoteIdentifier).join(", ");
+  const placeholders = spec.columns.map(() => "?").join(", ");
+  const id = spec.parameters[spec.columns.indexOf("id")];
+  return db
+    .prepare(
+      `INSERT INTO threads (${columnList}) ` +
+        `SELECT ${placeholders} WHERE NOT EXISTS (` +
+        `SELECT 1 FROM threads WHERE id = ?)`
+    )
+    .run(...spec.parameters, id).changes;
+}
+
+function findCatalogPath(sqliteDir) {
+  for (const name of ["codex-dev.db", "codex.db"]) {
+    const candidate = path.join(sqliteDir, name);
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  return null;
+}
+
+function inspectCatalog(catalogPath, candidateIds) {
+  if (!catalogPath) return { ready: false, missingIds: [] };
+  const db = new DatabaseSync(catalogPath, { readOnly: true });
   try {
-    return new Set(
+    const requiredTables = [
+      "local_thread_catalog",
+      "local_thread_catalog_sync_state",
+      "local_thread_catalog_metadata",
+    ];
+    if (!requiredTables.every((table) => tableExists(db, table))) {
+      return { ready: false, missingIds: [] };
+    }
+    const syncState = db
+      .prepare(
+        "SELECT observation_sequence FROM local_thread_catalog_sync_state " +
+          "WHERE host_id = 'local'"
+      )
+      .get();
+    const metadata = db
+      .prepare("SELECT catalog_revision FROM local_thread_catalog_metadata WHERE id = 1")
+      .get();
+    if (!syncState || !metadata) return { ready: false, missingIds: [] };
+    const existing = new Set(
       db
-        .prepare("SELECT id FROM threads WHERE archived = 0")
+        .prepare(
+          "SELECT thread_id FROM local_thread_catalog WHERE host_id = 'local'"
+        )
         .all()
-        .map((r) => r.id)
+        .map((row) => row.thread_id)
     );
+    return {
+      ready: true,
+      missingIds: candidateIds.filter((id) => !existing.has(id)),
+    };
   } finally {
     db.close();
   }
 }
 
-function normalizeSessionMetaFiles(visibleThreadIds) {
-  let changed = 0;
-  let skipped = 0;
+function rowIsVisible(row) {
+  return row && (row.archived == null || Number(row.archived) === 0);
+}
 
-  for (const meta of sessionMetas) {
-    if (!visibleThreadIds.has(meta.id)) continue;
+async function importMissingThreads(paths) {
+  if (!fs.existsSync(paths.sessions)) {
+    console.log("未找到 sessions 目录 / No sessions directory found.");
+    return;
+  }
+  if (!fs.existsSync(paths.appServer)) {
+    throw new Error("未找到 App-server 数据库 / App-server database not found");
+  }
 
-    let firstLine;
+  const sessions = collectSessionMetas(paths.sessions);
+  console.log(`发现 ${sessions.length} 个会话文件 / Found ${sessions.length} session files.`);
+
+  const appRead = new DatabaseSync(paths.appServer, { readOnly: true });
+  let appInfo;
+  let appRows;
+  try {
+    appInfo = tableInfo(appRead, "threads");
+    if (appInfo.length === 0) throw new Error("App-server threads 表不存在");
+    appRows = rowsById(appRead);
+  } finally {
+    appRead.close();
+  }
+
+  let desktopInfo = null;
+  let desktopRows = new Map();
+  if (fs.existsSync(paths.desktop)) {
+    const desktopRead = new DatabaseSync(paths.desktop, { readOnly: true });
     try {
-      firstLine = readFirstLine(meta.rollout_path);
-      const obj = JSON.parse(firstLine);
-      if (obj.type !== "session_meta" || obj.payload == null) {
-        skipped++;
+      desktopInfo = tableInfo(desktopRead, "threads");
+      if (desktopInfo.length > 0) desktopRows = rowsById(desktopRead);
+    } finally {
+      desktopRead.close();
+    }
+  }
+
+  const appColumnNames = new Set(appInfo.map((column) => column.name));
+  const desktopCommonColumns = desktopInfo
+    ? desktopInfo
+        .map((column) => column.name)
+        .filter((name) => appColumnNames.has(name))
+    : [];
+  const appInsertSpecs = [];
+  const prospectiveRows = new Map(appRows);
+
+  for (const session of sessions) {
+    if (appRows.has(session.id)) continue;
+    const desktopRow = desktopRows.get(session.id);
+    const values = desktopRow
+      ? Object.fromEntries(desktopCommonColumns.map((name) => [name, desktopRow[name]]))
+      : session;
+    appInsertSpecs.push(
+      makeInsertSpec(appInfo, values, `App-server thread ${session.id}`)
+    );
+    prospectiveRows.set(session.id, desktopRow || { ...session, archived: 0 });
+  }
+
+  const desktopMissingIds = desktopInfo
+    ? sessions
+        .map((session) => session.id)
+        .filter((id) => prospectiveRows.has(id) && !desktopRows.has(id))
+    : [];
+  const visibleCandidateIds = sessions
+    .map((session) => session.id)
+    .filter((id) => rowIsVisible(prospectiveRows.get(id)));
+  const catalogPath = findCatalogPath(paths.sqliteDir);
+  const catalogPlan = inspectCatalog(catalogPath, visibleCandidateIds);
+  if (catalogPath && !catalogPlan.ready) {
+    console.warn(
+      "Catalog schema/state 不完整，已跳过 catalog 导入 / Catalog schema or state is incomplete; catalog import skipped."
+    );
+  }
+
+  const databasesToModify = [];
+  if (appInsertSpecs.length > 0) databasesToModify.push(paths.appServer);
+  if (desktopMissingIds.length > 0) databasesToModify.push(paths.desktop);
+  if (catalogPlan.missingIds.length > 0) databasesToModify.push(catalogPath);
+  const backups = await backupDatabases(databasesToModify);
+
+  try {
+    let appInserted = 0;
+    if (appInsertSpecs.length > 0) {
+      const appDb = new DatabaseSync(paths.appServer);
+      try {
+        appInserted = withImmediateTransaction(appDb, () => {
+          let inserted = 0;
+          for (const spec of appInsertSpecs) inserted += insertIfMissing(appDb, spec);
+          return inserted;
+        });
+      } finally {
+        appDb.close();
+      }
+    }
+
+    let desktopInserted = 0;
+    if (desktopMissingIds.length > 0) {
+      desktopInserted = copyAppRowsToDesktop(
+        paths.appServer,
+        paths.desktop,
+        desktopMissingIds
+      );
+    }
+
+    let catalogInserted = 0;
+    if (catalogPlan.missingIds.length > 0) {
+      catalogInserted = insertMissingCatalogRows(
+        paths.appServer,
+        catalogPath,
+        catalogPlan.missingIds
+      );
+    }
+
+    console.log(
+      `修复完成 / Repair complete: App-server +${appInserted}, Desktop +${desktopInserted}, Catalog +${catalogInserted}.`
+    );
+  } catch (error) {
+    compensateAndRethrow(backups, error);
+  }
+}
+
+function copyAppRowsToDesktop(appPath, desktopPath, ids) {
+  const appDb = new DatabaseSync(appPath, { readOnly: true });
+  const desktopDb = new DatabaseSync(desktopPath);
+  try {
+    const appInfo = tableInfo(appDb, "threads");
+    const desktopInfo = tableInfo(desktopDb, "threads");
+    const appColumns = new Set(appInfo.map((column) => column.name));
+    const commonColumns = desktopInfo
+      .map((column) => column.name)
+      .filter((name) => appColumns.has(name));
+    const appRows = rowsById(appDb, commonColumns);
+    const idSet = new Set(ids);
+    return withImmediateTransaction(desktopDb, () => {
+      let inserted = 0;
+      for (const [id, row] of appRows) {
+        if (!idSet.has(id)) continue;
+        const spec = makeInsertSpec(desktopInfo, row, `Desktop thread ${id}`);
+        inserted += insertIfMissing(desktopDb, spec);
+      }
+      return inserted;
+    });
+  } finally {
+    desktopDb.close();
+    appDb.close();
+  }
+}
+
+function insertMissingCatalogRows(appPath, catalogPath, candidateIds) {
+  const appDb = new DatabaseSync(appPath, { readOnly: true });
+  const catalogDb = new DatabaseSync(catalogPath);
+  try {
+    const appRows = rowsById(appDb);
+    const candidateSet = new Set(candidateIds);
+    return withImmediateTransaction(catalogDb, () => {
+      const syncState = catalogDb
+        .prepare(
+          "SELECT observation_sequence FROM local_thread_catalog_sync_state " +
+            "WHERE host_id = 'local'"
+        )
+        .get();
+      if (!syncState) throw new Error("Catalog sync_state(local) 不存在");
+      if (
+        !catalogDb
+          .prepare("SELECT 1 FROM local_thread_catalog_metadata WHERE id = 1")
+          .get()
+      ) {
+        throw new Error("Catalog metadata(1) 不存在");
+      }
+
+      const existing = new Set(
+        catalogDb
+          .prepare(
+            "SELECT thread_id FROM local_thread_catalog WHERE host_id = 'local'"
+          )
+          .all()
+          .map((row) => row.thread_id)
+      );
+      const insert = catalogDb.prepare(`
+        INSERT INTO local_thread_catalog
+          (host_id, thread_id, display_title, source_created_at,
+           source_updated_at, cwd, source_kind, source_detail,
+           model_provider, git_branch, observation_sequence, missing_candidate)
+        VALUES ('local', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+      `);
+      let sequence = Number(syncState.observation_sequence) || 0;
+      let inserted = 0;
+      for (const [id, row] of appRows) {
+        if (!candidateSet.has(id) || existing.has(id) || !rowIsVisible(row)) continue;
+        const source = sourceCatalogValues(row.source);
+        sequence += 1;
+        insert.run(
+          id,
+          shortText(row.title, row.cwd || id),
+          toEpochMs(row.created_at_ms ?? row.created_at),
+          toEpochMs(row.updated_at_ms ?? row.updated_at ?? row.created_at),
+          row.cwd || "",
+          source.kind,
+          source.detail,
+          row.model_provider || "",
+          row.git_branch || null,
+          sequence
+        );
+        inserted += 1;
+      }
+      if (inserted > 0) {
+        catalogDb
+          .prepare(
+            "UPDATE local_thread_catalog_sync_state " +
+              "SET observation_sequence = ? WHERE host_id = 'local'"
+          )
+          .run(sequence);
+        catalogDb
+          .prepare(
+            "UPDATE local_thread_catalog_metadata " +
+              "SET catalog_revision = catalog_revision + 1 WHERE id = 1"
+          )
+          .run();
+      }
+      return inserted;
+    });
+  } finally {
+    catalogDb.close();
+    appDb.close();
+  }
+}
+
+function backupStamp() {
+  return new Date().toISOString().replace(/[-:.]/g, "");
+}
+
+async function backupDatabases(databasePaths) {
+  const uniquePaths = [...new Set(databasePaths.filter(Boolean))];
+  if (uniquePaths.length === 0) return [];
+
+  const baseStamp = backupStamp();
+  let stamp = baseStamp;
+  let attempt = 0;
+  while (
+    uniquePaths.some((dbPath) =>
+      fs.existsSync(`${dbPath}.bak-repair-threads-${stamp}`)
+    )
+  ) {
+    attempt += 1;
+    stamp = `${baseStamp}-${attempt}`;
+  }
+
+  const backupPaths = uniquePaths.map(
+    (dbPath) => `${dbPath}.bak-repair-threads-${stamp}`
+  );
+  for (const backupPath of backupPaths) {
+    if (fs.existsSync(backupPath)) {
+      throw new Error(`备份已存在，拒绝覆盖 / Backup already exists: ${backupPath}`);
+    }
+  }
+
+  for (let index = 0; index < uniquePaths.length; index += 1) {
+    await createDatabaseBackup(uniquePaths[index], backupPaths[index]);
+  }
+  console.log(
+    `已创建 ${backupPaths.length} 个 SQLite 快照 / Created ${backupPaths.length} SQLite snapshot(s), stamp=${stamp}.`
+  );
+  return uniquePaths.map((dbPath, index) => ({
+    backupPath: backupPaths[index],
+    dbPath,
+  }));
+}
+
+async function createDatabaseBackup(dbPath, backupPath) {
+  const sourceDb = new DatabaseSync(dbPath, { readOnly: true });
+  try {
+    if (typeof sqlite.backup === "function") {
+      await sqlite.backup(sourceDb, backupPath);
+    } else {
+      sourceDb.exec(`VACUUM INTO '${backupPath.replaceAll("'", "''")}'`);
+    }
+  } finally {
+    sourceDb.close();
+  }
+
+  assertDatabaseIntegrity(backupPath);
+}
+
+function assertDatabaseIntegrity(dbPath) {
+  const db = new DatabaseSync(dbPath, { readOnly: true });
+  try {
+    const results = db.prepare("PRAGMA integrity_check").all();
+    if (
+      results.length !== 1 ||
+      String(Object.values(results[0])[0]).toLowerCase() !== "ok"
+    ) {
+      throw new Error(`SQLite 完整性校验失败 / integrity check failed: ${dbPath}`);
+    }
+  } finally {
+    db.close();
+  }
+}
+
+function removeSqliteSidecars(dbPath) {
+  for (const suffix of ["-wal", "-shm", "-journal"]) {
+    const sidecar = `${dbPath}${suffix}`;
+    if (fs.existsSync(sidecar)) fs.unlinkSync(sidecar);
+  }
+}
+
+function restoreDatabasesFromBackups(backups) {
+  const failures = [];
+  for (let index = 0; index < backups.length; index += 1) {
+    const { backupPath, dbPath } = backups[index];
+    const temporaryPath = `${dbPath}.restore-repair-threads-${process.pid}-${index}.tmp`;
+    try {
+      fs.copyFileSync(backupPath, temporaryPath, fs.constants.COPYFILE_EXCL);
+      assertDatabaseIntegrity(temporaryPath);
+      removeSqliteSidecars(dbPath);
+      fs.renameSync(temporaryPath, dbPath);
+      removeSqliteSidecars(dbPath);
+      assertDatabaseIntegrity(dbPath);
+    } catch (error) {
+      failures.push(new Error(`${dbPath}: ${error.message}`));
+    } finally {
+      if (fs.existsSync(temporaryPath)) fs.unlinkSync(temporaryPath);
+    }
+  }
+  if (failures.length > 0) {
+    throw new AggregateError(
+      failures,
+      "SQLite 快照补偿失败 / SQLite snapshot compensation failed"
+    );
+  }
+  console.warn(
+    `下游步骤失败，已从快照恢复 ${backups.length} 个数据库 / Downstream step failed; restored ${backups.length} database(s) from snapshots.`
+  );
+}
+
+function compensateAndRethrow(backups, originalError) {
+  try {
+    restoreDatabasesFromBackups(backups);
+  } catch (compensationError) {
+    throw new AggregateError(
+      [originalError, compensationError],
+      "修复失败且快照补偿未完整完成 / Repair and snapshot compensation both failed"
+    );
+  }
+  throw originalError;
+}
+
+function collectRestoreEvidence(sessionsDir) {
+  const evidence = [];
+  let legacyBackupCount = 0;
+  for (const sessionPath of walkFiles(sessionsDir, (name) =>
+    UUID_JSONL_RE.test(name)
+  )) {
+    try {
+      const currentRecord = JSON.parse(readFirstLine(sessionPath));
+      if (currentRecord.type !== "session_meta" || !currentRecord.payload?.id) {
         continue;
       }
 
-      const payload = obj.payload;
-      const alreadyCorrect =
-        payload.model_provider === RECENT_LIST_MODEL_PROVIDER &&
-        payload.source === RECENT_LIST_SOURCE &&
-        payload.thread_source === RECENT_LIST_THREAD_SOURCE;
-      if (alreadyCorrect) continue;
-
-      payload.model_provider = RECENT_LIST_MODEL_PROVIDER;
-      payload.source = RECENT_LIST_SOURCE;
-      payload.thread_source = RECENT_LIST_THREAD_SOURCE;
-
-      const text = fs.readFileSync(meta.rollout_path, "utf8");
-      const nl = text.indexOf("\n");
-      const rest = nl === -1 ? "" : text.slice(nl + 1);
-      const eol = nl > 0 && text[nl - 1] === "\r" ? "\r\n" : "\n";
-      const backupPath = meta.rollout_path + SESSION_META_BACKUP_SUFFIX;
-      if (!fs.existsSync(backupPath)) {
-        fs.copyFileSync(meta.rollout_path, backupPath);
+      let backupPayload = null;
+      const backupPath = `${sessionPath}${SESSION_META_BACKUP_SUFFIX}`;
+      if (fs.existsSync(backupPath)) {
+        try {
+          const backupRecord = JSON.parse(readFirstLine(backupPath));
+          if (
+            backupRecord.type === "session_meta" &&
+            backupRecord.payload?.id === currentRecord.payload.id
+          ) {
+            backupPayload = backupRecord.payload;
+            legacyBackupCount += 1;
+          }
+        } catch {}
       }
-      fs.writeFileSync(meta.rollout_path, JSON.stringify(obj) + eol + rest);
-      changed++;
-    } catch {
-      skipped++;
-    }
-  }
 
-  console.log(
-    `Normalized ${changed} visible session_meta JSONL headers (${skipped} skipped).`
-  );
-}
-
-normalizeSessionMetaFiles(readVisibleThreadIds(appServerDbPath));
-
-// ---- 2. Repair the app-server state_5.sqlite used by thread/list ----------
-
-function repairThreadsDb(dbPath, label) {
-  const db = new DatabaseSync(dbPath);
-  const cols = db
-    .prepare("PRAGMA table_info(threads)")
-    .all()
-    .map((r) => r.name);
-  const existingIds = new Set(
-    db.prepare("SELECT id FROM threads").all().map((r) => r.id)
-  );
-
-  const missing = sessionMetas.filter((m) => !existingIds.has(m.id));
-  console.log(
-    `${label} DB has ${existingIds.size} threads, ${missing.length} missing.`
-  );
-
-  if (missing.length > 0) {
-    const DEFAULTS = {
-      title: "",
-      sandbox_policy: FULL_ACCESS_SANDBOX_POLICY,
-      approval_mode: FULL_ACCESS_APPROVAL_MODE,
-      model_provider: RECENT_LIST_MODEL_PROVIDER,
-      source: RECENT_LIST_SOURCE,
-      thread_source: RECENT_LIST_THREAD_SOURCE,
-      model: DEFAULT_MODEL,
-      first_user_message: "",
-      preview: "",
-    };
-
-    const insertCols = [
-      "id",
-      "rollout_path",
-      "created_at",
-      "updated_at",
-      "source",
-      "model_provider",
-      "cwd",
-      "title",
-      "sandbox_policy",
-      "approval_mode",
-      "cli_version",
-      "git_branch",
-      "created_at_ms",
-      "updated_at_ms",
-      "first_user_message",
-      "preview",
-      "model",
-      "thread_source",
-    ].filter((c) => cols.includes(c));
-
-    const placeholders = insertCols.map(() => "?").join(", ");
-    const insertStmt = db.prepare(
-      `INSERT OR IGNORE INTO threads (${insertCols.join(", ")}) VALUES (${placeholders})`
-    );
-
-    for (const m of missing) {
-      insertStmt.run(...insertCols.map((c) => m[c] ?? DEFAULTS[c] ?? null));
-    }
-
-    console.log(`Imported ${missing.length} threads into ${label} DB.`);
-  }
-
-  function hasCol(name) {
-    return cols.includes(name);
-  }
-
-  const normalizeSets = [
-    "created_at = CASE WHEN created_at > 20000000000 THEN CAST(created_at / 1000 AS INTEGER) ELSE CAST(created_at AS INTEGER) END",
-    "updated_at = CASE WHEN updated_at > 20000000000 THEN CAST(updated_at / 1000 AS INTEGER) ELSE CAST(updated_at AS INTEGER) END",
-    "model_provider = ?",
-    "source = ?",
-  ];
-  const normalizeParams = [RECENT_LIST_MODEL_PROVIDER, RECENT_LIST_SOURCE];
-
-  if (hasCol("created_at_ms")) {
-    normalizeSets.push(
-      "created_at_ms = CASE WHEN created_at_ms > 20000000000000 THEN CAST(created_at_ms / 1000 AS INTEGER) WHEN created_at_ms IS NULL OR created_at_ms < 20000000000 THEN CAST((CASE WHEN created_at > 20000000000 THEN created_at ELSE created_at * 1000 END) AS INTEGER) ELSE CAST(created_at_ms AS INTEGER) END"
-    );
-  }
-  if (hasCol("updated_at_ms")) {
-    normalizeSets.push(
-      "updated_at_ms = CASE WHEN updated_at_ms > 20000000000000 THEN CAST(updated_at_ms / 1000 AS INTEGER) WHEN updated_at_ms IS NULL OR updated_at_ms < 20000000000 THEN CAST((CASE WHEN updated_at > 20000000000 THEN updated_at ELSE updated_at * 1000 END) AS INTEGER) ELSE CAST(updated_at_ms AS INTEGER) END"
-    );
-  }
-  if (hasCol("thread_source")) {
-    normalizeSets.push("thread_source = ?");
-    normalizeParams.push(RECENT_LIST_THREAD_SOURCE);
-  }
-  if (hasCol("model")) {
-    normalizeSets.push("model = COALESCE(NULLIF(model, ''), ?)");
-    normalizeParams.push(DEFAULT_MODEL);
-  }
-  if (hasCol("sandbox_policy")) {
-    normalizeSets.push("sandbox_policy = ?");
-    normalizeParams.push(FULL_ACCESS_SANDBOX_POLICY);
-  }
-  if (hasCol("approval_mode")) {
-    normalizeSets.push("approval_mode = ?");
-    normalizeParams.push(FULL_ACCESS_APPROVAL_MODE);
-  }
-  if (hasCol("first_user_message")) {
-    normalizeSets.push(
-      "first_user_message = COALESCE(NULLIF(first_user_message, ''), NULLIF(preview, ''), NULLIF(title, ''), cwd)"
-    );
-  }
-  if (hasCol("preview")) {
-    normalizeSets.push(
-      "preview = COALESCE(NULLIF(preview, ''), NULLIF(first_user_message, ''), NULLIF(title, ''), cwd)"
-    );
-  }
-  if (hasCol("title")) {
-    normalizeSets.push(
-      "title = COALESCE(NULLIF(title, ''), NULLIF(first_user_message, ''), NULLIF(preview, ''), cwd)"
-    );
-  }
-
-  const normalized = db
-    .prepare(
-      `UPDATE threads SET ${normalizeSets.join(", ")} WHERE archived = 0`
-    )
-    .run(...normalizeParams);
-  console.log(
-    `Normalized ${normalized.changes} visible ${label} DB threads for default recent-list discovery.`
-  );
-
-  db.close();
-}
-
-repairThreadsDb(appServerDbPath, "App-server");
-
-// Keep the legacy Desktop sqlite copy in sync when present. Deep links and
-// older Desktop flows still consult this DB, while current thread/list reads
-// the app-server DB above.
-if (fs.existsSync(desktopDbPath)) {
-  repairThreadsDb(desktopDbPath, "Desktop");
-}
-
-// ---- 4. Update catalog (codex-dev.db) ------------------------------------
-// Desktop with unset BUILD_FLAVOR uses codex-dev.db; we also check codex.db
-// for completeness.
-
-let catalogPath = null;
-for (const name of ["codex-dev.db", "codex.db"]) {
-  const p = path.join(sqliteDir, name);
-  if (fs.existsSync(p)) {
-    catalogPath = p;
-    break;
-  }
-}
-
-if (!catalogPath) {
-  // Create codex-dev.db from scratch — the Desktop would create it too, but
-  // we need it now to pre-populate.
-  catalogPath = path.join(sqliteDir, "codex-dev.db");
-  console.log("Catalog DB not found, creating codex-dev.db.");
-}
-
-const catDb = new DatabaseSync(catalogPath);
-
-// Ensure schema exists (Desktop normally creates these)
-catDb.exec(`
-  CREATE TABLE IF NOT EXISTS local_thread_catalog (
-    host_id TEXT NOT NULL,
-    thread_id TEXT NOT NULL,
-    display_title TEXT,
-    source_created_at REAL,
-    source_updated_at REAL,
-    cwd TEXT DEFAULT '',
-    source_kind TEXT DEFAULT 'unknown',
-    source_detail TEXT,
-    model_provider TEXT DEFAULT '',
-    git_branch TEXT,
-    observation_sequence INTEGER DEFAULT 0,
-    missing_candidate INTEGER DEFAULT 0,
-    PRIMARY KEY (host_id, thread_id)
-  );
-  CREATE TABLE IF NOT EXISTS local_thread_catalog_sync_state (
-    host_id TEXT PRIMARY KEY,
-    watermark_updated_at REAL,
-    initial_build_complete INTEGER DEFAULT 0,
-    observation_sequence INTEGER DEFAULT 0
-  );
-  CREATE TABLE IF NOT EXISTS local_thread_catalog_metadata (
-    id INTEGER PRIMARY KEY,
-    catalog_revision INTEGER DEFAULT 0
-  );
-  INSERT OR IGNORE INTO local_thread_catalog_metadata (id, catalog_revision)
-    VALUES (1, 0);
-  INSERT OR IGNORE INTO local_thread_catalog_sync_state
-    (host_id, watermark_updated_at, initial_build_complete, observation_sequence)
-    VALUES ('local', NULL, 0, 0);
-`);
-
-// ---- 4a. Sync ALL non-archived threads from app-server DB into catalog ----
-
-const stateDb = new DatabaseSync(appServerDbPath, { readOnly: true });
-const allThreads = stateDb
-  .prepare(
-    `SELECT id, title, created_at, updated_at, source,
-            model_provider, cwd, git_branch
-     FROM threads WHERE archived = 0`
-  )
-  .all();
-stateDb.close();
-
-function parseSourceKind(src) {
-  if (typeof src === "string" && !src.startsWith("{")) return src;
-  if (typeof src === "string") {
-    try {
-      const obj = JSON.parse(src);
-      if (typeof obj === "object" && obj !== null) {
-        if ("subagent" in obj) return "subagent";
-        if ("custom" in obj) return "custom";
-      }
+      const currentPayload = currentRecord.payload;
+      const targetPayload = isPollutedThread(currentPayload)
+        ? backupPayload
+        : currentPayload;
+      if (!targetPayload) continue;
+      evidence.push({
+        id: currentPayload.id,
+        sessionPath,
+        backupPayload,
+        targetPayload,
+      });
     } catch {}
   }
-  return "unknown";
+  return { evidence, legacyBackupCount };
 }
 
-function makeDisplayTitle(t) {
-  const raw = (t.title || t.cwd || t.id || "").replace(/\s+/g, " ").trim();
-  if (raw.length === 0) return t.id;
-  return raw.length <= 36 ? raw : raw.slice(0, 35).trimEnd() + "…";
-}
-
-const upsertCat = catDb.prepare(`
-  INSERT INTO local_thread_catalog
-    (host_id, thread_id, display_title, source_created_at, source_updated_at,
-     cwd, source_kind, source_detail, model_provider, git_branch,
-     observation_sequence, missing_candidate)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
-  ON CONFLICT (host_id, thread_id) DO UPDATE SET
-    display_title     = excluded.display_title,
-    source_created_at = excluded.source_created_at,
-    source_updated_at = excluded.source_updated_at,
-    cwd               = excluded.cwd,
-    source_kind       = excluded.source_kind,
-    model_provider    = excluded.model_provider,
-    git_branch        = excluded.git_branch,
-    observation_sequence = excluded.observation_sequence,
-    missing_candidate = 0
-`);
-
-let upserted = 0;
-for (const t of allThreads) {
-  const createdMs = toEpochMs(t.created_at);
-  const updatedMs = toEpochMs(t.updated_at || t.created_at);
-
-  upsertCat.run(
-    "local",
-    t.id,
-    makeDisplayTitle(t),
-    createdMs,
-    updatedMs,
-    t.cwd || "",
-    parseSourceKind(t.source),
-    null,
-    t.model_provider || "",
-    t.git_branch || null,
-    PINNED_SEQ
+function isPollutedThread(row) {
+  return (
+    row?.source === "cli" &&
+    row?.model_provider === "custom" &&
+    row?.thread_source === "user"
   );
-  upserted++;
 }
 
-console.log(
-  `Synced ${upserted} threads from state_5.sqlite into catalog (all pinned at seq=${PINNED_SEQ}).`
-);
+function metadataFieldsEqual(left, right) {
+  for (const field of ["source", "model_provider", "thread_source"]) {
+    if (Object.hasOwn(left, field) !== Object.hasOwn(right, field)) return false;
+    if (Object.hasOwn(left, field) && !isDeepStrictEqual(left[field], right[field])) {
+      return false;
+    }
+  }
+  return true;
+}
 
-// ---- 4b. Pin any pre-existing catalog entries too -------------------------
+function inspectThreadRestorePlans(dbPath, evidence) {
+  if (!fs.existsSync(dbPath)) return { plans: [] };
+  const db = new DatabaseSync(dbPath, { readOnly: true });
+  try {
+    const info = tableInfo(db, "threads");
+    const columns = new Set(info.map((column) => column.name));
+    if (!["source", "model_provider", "thread_source"].every((name) => columns.has(name))) {
+      return { plans: [] };
+    }
+    const threadSourceNotNull =
+      info.find((column) => column.name === "thread_source")?.notnull === 1;
+    const select = db.prepare(
+      "SELECT id, source, model_provider, thread_source FROM threads WHERE id = ?"
+    );
+    const plans = [];
+    for (const item of evidence) {
+      const row = select.get(item.id);
+      if (!isPollutedThread(row)) continue;
+      const payload = item.targetPayload;
+      const desired = {
+        source: serializeSource(payload.source),
+        modelProvider:
+          payload.model_provider == null ? "" : String(payload.model_provider),
+        threadSource:
+          serializeOptionalValue(payload.thread_source) ??
+          (threadSourceNotNull ? "" : null),
+      };
+      if (
+        row.source === desired.source &&
+        row.model_provider === desired.modelProvider &&
+        row.thread_source === desired.threadSource
+      ) {
+        continue;
+      }
+      plans.push({ desired, item });
+    }
+    return { plans };
+  } finally {
+    db.close();
+  }
+}
 
-catDb
-  .prepare(
-    `UPDATE local_thread_catalog
-     SET observation_sequence = ?, missing_candidate = 0
-     WHERE host_id = 'local' AND observation_sequence < ?`
-  )
-  .run(PINNED_SEQ, PINNED_SEQ);
+function inspectCatalogRestorePlans(catalogPath, evidence) {
+  if (!catalogPath) return [];
+  const db = new DatabaseSync(catalogPath, { readOnly: true });
+  try {
+    if (
+      !tableExists(db, "local_thread_catalog") ||
+      !tableExists(db, "local_thread_catalog_metadata")
+    ) {
+      return [];
+    }
+    const select = db.prepare(
+      "SELECT source_kind, model_provider FROM local_thread_catalog " +
+        "WHERE host_id = 'local' AND thread_id = ?"
+    );
+    const plans = [];
+    for (const item of evidence) {
+      const row = select.get(item.id);
+      if (row?.source_kind !== "cli" || row?.model_provider !== "custom") {
+        continue;
+      }
+      const source = sourceCatalogValues(item.targetPayload.source);
+      const modelProvider =
+        item.targetPayload.model_provider == null
+          ? ""
+          : String(item.targetPayload.model_provider);
+      if (row.source_kind === source.kind && row.model_provider === modelProvider) {
+        continue;
+      }
+      plans.push({ item, modelProvider, sourceKind: source.kind });
+    }
+    return plans;
+  } finally {
+    db.close();
+  }
+}
 
-// ---- 4c. Mark initial build complete and set watermark --------------------
+async function restoreLegacyRepair(paths) {
+  const { evidence, legacyBackupCount } = collectRestoreEvidence(paths.sessions);
+  console.log(
+    `发现 ${legacyBackupCount} 份旧版备份、${evidence.length} 份可用元数据证据 / Found ${legacyBackupCount} legacy backup(s) and ${evidence.length} usable metadata record(s).`
+  );
+  console.warn(
+    "警告 / Warning: 旧版没有 SQLite 备份，无法自动恢复 sandbox_policy 或 approval_mode；本次恢复不会修改这些安全字段。"
+  );
 
-const maxTs = catDb
-  .prepare("SELECT MAX(source_updated_at) as v FROM local_thread_catalog")
-  .get();
+  const statePlans = [paths.appServer, paths.desktop]
+    .map((dbPath) => ({ dbPath, ...inspectThreadRestorePlans(dbPath, evidence) }))
+    .filter(({ plans }) => plans.length > 0);
+  const catalogPath = findCatalogPath(paths.sqliteDir);
+  const catalogPlans = inspectCatalogRestorePlans(catalogPath, evidence);
+  const backups = await backupDatabases([
+    ...statePlans.map(({ dbPath }) => dbPath),
+    ...(catalogPlans.length > 0 ? [catalogPath] : []),
+  ]);
 
-catDb
-  .prepare(
-    `UPDATE local_thread_catalog_sync_state
-     SET initial_build_complete = 1, watermark_updated_at = ?
-     WHERE host_id = 'local'`
-  )
-  .run(maxTs.v);
+  try {
+    let stateRestored = 0;
+    for (const { dbPath, plans } of statePlans) {
+      const db = new DatabaseSync(dbPath);
+      try {
+        stateRestored += withImmediateTransaction(db, () => {
+          const update = db.prepare(
+            "UPDATE threads SET source = ?, model_provider = ?, thread_source = ? " +
+              "WHERE id = ? AND source = 'cli' AND model_provider = 'custom' " +
+              "AND thread_source = 'user'"
+          );
+          let restored = 0;
+          for (const { desired, item } of plans) {
+            restored += update.run(
+              desired.source,
+              desired.modelProvider,
+              desired.threadSource,
+              item.id
+            ).changes;
+          }
+          return restored;
+        });
+      } finally {
+        db.close();
+      }
+    }
 
-catDb
-  .prepare(
-    `UPDATE local_thread_catalog_metadata
-     SET catalog_revision = catalog_revision + 1
-     WHERE id = 1`
-  )
-  .run();
+    let catalogRestored = 0;
+    if (catalogPlans.length > 0) {
+      const db = new DatabaseSync(catalogPath);
+      try {
+        catalogRestored = withImmediateTransaction(db, () => {
+          const update = db.prepare(
+            "UPDATE local_thread_catalog SET source_kind = ?, model_provider = ? " +
+              "WHERE host_id = 'local' AND thread_id = ? " +
+              "AND source_kind = 'cli' AND model_provider = 'custom'"
+          );
+          let restored = 0;
+          for (const plan of catalogPlans) {
+            restored += update.run(
+              plan.sourceKind,
+              plan.modelProvider,
+              plan.item.id
+            ).changes;
+          }
+          if (restored > 0) {
+            db.prepare(
+              "UPDATE local_thread_catalog_metadata " +
+                "SET catalog_revision = catalog_revision + 1 WHERE id = 1"
+            ).run();
+          }
+          return restored;
+        });
+      } finally {
+        db.close();
+      }
+    }
 
-const finalCount = catDb
-  .prepare(
-    "SELECT COUNT(*) as cnt FROM local_thread_catalog WHERE host_id = 'local' AND missing_candidate = 0"
-  )
-  .get();
+    let filesRestored = 0;
+    let fileConflicts = 0;
+    for (const item of evidence) {
+      if (!item.backupPayload) continue;
+      const result = restoreSessionHeader(item);
+      if (result === "restored") filesRestored += 1;
+      if (result === "conflict") fileConflicts += 1;
+    }
+    console.log(
+      `恢复完成 / Restore complete: JSONL ${filesRestored}, conflicts ${fileConflicts}, state rows ${stateRestored}, catalog rows ${catalogRestored}.`
+    );
+  } catch (error) {
+    compensateAndRethrow(backups, error);
+  }
+}
 
-catDb.close();
-console.log(
-  `Catalog now has ${finalCount.cnt} visible entries. Repair complete.`
-);
-process.exit(0);
+function restoreSessionHeader(item) {
+  const current = JSON.parse(readFirstLine(item.sessionPath));
+  if (current.type !== "session_meta" || current.payload?.id !== item.id) {
+    throw new Error(
+      `当前 session_meta 已变化，拒绝覆盖 / Current session_meta changed: ${item.sessionPath}`
+    );
+  }
+  const backup = item.backupPayload;
+  if (metadataFieldsEqual(current.payload, backup)) return "unchanged";
+  if (!isPollutedThread(current.payload)) {
+    console.warn(
+      `跳过已另行修改的 session_meta / Skipped conflicting session_meta: ${item.sessionPath}`
+    );
+    return "conflict";
+  }
+  for (const field of ["source", "model_provider", "thread_source"]) {
+    if (Object.hasOwn(backup, field)) {
+      current.payload[field] = backup[field];
+    } else {
+      delete current.payload[field];
+    }
+  }
+
+  const contents = fs.readFileSync(item.sessionPath);
+  const newlineIndex = contents.indexOf(0x0a);
+  const body = newlineIndex === -1 ? Buffer.alloc(0) : contents.subarray(newlineIndex + 1);
+  const eol =
+    newlineIndex > 0 && contents[newlineIndex - 1] === 0x0d ? "\r\n" : "\n";
+  const header = Buffer.from(`${JSON.stringify(current)}${eol}`, "utf8");
+  const restored = Buffer.concat([header, body]);
+  if (restored.equals(contents)) return "unchanged";
+
+  const temporaryPath = `${item.sessionPath}.repair-threads-${process.pid}.tmp`;
+  fs.writeFileSync(temporaryPath, restored, { flag: "wx" });
+  try {
+    fs.renameSync(temporaryPath, item.sessionPath);
+  } catch (error) {
+    try {
+      fs.unlinkSync(temporaryPath);
+    } catch {}
+    throw error;
+  }
+  return "restored";
+}

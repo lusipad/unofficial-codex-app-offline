@@ -38,8 +38,6 @@ en.TaskCodexLinks=Register codex:// links for CLI /app
 zh.TaskCodexLinks=注册用于 CLI /app 的 codex:// 链接
 en.TaskAppShim=Install PowerShell shim for CLI /app (adds a module that overrides Get-AppxPackage; may conflict with the Microsoft Store version of Codex Desktop)
 zh.TaskAppShim=安装 CLI /app 的 PowerShell shim（会覆盖 Get-AppxPackage 命令，可能与已安装的商店版 Codex Desktop 冲突）
-en.TaskRepairThreads=Detect and repair missing threads (useful after switching providers)
-zh.TaskRepairThreads=检测并修复丢失的历史会话（切换 provider 后会话丢失时使用）
 en.TaskComputerUse=Repair Computer Use plugin layout
 zh.TaskComputerUse=修复 Computer Use 插件布局
 en.TaskChromeGuide=Open Chrome extension setup guide
@@ -55,7 +53,6 @@ Name: "skills"; Description: "{cm:TaskSkills}"; Flags: unchecked
 Name: "chromehost"; Description: "{cm:TaskChromeHost}"; Flags: unchecked
 Name: "codexlinks"; Description: "{cm:TaskCodexLinks}"; Flags: unchecked
 Name: "appshim"; Description: "{cm:TaskAppShim}"; Flags: unchecked
-Name: "repairthreads"; Description: "{cm:TaskRepairThreads}"; Flags: unchecked
 Name: "computeruse"; Description: "{cm:TaskComputerUse}"; Flags: unchecked
 Name: "chromeguide"; Description: "{cm:TaskChromeGuide}"; Flags: unchecked
 
@@ -107,8 +104,6 @@ begin
     Result := Result + ' -RegisterCodexLinks';
   if WizardIsTaskSelected('appshim') then
     Result := Result + ' -InstallAppShim';
-  if WizardIsTaskSelected('repairthreads') then
-    Result := Result + ' -RepairThreads';
   if WizardIsTaskSelected('computeruse') then
     Result := Result + ' -RepairComputerUse';
   if WizardIsTaskSelected('chromeguide') then
