@@ -1431,7 +1431,8 @@ for (const entry of javaScriptEntries) {
     content.includes('globalThis.__codexOfflineArchivedThreadsCache');
   archivedThreadsStateDbOnlyPatched ||=
     content.includes(ARCHIVED_THREADS_PARTIAL_LIST_PATCH_MARKER) &&
-    /useStateDbOnly:[A-Za-z_$][\w$]*\?!0:[A-Za-z_$][\w$]*/.test(content);
+    (/useStateDbOnly:[A-Za-z_$][\w$]*\?!0:[A-Za-z_$][\w$]*/.test(content) ||
+      content.includes('useStateDbOnly:!0'));
   archivedSettingsOfflineLocalVisibilityPatched ||=
     content.includes(ARCHIVED_SETTINGS_OFFLINE_LOCAL_VISIBILITY_PATCH_MARKER) &&
     content.includes('archivedChats:') &&
