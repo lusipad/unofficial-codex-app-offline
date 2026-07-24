@@ -57,10 +57,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
@@ -347,7 +347,7 @@ jobs:
 
       - name: Upload workflow artifacts
         if: ${{ steps.release_check.outputs.skip_build != 'true' }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ steps.build.outputs.release_tag }}
           path: ${{ steps.build.outputs.artifact_dir }}
@@ -355,7 +355,7 @@ jobs:
 
       - name: Publish release assets
         if: ${{ github.event_name != 'pull_request' && steps.release_check.outputs.skip_publish != 'true' }}
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.build.outputs.release_tag }}
           name: ${{ steps.build.outputs.release_name }}
