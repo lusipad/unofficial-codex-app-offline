@@ -1008,7 +1008,7 @@ function patchChromeBrowserClient(filePath) {
       `function _codexOfflineShouldUseNativePipeFallback(t){return ${nativePipeSymbols.platform}()==="win32"&&typeof t=="string"&&t.startsWith(${nativePipeSymbols.pipePrefix}("win32"))}` +
       nativePipeHelpersWithoutTimeout +
       nativePipeFallbackPatchMarker;
-    const createNeedleMatch = content.match(
+    const createWithConnectionMatch = content.match(
       new RegExp(
         `static async create\\(([A-Za-z_$][\\w$]*)\\)\\{` +
         `let ([A-Za-z_$][\\w$]*)=${escapeRegExp(nativePipeSymbols.bridgeGetter)}\\(\\);` +
@@ -1017,6 +1017,15 @@ function patchChromeBrowserClient(filePath) {
         `throw new Error\\(${escapeRegExp(nativePipeSymbols.unavailableMessage)}\\(\\)\\)\\}`,
       ),
     );
+    const createWithInlineConnectionMatch = content.match(
+      new RegExp(
+        `static async create\\(([A-Za-z_$][\\w$]*)\\)\\{` +
+        `let ([A-Za-z_$][\\w$]*)=${escapeRegExp(nativePipeSymbols.bridgeGetter)}\\(\\);` +
+        `if\\(\\2==null\\)throw new Error\\(${escapeRegExp(nativePipeSymbols.unavailableMessage)}\\(\\)\\);` +
+        `return new ([A-Za-z_$][\\w$]*)\\(await \\2\\.createConnection\\(\\1\\)\\)\\}`,
+      ),
+    );
+    const createNeedleMatch = createWithConnectionMatch ?? createWithInlineConnectionMatch;
 
     if (!content.includes(helperNeedle) || !createNeedleMatch) {
       throw new Error(
@@ -1028,9 +1037,15 @@ function patchChromeBrowserClient(filePath) {
       createNeedle,
       pipeArg,
       bridgeVar,
-      connectionVar,
-      constructorVar,
+      thirdCapture,
+      fourthCapture,
     ] = createNeedleMatch;
+    const connectionVar = createWithConnectionMatch
+      ? thirdCapture
+      : '_codexOfflineConnection';
+    const constructorVar = createWithConnectionMatch
+      ? fourthCapture
+      : thirdCapture;
     const createReplacement =
       `static async create(${pipeArg}){` +
       `if(_codexOfflineShouldUseNativePipeFallback(${pipeArg})){` +
@@ -1361,7 +1376,7 @@ function patchChromeSkillInstructions(chromePluginRoot) {
   }
 
   const needle =
-    /The `browser-client` module is the core entry point for browser use, and is available under `scripts\/browser-client\.mjs` in this plugin's root directory\. ALWAYS import it using an absolute path\.\r?\nIMPORTANT: If this path cannot be found, stop and report that this plugin is missing `scripts\/browser-client\.mjs`\. NEVER use the built in `browser-client` library\./;
+    /The `browser-client` module is the core entry point for browser use, and is available under `scripts\/browser-client\.mjs` in this plugin's root directory\. ALWAYS import it using an absolute path\.\s+IMPORTANT: If this path cannot be found, stop and report that this plugin is missing `scripts\/browser-client\.mjs`\. NEVER use the built in `browser-client` library\./;
   const matched = content.match(needle)?.[0];
   const replacement =
     `${matched}\n\n` +
@@ -1739,6 +1754,10 @@ try {
     /let (\w+)=(\w+)\.cwds;if\(\1\.length===0\)/;
   const AUTOMATION_RUNTIME_CWD_REPLACEMENT =
     `let $1=$2.cwds.map(${AUTOMATION_CWD_NORMALIZER_INLINE});if($1.length===0)`;
+  const AUTOMATION_RUNTIME_LEGACY_TARGET_CWD_RE =
+    /if\(([A-Za-z_$][\w$]*)\.target==null\)([A-Za-z_$][\w$]*)=\1\.cwds\.map\(([A-Za-z_$][\w$]*)=>\(\{type:`legacy`,cwd:\3\}\)\)/;
+  const AUTOMATION_RUNTIME_LEGACY_TARGET_CWD_REPLACEMENT =
+    `if($1.target==null)$2=$1.cwds.map(${AUTOMATION_CWD_NORMALIZER_INLINE}).map($3=>({type:\`legacy\`,cwd:$3}))`;
   const AUTOMATION_RUNTIME_CWD_PATCH_MARKER =
     `.cwds.map(${AUTOMATION_CWD_NORMALIZER_INLINE})`;
   const APP_SERVER_SANDBOX_OVERRIDE_PATCHES = [
@@ -1776,6 +1795,8 @@ try {
     contractPatchMarker('/*codex-offline:node-repl-tool-search-feature*/');
   const COMPUTER_USE_PLUGIN_ROOT_FALLBACK_PATCH_MARKER =
     contractPatchMarker('/*codex-offline:computer-use-plugin-root-fallback*/');
+  const COMPUTER_USE_RESOURCE_RUNTIME_PATHS_PATCH_MARKER =
+    contractPatchMarker('/*codex-offline:computer-use-resource-runtime-paths*/');
   const COMPUTER_USE_THREAD_CONFIG_DIAGNOSTICS_PATCH_MARKER =
     '/*codex-offline:computer-use-thread-config-diagnostics*/';
   const COMPUTER_USE_FORWARD_THREAD_START_DIAGNOSTICS_PATCH_MARKER =
@@ -1878,6 +1899,8 @@ try {
     /if\(([A-Za-z_$][\w$]*)!=null\)\{if\(([A-Za-z_$][\w$]*)\.warning\(`bundled_plugins_marketplace_install_failed`,\{safe:\{errorCategory:([A-Za-z_$][\w$]*)\(\{error:\1\.error,platformFamily:e\.platformFamily\}\),marketplaceName:t,platformFamily:e\.platformFamily,\.\.\.\1\.safe\},sensitive:\{error:\1\.error,marketplaceRoot:e\.materializedMarketplace\.marketplaceRoot,\.\.\.\1\.sensitive\}\}\),n\)throw \1\.error;return!1\}return!0\}/g;
   const BUNDLED_PLUGIN_CACHE_LOCK_CATCH_THROW_RE =
     /catch\(([A-Za-z_$][\w$]*)\)\{if\(([A-Za-z_$][\w$]*)\.warning\(`bundled_plugins_marketplace_install_failed`,\{safe:\{errorCategory:([A-Za-z_$][\w$]*)\(\{error:\1,platformFamily:e\.platformFamily\}\),marketplaceName:t,platformFamily:e\.platformFamily\},sensitive:\{error:\1,marketplaceRoot:e\.materializedMarketplace\.marketplaceRoot\}\}\),n\)throw \1;return!1\}/g;
+  const BUNDLED_PLUGIN_CACHE_LOCK_CURRENT_CATCH_THROW_RE =
+    /catch\(([A-Za-z_$][\w$]*)\)\{if\(([A-Za-z_$][\w$]*)\.warning\(`bundled_plugins_marketplace_install_failed`,\{safe:\{errorCategory:([A-Za-z_$][\w$]*)\(\{error:\1,platformFamily:([A-Za-z_$][\w$]*)\.platformFamily\}\),marketplaceName:([A-Za-z_$][\w$]*),platformFamily:\4\.platformFamily\},sensitive:\{error:\1,marketplaceRoot:\4\.materializedMarketplace\.marketplaceRoot\}\}\),\4\.throwOnReconcileFailure\)throw \1;return\{/;
   const NODE_REPL_CONFIG_RECONCILE_FINAL_STEP =
     'await Ro({appServerConnection:r,chromeExtensionSyncManagedPluginStore:l,' +
     'devRuntimeRepoRoot:s,marketplacePluginNames:e.marketplacePluginNames,' +
@@ -1995,6 +2018,8 @@ try {
     /function ([A-Za-z_$][\w$]*)\(\{codexHome:([A-Za-z_$][\w$]*),env:([A-Za-z_$][\w$]*)=process\.env,marketplaceName:([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\.or\(([A-Za-z_$][\w$]*)\.M\.resolve\(\)\),marketplaces:([A-Za-z_$][\w$]*),pathExists:([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\.existsSync\}\)\{for\(let ([A-Za-z_$][\w$]*) of ([A-Za-z_$][\w$]*)\(\{marketplaceName:\4,marketplaces:\7\}\)\)\{let ([A-Za-z_$][\w$]*)=\10\.plugins\.find\(([A-Za-z_$][\w$]*)=>\13\.name===`computer-use`&&\13\.installed&&\13\.enabled&&\13\.source\.type===`local`\);if\(\12\?\.source\.type===`local`\)return ([A-Za-z_$][\w$]*)\(\{env:\3,installedPluginRoot:\5\.([A-Za-z_$][\w$]*)\(\{codexHome:\2,localVersion:\12\.localVersion,marketplaceName:\10\.name,pluginName:\12\.name\}\),pathExists:\8\}\)\}return \14\(\{env:\3,pathExists:\8\}\)\}/;
   const COMPUTER_USE_PLUGIN_ROOT_FALLBACK_CURRENT_RE_V2 =
     /function ([A-Za-z_$][\w$]*)\(\{codexHome:([A-Za-z_$][\w$]*),env:([A-Za-z_$][\w$]*)=process\.env,marketplaceName:([A-Za-z_$][\w$]*)=([^,{}]+?\([^{}]*?\.resolve\(\)\)),marketplaces:([A-Za-z_$][\w$]*),pathExists:([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\.existsSync\}\)\{for\(let ([A-Za-z_$][\w$]*) of ([A-Za-z_$][\w$]*)\(\{marketplaceName:\4,marketplaces:\6\}\)\)\{let ([A-Za-z_$][\w$]*)=\9\.plugins\.find\(([A-Za-z_$][\w$]*)=>\12\.name===`computer-use`&&\12\.installed&&\12\.enabled&&\12\.source\.type===`local`\);if\(\11\?\.source\.type===`local`\)return ([A-Za-z_$][\w$]*)\(\{env:\3,installedPluginRoot:([A-Za-z_$][\w$]*)\.([A-Za-z_$][\w$]*)\(\{codexHome:\2,localVersion:\11\.localVersion,marketplaceName:\9\.name,pluginName:\11\.name\}\),pathExists:\7\}\)\}return \13\(\{env:\3,pathExists:\7\}\)\}/;
+  const COMPUTER_USE_RESOURCE_RUNTIME_PATHS_CURRENT_RE =
+    /function ([A-Za-z_$][\w$]*)\(\{codexHome:([A-Za-z_$][\w$]*),env:([A-Za-z_$][\w$]*)=process\.env,marketplaceName:([A-Za-z_$][\w$]*)=([^,{}]+),marketplaces:([A-Za-z_$][\w$]*),pathExists:([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\.existsSync\}\)\{for\(let ([A-Za-z_$][\w$]*) of ([A-Za-z_$][\w$]*)\(\{marketplaceName:\4,marketplaces:\6\}\)\)if\(\9\.plugins\.find\(([A-Za-z_$][\w$]*)=>\11\.name===`computer-use`&&\11\.installed&&\11\.enabled&&\11\.source\.type===`local`\)\?\.source\.type===`local`\)return ([A-Za-z_$][\w$]*)\(\{codexHome:\2,env:\3,pathExists:\7\}\);return \12\(\{env:\3,pathExists:\7\}\)\}/;
   const COMPUTER_USE_FORWARD_THREAD_START_DIAGNOSTICS_NEEDLE =
     'try{this.logger.debug(`bridge_forwarded_to_transport`,{safe:{requestId:r,' +
     'method:t.method,conversationId:i??null,originWebcontentsId:e.id,' +
@@ -2049,6 +2074,8 @@ try {
     'if(Array.isArray(_codexOfflineInput)&&_codexOfflineInput.some(e=>e?.type===`mention`&&typeof e?.path===`string`&&e.path.includes(`plugin://computer-use`))&&!_codexOfflineInput.some(e=>e?.type===`skill`&&(e?.name===`computer-use`||typeof e?.path===`string`&&e.path.includes(`computer-use`))))' +
     '_codexOfflineInput.push({type:`skill`,name:`computer-use`,path:_codexOfflineComputerUseSkillPath})}' +
     COMPUTER_USE_INPUT_SKILL_PATCH_MARKER;
+  const COMPUTER_USE_SCHEDULED_FORWARD_REQUEST_NEEDLE =
+    'this.options.logger.debug(`bridge_forwarded_to_transport`';
   const COMPUTER_USE_THREAD_START_TOOL_SEARCH_CODE =
     'if(t.method===`thread/start`&&t.params?.config?.[`mcp_servers.node_repl`]!=null)' +
     '{let _codexOfflineNodeReplConfig=t.params.config[`mcp_servers.node_repl`];' +
@@ -2195,6 +2222,8 @@ try {
     /(?<prefix>async function [A-Za-z_$][\w$]*\(\{scope:(?<scope>[A-Za-z_$][\w$]*),serverRequest:(?<serverRequest>[A-Za-z_$][\w$]*),hostId:(?<hostId>[A-Za-z_$][\w$]*),queryClient:(?<queryClient>[A-Za-z_$][\w$]*)\}\)\{(?:let [^;{}]+;)?let\{id:(?<requestId>[A-Za-z_$][\w$]*),params:(?<params>[A-Za-z_$][\w$]*)\}=\k<serverRequest>,\{threadId:(?<threadId>[A-Za-z_$][\w$]*),tool:(?<tool>[A-Za-z_$][\w$]*)\}=\k<params>;if\(!\k<threadId>\)\{(?<logger>[A-Za-z_$][\w$]*)\.error\(`Missing threadId for dynamic tool call request`,\{safe:\{\},sensitive:\{id:\k<requestId>,params:\k<params>\}\}\);return\}let (?<result>[A-Za-z_$][\w$]*),(?<namespaceOk>[A-Za-z_$][\w$]*)=\k<params>\.namespace===[^,;]+,(?<compatOk>[A-Za-z_$][\w$]*)=\k<params>\.namespace==null&&[^;]+;)(?<gate>if\(!\k<namespaceOk>&&!\k<compatOk>\)\k<result>=(?<failureFn>[A-Za-z_$][\w$]*)\(`Unsupported dynamic tool namespace: \$\{\k<params>\.namespace\}`\);else)/;
   const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_CURRENT_V3_RE =
     /(?<prefix>async function [A-Za-z_$][\w$]*\(\{scope:(?<scope>[A-Za-z_$][\w$]*),serverRequest:(?<serverRequest>[A-Za-z_$][\w$]*),hostId:(?<hostId>[A-Za-z_$][\w$]*),queryClient:(?<queryClient>[A-Za-z_$][\w$]*)\}\)\{let\{id:(?<requestId>[A-Za-z_$][\w$]*),params:(?<params>[A-Za-z_$][\w$]*)\}=\k<serverRequest>,\{threadId:(?<threadId>[A-Za-z_$][\w$]*),tool:(?<tool>[A-Za-z_$][\w$]*)\}=\k<params>;if\(!\k<threadId>\)\{(?<logger>[A-Za-z_$][\w$]*)\.error\(`Missing threadId for dynamic tool call request`,\{safe:\{\},sensitive:\{id:\k<requestId>,params:\k<params>\}\}\);return\}let (?<result>[A-Za-z_$][\w$]*),(?<namespaceOk>[A-Za-z_$][\w$]*)=\k<params>\.namespace===[^,;]+,(?<compatOk>[A-Za-z_$][\w$]*)=\k<params>\.namespace==null&&[^;]+;)(?<gate>if\([A-Za-z_$][\w$]*!=null\)\k<result>=[A-Za-z_$][\w$]*;else if\(!\k<namespaceOk>&&!\k<compatOk>\)\k<result>=(?<failureFn>[A-Za-z_$][\w$]*)\(`Unsupported dynamic tool namespace: \$\{\k<params>\.namespace\}`\);else)/;
+  const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_CURRENT_V4_RE =
+    /(?<prefix>async function [A-Za-z_$][\w$]*\(\{scope:(?<scope>[A-Za-z_$][\w$]*),serverRequest:(?<serverRequest>[A-Za-z_$][\w$]*),hostId:(?<hostId>[A-Za-z_$][\w$]*),queryClient:(?<queryClient>[A-Za-z_$][\w$]*)\}\)\{let\{id:(?<requestId>[A-Za-z_$][\w$]*),params:(?<params>[A-Za-z_$][\w$]*)\}=\k<serverRequest>,\{threadId:(?<threadId>[A-Za-z_$][\w$]*),tool:(?<tool>[A-Za-z_$][\w$]*)\}=\k<params>;if\(!\k<threadId>\)\{(?<logger>[A-Za-z_$][\w$]*)\.error\(`Missing threadId for dynamic tool call request`,\{safe:\{\},sensitive:\{id:\k<requestId>,params:\k<params>\}\}\);return\}if\([A-Za-z_$][\w$]*\.dynamicToolCalls!=null&&!await [A-Za-z_$][\w$]*\.dynamicToolCalls\.tryClaimExecution\(\{callId:\k<params>\.callId,hostId:\k<hostId>,threadId:\k<threadId>,turnId:\k<params>\.turnId\}\)\)return;let (?<result>[A-Za-z_$][\w$]*),(?<namespaceOk>[A-Za-z_$][\w$]*)=\k<params>\.namespace===[^,;]+,(?<compatOk>[A-Za-z_$][\w$]*)=\k<params>\.namespace==null&&[^,;]+,(?<dynamicResult>[A-Za-z_$][\w$]*)=[^,;]+\?await [^;]+:null,(?<pluginResult>[A-Za-z_$][\w$]*)=\k<params>\.namespace===`plugin_management`\?await [^;]+:null;)(?<gate>if\(\k<pluginResult>!=null\)\k<result>=\k<pluginResult>;else if\(!\k<namespaceOk>&&!\k<compatOk>\)\k<result>=(?<failureFn>[A-Za-z_$][\w$]*)\(`Unsupported dynamic tool namespace: \$\{\k<params>\.namespace\}`\);else if\(\k<dynamicResult>!=null\)\k<result>=\k<dynamicResult>;else)/;
   const COMPUTER_USE_NODE_REPL_RESULT_TEXT_CODE =
     'let _codexOfflineNodeReplStringify=e=>{try{return JSON.stringify(e)}catch{return String(e)}};' +
     'let _codexOfflineNodeReplContentText=e=>Array.isArray(e)?e.map(e=>(e?.type===`text`||e?.type===`inputText`)?String(e.text??``):e?.text!=null?String(e.text):_codexOfflineNodeReplStringify(e)).join(`\\n`):``;' +
@@ -2335,6 +2364,12 @@ try {
     if (next === content) {
       next = content.replace(
         COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_CURRENT_V3_RE,
+        computerUseNodeReplDynamicToolCallCurrentV2Replacement,
+      );
+    }
+    if (next === content) {
+      next = content.replace(
+        COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_CURRENT_V4_RE,
         computerUseNodeReplDynamicToolCallCurrentV2Replacement,
       );
     }
@@ -2853,10 +2888,21 @@ try {
         fs.writeFileSync(filePath, content, 'utf8');
         automationRuntimePatchedFiles.push(path.relative(tmpDir, filePath));
       }
+    } else if (AUTOMATION_RUNTIME_LEGACY_TARGET_CWD_RE.test(content)) {
+      const patchedContent = content.replace(
+        AUTOMATION_RUNTIME_LEGACY_TARGET_CWD_RE,
+        AUTOMATION_RUNTIME_LEGACY_TARGET_CWD_REPLACEMENT,
+      );
+      if (patchedContent !== content) {
+        content = patchedContent;
+        fs.writeFileSync(filePath, content, 'utf8');
+        automationRuntimePatchedFiles.push(path.relative(tmpDir, filePath));
+      }
     }
 
     if (!content.includes(AUTOMATION_RUNTIME_CWD_PATCH_MARKER) &&
-        AUTOMATION_RUNTIME_CWD_RE.test(content)) {
+        (AUTOMATION_RUNTIME_CWD_RE.test(content) ||
+         AUTOMATION_RUNTIME_LEGACY_TARGET_CWD_RE.test(content))) {
       automationRuntimeUnpatchedFiles.push(path.relative(tmpDir, filePath));
     }
   }
@@ -3179,6 +3225,40 @@ try {
         '}',
     );
 
+    const currentCatchMatch = content.match(
+      BUNDLED_PLUGIN_CACHE_LOCK_CURRENT_CATCH_THROW_RE,
+    );
+    if (currentCatchMatch) {
+      const [
+        currentCatchNeedle,
+        errorVar,
+        loggerVar,
+        categoryFn,
+        contextVar,
+        marketplaceVar,
+      ] = currentCatchMatch;
+      const categoryVar = '_codexOfflinePluginCacheCategory';
+      const currentCatchReplacement =
+        `catch(${errorVar}){let ${categoryVar}=${categoryFn}({error:${errorVar},platformFamily:${contextVar}.platformFamily});` +
+        `if(${loggerVar}.warning(\`bundled_plugins_marketplace_install_failed\`,{safe:{errorCategory:${categoryVar},marketplaceName:${marketplaceVar},platformFamily:${contextVar}.platformFamily},sensitive:{error:${errorVar},marketplaceRoot:${contextVar}.materializedMarketplace.marketplaceRoot}}),` +
+        `${contextVar}.throwOnReconcileFailure&&${categoryVar}!==${BUNDLED_PLUGIN_CACHE_LOCK_CATEGORY_VALUE})throw ${errorVar};return{`;
+      content = content.replace(currentCatchNeedle, currentCatchReplacement);
+
+      const firstFailureRe = new RegExp(
+        `let\\{firstFailure:([A-Za-z_$][\\w$]*)\\}=([A-Za-z_$][\\w$]*);` +
+        `if\\(\\1!=null\\)\\{if\\(${escapeRegExp(contextVar)}\\.throwOnReconcileFailure\\)` +
+        `throw \\1\\.error;return\\{`,
+      );
+      content = content.replace(
+        firstFailureRe,
+        (match, failureVar, resultVar) =>
+          `let{firstFailure:${failureVar}}=${resultVar};if(${failureVar}!=null){` +
+          `if(${contextVar}.throwOnReconcileFailure&&${categoryFn}({error:${failureVar}.error,platformFamily:${contextVar}.platformFamily})!==${BUNDLED_PLUGIN_CACHE_LOCK_CATEGORY_VALUE})` +
+          `throw ${failureVar}.error;return{` +
+          BUNDLED_PLUGIN_CACHE_LOCK_NONFATAL_PATCH_MARKER,
+      );
+    }
+
     if (content !== originalContent) {
       fs.writeFileSync(filePath, content, 'utf8');
       bundledPluginCacheLockNonfatalPatched = true;
@@ -3358,6 +3438,15 @@ try {
           COMPUTER_USE_PLUGIN_ROOT_FALLBACK_PATCH_MARKER +
           `return ${computerUsePathsFunction}({env:${envVar},pathExists:${pathExistsVar}})}`,
       );
+    } else if (
+      COMPUTER_USE_RESOURCE_RUNTIME_PATHS_CURRENT_RE.test(content) &&
+      /nodeModuleDirs:[A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*\([A-Za-z_$][\w$]*\)/.test(content) &&
+      content.includes('serviceAppPath:l.platform===`darwin`?o.serviceAppPath:null')
+    ) {
+      content = content.replace(
+        COMPUTER_USE_RESOURCE_RUNTIME_PATHS_CURRENT_RE,
+        `$&${COMPUTER_USE_RESOURCE_RUNTIME_PATHS_PATCH_MARKER}`,
+      );
     } else {
       continue;
     }
@@ -3367,7 +3456,7 @@ try {
   }
 
   if (computerUsePluginRootFallbackPatched) {
-    log('Computer Use plugin root fallback patched in ' +
+    log('Computer Use runtime path compatibility patched in ' +
         `${computerUsePluginRootFallbackPatchedFiles.join(', ')}.`);
   } else if (computerUsePluginRootFallbackAlreadyCorrect) {
     log('Computer Use plugin root fallback already patched.');
@@ -3384,6 +3473,27 @@ try {
 
   for (const filePath of mainBundleFiles) {
     let content = fs.readFileSync(filePath, 'utf8');
+    if (
+      content.includes(COMPUTER_USE_THREAD_START_TOOL_SEARCH_PATCH_MARKER) &&
+      content.includes(COMPUTER_USE_INPUT_SKILL_PATCH_MARKER) &&
+      content.includes(COMPUTER_USE_SCHEDULED_FORWARD_REQUEST_NEEDLE)
+    ) {
+      computerUseForwardThreadStartDiagnosticsAlreadyCorrect = true;
+      computerUseForwardThreadStartDiagnosticsPatchedFiles.push(path.relative(tmpDir, filePath));
+      continue;
+    }
+    if (content.includes(COMPUTER_USE_SCHEDULED_FORWARD_REQUEST_NEEDLE)) {
+      content = content.replace(
+        COMPUTER_USE_SCHEDULED_FORWARD_REQUEST_NEEDLE,
+        COMPUTER_USE_THREAD_START_TOOL_SEARCH_CODE +
+          COMPUTER_USE_INPUT_SKILL_INJECTION_CODE +
+          COMPUTER_USE_SCHEDULED_FORWARD_REQUEST_NEEDLE,
+      );
+      fs.writeFileSync(filePath, content, 'utf8');
+      computerUseForwardThreadStartDiagnosticsPatched = true;
+      computerUseForwardThreadStartDiagnosticsPatchedFiles.push(path.relative(tmpDir, filePath));
+      continue;
+    }
     if (content.includes(COMPUTER_USE_FORWARD_THREAD_START_DIAGNOSTICS_PATCH_MARKER)) {
       let patchedContent = content;
       if (patchedContent.includes(COMPUTER_USE_THREAD_START_TOOL_SEARCH_LEGACY_CODE)) {
@@ -3492,10 +3602,10 @@ try {
   }
 
   if (computerUseForwardThreadStartDiagnosticsPatched) {
-    log('Computer Use thread/start forwarding diagnostics patched in ' +
+    log('Computer Use thread/start forwarding compatibility patched in ' +
         `${computerUseForwardThreadStartDiagnosticsPatchedFiles.join(', ')}.`);
   } else if (computerUseForwardThreadStartDiagnosticsAlreadyCorrect) {
-    log('Computer Use thread/start forwarding diagnostics already patched.');
+    log('Computer Use thread/start forwarding compatibility already patched.');
   } else {
     warn(
       'Could not locate thread/start forwarding code for Computer Use diagnostics. ' +

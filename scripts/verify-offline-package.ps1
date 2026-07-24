@@ -1150,6 +1150,8 @@ const NODE_REPL_TOOL_SEARCH_FEATURE_PATCH_MARKER =
   requiredPatchMarker('/*codex-offline:node-repl-tool-search-feature*/');
 const COMPUTER_USE_PLUGIN_ROOT_FALLBACK_PATCH_MARKER =
   requiredPatchMarker('/*codex-offline:computer-use-plugin-root-fallback*/');
+const COMPUTER_USE_RESOURCE_RUNTIME_PATHS_PATCH_MARKER =
+  requiredPatchMarker('/*codex-offline:computer-use-resource-runtime-paths*/');
 const COMPUTER_USE_INPUT_MENTION_PATCH_MARKER =
   requiredPatchMarker('/*codex-offline:computer-use-input-mention*/');
 const COMPUTER_USE_INPUT_MENTION_V2_PATCH_MARKER =
@@ -1186,6 +1188,10 @@ const bundledPluginCacheLockFatalResultRe =
   /if\([A-Za-z_$][\w$]*!=null\)\{if\([A-Za-z_$][\w$]*\.warning\(`bundled_plugins_marketplace_install_failed`,\{safe:\{errorCategory:[A-Za-z_$][\w$]*\(\{error:[A-Za-z_$][\w$]*\.error,platformFamily:e\.platformFamily\}\),marketplaceName:t,platformFamily:e\.platformFamily,\.\.\.[A-Za-z_$][\w$]*\.safe\},sensitive:\{error:[A-Za-z_$][\w$]*\.error,marketplaceRoot:e\.materializedMarketplace\.marketplaceRoot,\.\.\.[A-Za-z_$][\w$]*\.sensitive\}\}\),n\)throw [A-Za-z_$][\w$]*\.error;return!1\}return!0\}/;
 const bundledPluginCacheLockFatalCatchRe =
   /catch\([A-Za-z_$][\w$]*\)\{if\([A-Za-z_$][\w$]*\.warning\(`bundled_plugins_marketplace_install_failed`,\{safe:\{errorCategory:[A-Za-z_$][\w$]*\(\{error:[A-Za-z_$][\w$]*,platformFamily:e\.platformFamily\}\),marketplaceName:t,platformFamily:e\.platformFamily\},sensitive:\{error:[A-Za-z_$][\w$]*,marketplaceRoot:e\.materializedMarketplace\.marketplaceRoot\}\}\),n\)throw [A-Za-z_$][\w$]*;return!1\}/;
+const bundledPluginCacheLockCurrentFatalCatchRe =
+  /catch\(([A-Za-z_$][\w$]*)\)\{if\([A-Za-z_$][\w$]*\.warning\(`bundled_plugins_marketplace_install_failed`,\{safe:\{errorCategory:[A-Za-z_$][\w$]*\(\{error:\1,platformFamily:([A-Za-z_$][\w$]*)\.platformFamily\}\),marketplaceName:[A-Za-z_$][\w$]*,platformFamily:\2\.platformFamily\},sensitive:\{error:\1,marketplaceRoot:\2\.materializedMarketplace\.marketplaceRoot\}\}\),\2\.throwOnReconcileFailure\)throw \1;return\{/;
+const bundledPluginCacheLockCurrentFatalResultRe =
+  /let\{firstFailure:([A-Za-z_$][\w$]*)\}=[A-Za-z_$][\w$]*;if\(\1!=null\)\{if\([A-Za-z_$][\w$]*\.throwOnReconcileFailure\)throw \1\.error;return\{/;
 function findAppServerRequestBusName(content) {
   const patterns = [
     /listExperimentalFeatures:[A-Za-z_$][\w$]*=>\s*([A-Za-z_$][\w$]*)\(`list-experimental-features`,\{[\s\S]{0,260}?hostId:/,
@@ -1380,9 +1386,16 @@ for (const entry of javaScriptEntries) {
     throw new Error('Browser Use thread config has a malformed features.tool_search insertion.');
   }
   computerUsePluginRootFallbackPatched ||=
-    content.includes(COMPUTER_USE_PLUGIN_ROOT_FALLBACK_PATCH_MARKER) &&
-    content.includes('installedPluginRoot:f') &&
-    content.includes('source?.source===`local`');
+    (
+      content.includes(COMPUTER_USE_PLUGIN_ROOT_FALLBACK_PATCH_MARKER) &&
+      content.includes('installedPluginRoot:f') &&
+      content.includes('source?.source===`local`')
+    ) ||
+    (
+      content.includes(COMPUTER_USE_RESOURCE_RUNTIME_PATHS_PATCH_MARKER) &&
+      /nodeModuleDirs:[A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*\([A-Za-z_$][\w$]*\)/.test(content) &&
+      content.includes('serviceAppPath:l.platform===`darwin`?o.serviceAppPath:null')
+    );
   computerUseInputMentionPatched ||=
     content.includes(COMPUTER_USE_INPUT_MENTION_PATCH_MARKER) &&
     content.includes(COMPUTER_USE_INPUT_MENTION_V2_PATCH_MARKER) &&
@@ -1462,7 +1475,9 @@ for (const entry of javaScriptEntries) {
   bundledPluginCacheLockNonfatalPatched ||= content.includes(BUNDLED_PLUGIN_CACHE_LOCK_NONFATAL_PATCH_MARKER);
   if (
     bundledPluginCacheLockFatalResultRe.test(content) ||
-    bundledPluginCacheLockFatalCatchRe.test(content)
+    bundledPluginCacheLockFatalCatchRe.test(content) ||
+    bundledPluginCacheLockCurrentFatalCatchRe.test(content) ||
+    bundledPluginCacheLockCurrentFatalResultRe.test(content)
   ) {
     bundledPluginCacheLockFatalResiduals.push(entry);
   }
@@ -1640,7 +1655,7 @@ if (!allJavaScriptContent.some(content => /for\(let [A-Za-z_$][\w$]* of \[(["'`]
   throw new Error('Bundled runtime plugin materialization patch does not preserve computer-use.');
 }
 if (!computerUsePluginRootFallbackPatched) {
-  throw new Error('Computer Use plugin root fallback marker is missing; packaged computer-use runtime paths may be unavailable.');
+  throw new Error('Computer Use runtime path compatibility marker is missing; packaged computer-use runtime paths may be unavailable.');
 }
 if (!computerUseInputMentionPatched) {
   info('Computer Use prompt input mention marker is not required for this app version; transport-level skill injection is verified separately.');

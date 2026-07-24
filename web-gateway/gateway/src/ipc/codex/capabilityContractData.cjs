@@ -204,6 +204,7 @@ const DESKTOP_ASAR_PATCH_MARKERS = Object.freeze([
   "/*codex-offline:node-repl-disable-sandbox*/",
   "/*codex-offline:node-repl-tool-search-feature*/",
   "/*codex-offline:computer-use-plugin-root-fallback*/",
+  "/*codex-offline:computer-use-resource-runtime-paths*/",
   "/*codex-offline:computer-use-input-mention*/",
   "/*codex-offline:computer-use-input-mention-v2*/",
   "/*codex-offline:computer-use-input-skill*/",
