@@ -304,16 +304,32 @@ const MSIX_UPDATER_BINDING_STUB =
       'return _lb.apply(this,arguments)' +
     '}' +
   '}catch(_e){}})();\n';
-// Suppress EPIPE errors on stdout/stderr that surface as uncaught
+// Suppress closed-pipe errors on stdout/stderr that surface as uncaught
 // exceptions when the Electron app writes to a console pipe that has
 // already been closed (e.g. the CMD window that launched Codex exits
-// before the renderer finishes its cleanup logging).
-const EPIPE_GUARD =
+// before the renderer finishes its cleanup logging). Node can report
+// these either synchronously from write() or asynchronously via "error".
+const STDIO_WRITE_ERROR_GUARD_MARKER =
+  '/*codex-offline:stdio-write-error-guard-v2*/';
+const LEGACY_EPIPE_GUARD =
   'function _epipeGuard(s){' +
     'var ow=s.write;' +
     's.write=function(){' +
       'try{return ow.apply(s,arguments)}' +
       'catch(e){if(e.code!=="EPIPE")throw e}' +
+    '}' +
+  '}' +
+  '_epipeGuard(process.stdout);_epipeGuard(process.stderr);\n';
+const EPIPE_GUARD =
+  STDIO_WRITE_ERROR_GUARD_MARKER +
+  'function _epipeGuard(s){' +
+    'var ow=s.write;' +
+    's.on("error",function(e){' +
+      'if(e.code!=="EPIPE"&&e.code!=="EOF")throw e' +
+    '});' +
+    's.write=function(){' +
+      'try{return ow.apply(s,arguments)}' +
+      'catch(e){if(e.code!=="EPIPE"&&e.code!=="EOF")throw e}' +
     '}' +
   '}' +
   '_epipeGuard(process.stdout);_epipeGuard(process.stderr);\n';
@@ -369,6 +385,16 @@ function refreshMainEntryPatch(filePath) {
       content = content.replace(windowsStoreLine, windowsStoreLine + MSIX_UPDATER_BINDING_STUB);
     } else {
       content = content.replace(PATCH_MARKER, `${PATCH_MARKER}\n${MSIX_UPDATER_BINDING_STUB}`);
+    }
+    changed = true;
+  }
+
+  // Upgrade the synchronous-only stdout/stderr guard used by prior builds.
+  if (!content.includes(STDIO_WRITE_ERROR_GUARD_MARKER)) {
+    if (content.includes(LEGACY_EPIPE_GUARD)) {
+      content = content.replace(LEGACY_EPIPE_GUARD, EPIPE_GUARD);
+    } else {
+      content = content.replace(PATCH_MARKER, `${PATCH_MARKER}\n${EPIPE_GUARD}`);
     }
     changed = true;
   }

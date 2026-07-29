@@ -1122,6 +1122,7 @@ function directStatsigGateCallRe(gateId) {
   );
 }
 const PATCH_MARKER = requiredPatchMarker('/* codex-offline:windowsStore-patch */');
+const STDIO_WRITE_ERROR_GUARD_MARKER = '/*codex-offline:stdio-write-error-guard-v2*/';
 const SETTINGS_ROUTE_BAD_PATTERN_RE =
   /searchParams\.set\("initialRoute","\/settings\/"\+\([A-Za-z_$][\w$]*\.section\|\|"agent"\)\);/;
 const LOCALE_SOURCE_BAD_PATTERN = '.get(`locale_source`,`IDE`)';
@@ -1262,6 +1263,9 @@ if (!mainEntry) {
 const mainContent = asar.extractFile(asarPath, entryMap.get(mainEntry)).toString('utf8');
 if (!mainContent.includes(PATCH_MARKER)) {
   throw new Error('windowsStore patch marker is missing from the main entry.');
+}
+if (!mainContent.includes(STDIO_WRITE_ERROR_GUARD_MARKER)) {
+  throw new Error('Asynchronous stdout/stderr write error guard is missing from the main entry.');
 }
 if (!mainContent.includes('CODEX_ELECTRON_ENABLE_WINDOWS_COMPUTER_USE')) {
   throw new Error('Computer Use environment default is missing from the main entry.');
