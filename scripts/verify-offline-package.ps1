@@ -940,8 +940,12 @@ try {
     if (-not (Test-Path $chromePluginRoot -PathType Container)) {
         throw 'Bundled Chrome plugin was not found in the portable package.'
     }
-    if (-not (Test-Path (Join-Path $chromePluginRoot 'scripts\extension-id.json') -PathType Leaf)) {
-        throw 'Bundled Chrome plugin is missing scripts\extension-id.json.'
+    $chromeExtensionConfigPath = @(
+        Join-Path $chromePluginRoot 'scripts\extension-id.json'
+        Join-Path $chromePluginRoot 'scripts\extension-ids.json'
+    ) | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
+    if ($null -eq $chromeExtensionConfigPath) {
+        throw 'Bundled Chrome plugin is missing scripts\extension-id.json or scripts\extension-ids.json.'
     }
     $chromeBrowserClientPath = Join-Path $chromePluginRoot 'scripts\browser-client.mjs'
     if (-not (Test-Path $chromeBrowserClientPath -PathType Leaf)) {
@@ -1002,10 +1006,25 @@ try {
     if (-not (Get-ChildItem -Path (Join-Path $chromePluginRoot 'extension-host\windows') -Filter 'extension-host.exe' -Recurse -File -ErrorAction SilentlyContinue | Select-Object -First 1)) {
         throw 'Bundled Chrome plugin is missing a Windows extension-host.exe binary.'
     }
-    $chromeExtensionConfig = Get-Content -Path (Join-Path $chromePluginRoot 'scripts\extension-id.json') -Raw | ConvertFrom-Json
-    $chromeExtensionId = [string]$chromeExtensionConfig.extensionId
+    $chromeExtensionConfig = Get-Content -Path $chromeExtensionConfigPath -Raw | ConvertFrom-Json
+    $chromeExtensionIdProperty = $chromeExtensionConfig.PSObject.Properties['extensionId']
+    $chromeExtensionId = if ($null -eq $chromeExtensionIdProperty) { '' } else { [string]$chromeExtensionIdProperty.Value }
     if ([string]::IsNullOrWhiteSpace($chromeExtensionId)) {
-        throw 'Bundled Chrome plugin extension-id.json is missing extensionId.'
+        $chromeExtensionIdsProperty = $chromeExtensionConfig.PSObject.Properties['extensionIds']
+        $chromeExtensionIdCandidates = if ($null -ne $chromeExtensionIdsProperty) {
+            @($chromeExtensionIdsProperty.Value)
+        }
+        else {
+            @()
+        }
+        $chromeExtensionId = [string](@(
+            $chromeExtensionIdCandidates |
+                Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } |
+                Select-Object -First 1
+        )[0])
+    }
+    if ([string]::IsNullOrWhiteSpace($chromeExtensionId)) {
+        throw 'Bundled Chrome plugin extension-id.json or extension-ids.json is missing extensionId or extensionIds.'
     }
 
     $chromeExtensionRoot = Join-Path $portableRoot '_internal\chrome-extension'

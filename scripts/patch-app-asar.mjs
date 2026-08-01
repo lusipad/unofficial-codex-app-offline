@@ -720,7 +720,8 @@ function patchWorkspaceDependenciesSettingsGate(
   rendererPatchMarker,
 ) {
   const surfaceMarker = 'defaultMessage:`Workspace Dependencies`';
-  if (!content.includes(surfaceMarker)) {
+  const currentSurfaceMarker = 'settings.agent.dependencies.enabled.description';
+  if (!content.includes(surfaceMarker) && !content.includes(currentSurfaceMarker)) {
     return { content, seen: false, patched: false, alreadyCorrect: false };
   }
   if (content.includes(patchMarker)) {
@@ -741,10 +742,28 @@ function patchWorkspaceDependenciesSettingsGate(
     importedWorkspaceGateRe,
     `$1=!0${patchMarker},`,
   );
+  if (next !== content) {
+    return {
+      content: next,
+      seen: true,
+      patched: true,
+      alreadyCorrect: false,
+    };
+  }
+
+  const currentWorkspaceGateRe = new RegExp(
+    `([A-Za-z_$][\\w$]*)=([A-Za-z_$][\\w$]*)\\(([A-Za-z_$][\\w$]*)\\),` +
+      `(?=[A-Za-z_$][\\w$]*=[A-Za-z_$][\\w$]*\\(\\\`2106641128\\\`\\),` +
+      `[A-Za-z_$][\\w$]*=[A-Za-z_$][\\w$]*\\(\\\`3693343337\\\`\\))`,
+  );
+  const currentNext = content.replace(
+    currentWorkspaceGateRe,
+    `$1=!0${patchMarker},`,
+  );
   return {
-    content: next,
+    content: currentNext,
     seen: true,
-    patched: next !== content,
+    patched: currentNext !== content,
     alreadyCorrect: false,
   };
 }
@@ -2238,6 +2257,8 @@ try {
   // "unknown variant `namespace`, expected `function`".
   const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOLS_TOP_LEVEL_RE =
     /\]\.map\((?<item>[A-Za-z_$][\w$]*)=>\(\{type:`function`,\.\.\.\k<item>,\.\.\.(?<eager>[A-Za-z_$][\w$]*)\.has\(\k<item>\.name\)\?\{\}:\{deferLoading:!0\}\}\)\);return (?<supportsNamespaces>[A-Za-z_$][\w$]*)\?\[\{type:`namespace`,name:(?<appNamespace>[A-Za-z_$][\w$]*),description:`Tools provided by the Codex app\.`,tools:(?<functionTools>[A-Za-z_$][\w$]*)\},\.\.\.(?<namespaceGroups>[A-Za-z_$][\w$]*)\]:\k<functionTools>/;
+  const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOLS_TOP_LEVEL_CURRENT_RE =
+    /\]\.map\((?<item>[A-Za-z_$][\w$]*)=>\(\{type:`function`,\.\.\.\k<item>,\.\.\.(?<supportsNamespaces>[A-Za-z_$][\w$]*)&&!(?<eager>[A-Za-z_$][\w$]*)\.has\(\k<item>\.name\)\?\{deferLoading:!0\}:\{\}\}\)\);return \k<supportsNamespaces>\?\[\{type:`namespace`,name:(?<appNamespace>[A-Za-z_$][\w$]*),description:`Tools provided by the Codex app\.`,tools:(?<functionTools>[A-Za-z_$][\w$]*)\},\.\.\.(?<namespaceGroups>[A-Za-z_$][\w$]*)\]:(?<fallbackTools>[A-Za-z_$][\w$]*)/;
   const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_COMPAT_MISSING_RE =
     /(\(\{namespace:`node_repl`,name:`js`,description:`Execute JavaScript in the persistent Node REPL used by Computer Use\.`,inputSchema:\{[\s\S]{0,700}?required:\[`code`\]\}\}\),)(?!\(\{name:`js`,description:`Execute JavaScript in the persistent Node REPL used by Computer Use\. This forwards to node_repl\.js\.`)/;
   const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_RE =
@@ -2355,6 +2376,26 @@ try {
       COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_PATCH_MARKER
     );
   }
+  function computerUseNodeReplDynamicToolsTopLevelCurrentReplacement(...args) {
+    const {
+      item,
+      eager,
+      supportsNamespaces,
+      appNamespace,
+      functionTools,
+      namespaceGroups,
+      fallbackTools,
+    } = args.at(-1);
+    return (
+      `].map(${item}=>({type:\`function\`,...${item},` +
+      `...${supportsNamespaces}&&!${eager}.has(${item}.name)?{deferLoading:!0}:{}}));` +
+      `return ${supportsNamespaces}?[{type:\`namespace\`,name:${appNamespace},` +
+      `description:\`Tools provided by the Codex app.\`,tools:${functionTools}},` +
+      `...${namespaceGroups},${COMPUTER_USE_NODE_REPL_NAMESPACE_GROUP_SPEC}]` +
+      `:${fallbackTools}.concat([${COMPUTER_USE_NODE_REPL_NAMESPACE_TOOL_SPEC}])` +
+      COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_PATCH_MARKER
+    );
+  }
   function patchComputerUseNodeReplDynamicTools(content) {
     if (content.includes(COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_PATCH_MARKER)) {
       return { content, alreadyCorrect: true, patched: false };
@@ -2375,6 +2416,14 @@ try {
     next = content.replace(
       COMPUTER_USE_NODE_REPL_DYNAMIC_TOOLS_TOP_LEVEL_RE,
       computerUseNodeReplDynamicToolsTopLevelReplacement,
+    );
+    if (next !== content) {
+      return { content: next, alreadyCorrect: false, patched: true };
+    }
+
+    next = content.replace(
+      COMPUTER_USE_NODE_REPL_DYNAMIC_TOOLS_TOP_LEVEL_CURRENT_RE,
+      computerUseNodeReplDynamicToolsTopLevelCurrentReplacement,
     );
     return { content: next, alreadyCorrect: false, patched: next !== content };
   }
@@ -2656,26 +2705,46 @@ try {
     // Prop keys (archivedChats … isError … onLoadNextPage) are stable component
     // prop names; the isError value is a minified local we capture and rewrite.
     const isErrorPropMatch = content
-      .slice(archivedPanelAnchor, archivedPanelAnchor + 400)
+      .slice(archivedPanelAnchor, archivedPanelAnchor + 1200)
       .match(/isError:([A-Za-z_$][\w$]*),onLoadNextPage:/);
-    if (!isErrorPropMatch) {
+    if (isErrorPropMatch) {
+      const isErrorVar = isErrorPropMatch[1];
+      const combinedErrorRe = new RegExp(
+        '(^|[^\\w$])(' + isErrorVar + ')=([A-Za-z_$][\\w$]*)\\|\\|' +
+          '[A-Za-z_$][\\w$]*==null&&[A-Za-z_$][\\w$]*(?=[,;)])',
+      );
+      if (combinedErrorRe.test(content)) {
+        const next = content.replace(
+          combinedErrorRe,
+          (_match, prefix, errorVar, localErrorVar) =>
+            `${prefix}${errorVar}=${localErrorVar}` +
+            ARCHIVED_SETTINGS_OFFLINE_LOCAL_VISIBILITY_PATCH_MARKER,
+        );
+        if (next !== content) {
+          return { content: next, alreadyCorrect: false, patched: true };
+        }
+      }
+    }
+
+    const currentErrorPropRe =
+      /isError:([A-Za-z_$][\w$]*&&[A-Za-z_$][\w$]*)\|\|[A-Za-z_$][\w$]*==null&&[A-Za-z_$][\w$]*(?=,onLoadNextPage:)/;
+    const currentErrorPropMatch = currentErrorPropRe.exec(
+      content.slice(archivedPanelAnchor, archivedPanelAnchor + 1200),
+    );
+    if (!currentErrorPropMatch) {
       return { content, alreadyCorrect: false, patched: false };
     }
-    const isErrorVar = isErrorPropMatch[1];
-    const combinedErrorRe = new RegExp(
-      '(^|[^\\w$])(' + isErrorVar + ')=([A-Za-z_$][\\w$]*)\\|\\|' +
-        '[A-Za-z_$][\\w$]*==null&&[A-Za-z_$][\\w$]*(?=[,;)])',
-    );
-    if (!combinedErrorRe.test(content)) {
-      return { content, alreadyCorrect: false, patched: false };
-    }
-    const next = content.replace(
-      combinedErrorRe,
-      (_match, prefix, errorVar, localErrorVar) =>
-        `${prefix}${errorVar}=${localErrorVar}` +
-        ARCHIVED_SETTINGS_OFFLINE_LOCAL_VISIBILITY_PATCH_MARKER,
-    );
-    return { content: next, alreadyCorrect: false, patched: next !== content };
+    const absoluteStart = archivedPanelAnchor + currentErrorPropMatch.index;
+    const absoluteEnd = absoluteStart + currentErrorPropMatch[0].length;
+    return {
+      content:
+        content.slice(0, absoluteStart) +
+        `isError:${currentErrorPropMatch[1]}` +
+        ARCHIVED_SETTINGS_OFFLINE_LOCAL_VISIBILITY_PATCH_MARKER +
+        content.slice(absoluteEnd),
+      alreadyCorrect: false,
+      patched: true,
+    };
   }
   const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_LEGACY_RE =
     /if\(([A-Za-z_$][\w$]*)\.namespace===`node_repl`&&([A-Za-z_$][\w$]*)===`js`\)\{let _codexOfflineNodeReplResult;try\{_codexOfflineNodeReplResult=await Pi\(`mcpServer\/tool\/call`,\{params:\{threadId:([A-Za-z_$][\w$]*),server:`node_repl`,tool:`js`,arguments:\1\.arguments\}\}\);let _codexOfflineNodeReplText=Array\.isArray\(_codexOfflineNodeReplResult\?\.content\)\?_codexOfflineNodeReplResult\.content\.map\(e=>e\?\.type===`text`\?String\(e\.text\?\?``\):JSON\.stringify\(e\)\)\.join\(`\\n`\):JSON\.stringify\(_codexOfflineNodeReplResult\);u=\{contentItems:\[\{type:`inputText`,text:_codexOfflineNodeReplText\}\],success:_codexOfflineNodeReplResult\?\.isError!==!0\}\}catch\(_codexOfflineNodeReplError\)\{u=Ge\(String\(_codexOfflineNodeReplError\?\.message\?\?_codexOfflineNodeReplError\)\)\}\/\*codex-offline:computer-use-node-repl-dynamic-tool-call\*\/X\.dispatchMessage\(`mcp-response`,\{hostId:([A-Za-z_$][\w$]*),response:\{id:a\(([A-Za-z_$][\w$]*)\),result:u\}\}\);return\}/;
@@ -2700,7 +2769,7 @@ try {
   const BROWSER_USE_DESCRIPTOR_PATCHED_RE =
     /\{autoInstallOptOutKey:[A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*\([A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*\),installWhenMissing:!0,name:[A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*,isAvailable:\(\{features:[A-Za-z_$][\w$]*\}\)=>\/\*codex-offline:bundled-browser-plugins-no-force-reload\*\/!0,migrate:[A-Za-z_$][\w$]*\}/;
   const SYNC_EXTERNAL_BROWSER_DESCRIPTOR_RE =
-    /\{(?:forceReload:!0,)?name:([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)?),syncInstallStateWithChromeExtension:!0,isAvailable:\(\{(buildFlavor:[A-Za-z_$][\w$]*(?:,env:[A-Za-z_$][\w$]*)?,features:([A-Za-z_$][\w$]*))\}\)=>(?:(?:[A-Za-z_$][\w$]*\([A-Za-z_$][\w$]*(?:,[A-Za-z_$][\w$]*)?\)&&\3\.externalBrowserUseAllowed)|(?:\3\.externalBrowserUseAllowed&&[A-Za-z_$][\w$]*\([A-Za-z_$][\w$]*\)))(\})/g;
+    /\{(?:forceReload:!0,)?name:([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)?),syncInstallStateWithChromeExtension:!0,isAvailable:\(\{(buildFlavor:[A-Za-z_$][\w$]*(?:,env:[A-Za-z_$][\w$]*)?,features:([A-Za-z_$][\w$]*))\}\)=>(?:(?:[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\([A-Za-z_$][\w$]*(?:,[A-Za-z_$][\w$]*)?\)&&\3\.externalBrowserUseAllowed)|(?:\3\.externalBrowserUseAllowed&&[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\([A-Za-z_$][\w$]*\)))(\})/g;
   const SYNC_EXTERNAL_BROWSER_DESCRIPTOR_PATCHED_RE =
     /\{installWhenMissing:!0,name:[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)?,syncInstallStateWithChromeExtension:!0,isAvailable:\(\{buildFlavor:[A-Za-z_$][\w$]*(?:,env:[A-Za-z_$][\w$]*)?,features:[A-Za-z_$][\w$]*\}\)=>\/\*codex-offline:bundled-browser-plugins-no-force-reload\*\/!0\}/;
   const IN_APP_BROWSER_DESCRIPTOR_RE =

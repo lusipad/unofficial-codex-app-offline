@@ -271,3 +271,99 @@ test("26.721 Chrome skill bootstrap accepts upstream single-line guidance", () =
 
   assert.match(fixture, needle);
 });
+
+test("26.727 Chrome descriptors accept dotted availability helpers", () => {
+  const regexSource = sourceSlice(
+    "  const SYNC_EXTERNAL_BROWSER_DESCRIPTOR_RE =",
+    "\n  const SYNC_EXTERNAL_BROWSER_DESCRIPTOR_PATCHED_RE =",
+  );
+  const currentRegex = Function(
+    `"use strict";\n${regexSource}\nreturn SYNC_EXTERNAL_BROWSER_DESCRIPTOR_RE;`,
+  )();
+  const fixture =
+    "{name:s.c,syncInstallStateWithChromeExtension:!0," +
+    "isAvailable:({buildFlavor:e,env:t,features:n})=>s.a(e,t)&&n.externalBrowserUseAllowed}";
+
+  assert.match(fixture, currentRegex);
+});
+
+test("26.727 dynamic tools keep node_repl at the top-level namespace boundary", () => {
+  const regexSource = sourceSlice(
+    "  const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOLS_TOP_LEVEL_CURRENT_RE =",
+    "\n  const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_RE =",
+  );
+  const currentRegex = Function(
+    `"use strict";\n${regexSource}\nreturn COMPUTER_USE_NODE_REPL_DYNAMIC_TOOLS_TOP_LEVEL_CURRENT_RE;`,
+  )();
+  const replacementSource = sourceSlice(
+    "  function computerUseNodeReplDynamicToolsTopLevelCurrentReplacement(",
+    "\n  function patchComputerUseNodeReplDynamicTools(",
+  );
+  const replacement = Function(
+    "COMPUTER_USE_NODE_REPL_NAMESPACE_GROUP_SPEC",
+    "COMPUTER_USE_NODE_REPL_NAMESPACE_TOOL_SPEC",
+    "COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_PATCH_MARKER",
+    `"use strict";\n${replacementSource}\nreturn computerUseNodeReplDynamicToolsTopLevelCurrentReplacement;`,
+  )(
+    "{type:`namespace`,name:`node_repl`,description:`Node REPL tools for Computer Use.`,tools:[{type:`function`,name:`js`}]}",
+    "{type:`function`,name:`js`}",
+    "/*codex-offline:computer-use-node-repl-dynamic-tool*/",
+  );
+  const fixture =
+    "const tools=[...C];" +
+    "].map(e=>({type:`function`,...e,...x&&!jtl.has(e.name)?{deferLoading:!0}:{}}));" +
+    "return x?[{type:`namespace`,name:L2,description:`Tools provided by the Codex app.`,tools:A},...D]:A";
+
+  const patched = fixture.replace(currentRegex, replacement);
+  assert.ok(patched.includes("/*codex-offline:computer-use-node-repl-dynamic-tool*/"));
+  assert.match(patched, /\.\.\.D,\{type:`namespace`,name:`node_repl`/);
+  assert.match(patched, /:A\.concat\(\[\{type:`function`,name:`js`/);
+});
+
+test("26.727 archived settings keeps local errors separate from cloud task errors", () => {
+  const patchSource = sourceSlice(
+    "  function patchArchivedSettingsOfflineVisibility(content) {",
+    "\n  const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_LEGACY_RE =",
+  );
+  const patchArchivedSettingsOfflineVisibility = Function(
+    "ARCHIVED_SETTINGS_OFFLINE_LOCAL_VISIBILITY_PATCH_MARKER",
+    `"use strict";\n${patchSource}\nreturn patchArchivedSettingsOfflineVisibility;`,
+  )("/*codex-offline:archived-settings-offline-local-visibility*/");
+  const fixture =
+    "return{archivedChats:foo,projects:bar,isError:t&&l||u==null&&g," +
+    "onLoadNextPage:d};";
+
+  const result = patchArchivedSettingsOfflineVisibility(fixture);
+  assert.equal(result.patched, true);
+  assert.match(
+    result.content,
+    /isError:t&&l\/\*codex-offline:archived-settings-offline-local-visibility\*\//,
+  );
+  assert.ok(!result.content.includes("u==null&&g"));
+});
+
+test("26.727 Workspace Dependencies enables the current adjacent gate layout", () => {
+  const patchSource = sourceSlice(
+    "function patchWorkspaceDependenciesSettingsGate(",
+    "// end patchWorkspaceDependenciesSettingsGate",
+  );
+  const patchWorkspaceDependenciesSettingsGate = Function(
+    "escapeRegExp",
+    `"use strict";\n${patchSource}\nreturn patchWorkspaceDependenciesSettingsGate;`,
+  )((value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  const fixture =
+    "settings.agent.dependencies.enabled.description;" +
+    "a=ge(we),o=ge(`2106641128`),s=ge(`3693343337`);";
+
+  const result = patchWorkspaceDependenciesSettingsGate(
+    fixture,
+    "/*codex-offline:workspace-dependencies-settings*/",
+    "/*codex-offline:renderer-known-statsig-gates*/",
+  );
+  assert.equal(result.patched, true);
+  assert.ok(
+    result.content.includes(
+      "a=!0/*codex-offline:workspace-dependencies-settings*/,o=ge(`2106641128`)",
+    ),
+  );
+});

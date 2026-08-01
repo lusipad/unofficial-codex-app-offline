@@ -296,17 +296,31 @@ function Export-AppSource {
 function Get-ChromeExtensionConfig {
     param([Parameter(Mandatory = $true)][string]$AppRoot)
 
-    $configPath = Join-Path $AppRoot 'resources\plugins\openai-bundled\plugins\chrome\scripts\extension-id.json'
-    if (-not (Test-Path -LiteralPath $configPath -PathType Leaf)) {
+    $configPath = @(
+        Join-Path $AppRoot 'resources\plugins\openai-bundled\plugins\chrome\scripts\extension-id.json'
+        Join-Path $AppRoot 'resources\plugins\openai-bundled\plugins\chrome\scripts\extension-ids.json'
+    ) | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
+    if ($null -eq $configPath) {
         return $null
     }
 
     $config = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
-    if ([string]::IsNullOrWhiteSpace([string]$config.extensionId)) {
-        throw "Chrome plugin extension config is missing extensionId: $configPath"
+    $extensionId = [string](Get-OptionalProperty -Object $config -Name 'extensionId')
+    if ([string]::IsNullOrWhiteSpace($extensionId)) {
+        $extensionId = [string](@(
+            (Get-OptionalProperty -Object $config -Name 'extensionIds') |
+                Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } |
+                Select-Object -First 1
+        )[0])
+    }
+    if ([string]::IsNullOrWhiteSpace($extensionId)) {
+        throw "Chrome plugin extension config is missing extensionId or extensionIds: $configPath"
     }
 
-    return $config
+    return [pscustomobject]@{
+        extensionId = $extensionId
+        configPath = [string]$configPath
+    }
 }
 
 function Resolve-OfflineRuntimePluginMarketplaceRoot {

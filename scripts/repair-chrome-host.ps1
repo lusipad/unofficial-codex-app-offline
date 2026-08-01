@@ -185,16 +185,37 @@ if ($PSVersionTable.PSEdition -ne 'Desktop' -and -not $IsWindows) {
 }
 
 $chromePluginRoot = Get-ChromePluginRoot -RootPath $InstallRoot
-$extensionConfigPath = Join-Path $chromePluginRoot 'scripts\extension-id.json'
-if (-not (Test-Path -LiteralPath $extensionConfigPath -PathType Leaf)) {
-    throw "Chrome extension config was not found: $extensionConfigPath"
+$extensionConfigPath = @(
+    Join-Path $chromePluginRoot 'scripts\extension-id.json'
+    Join-Path $chromePluginRoot 'scripts\extension-ids.json'
+) | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
+if ($null -eq $extensionConfigPath) {
+    throw "Chrome extension config was not found under: $(Join-Path $chromePluginRoot 'scripts')"
 }
 
 $extensionConfig = Get-Content -LiteralPath $extensionConfigPath -Raw | ConvertFrom-Json
-$extensionId = [string]$extensionConfig.extensionId
+$extensionIdProperty = $extensionConfig.PSObject.Properties['extensionId']
+$extensionId = if ($null -eq $extensionIdProperty) { '' } else { [string]$extensionIdProperty.Value }
+if ([string]::IsNullOrWhiteSpace($extensionId)) {
+    $extensionIdsProperty = $extensionConfig.PSObject.Properties['extensionIds']
+    $extensionIdCandidates = if ($null -ne $extensionIdsProperty) {
+        @($extensionIdsProperty.Value)
+    }
+    else {
+        @()
+    }
+    $extensionIds = @(
+        $extensionIdCandidates |
+            Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } |
+            Select-Object -First 1
+    )
+    if ($extensionIds.Count -gt 0) {
+        $extensionId = [string]$extensionIds[0]
+    }
+}
 $extensionHostName = [string]$extensionConfig.extensionHostName
 if ([string]::IsNullOrWhiteSpace($extensionId) -or [string]::IsNullOrWhiteSpace($extensionHostName)) {
-    throw "Chrome extension config is missing extensionId or extensionHostName: $extensionConfigPath"
+    throw "Chrome extension config is missing extensionId, extensionIds, or extensionHostName: $extensionConfigPath"
 }
 
 $architectureName = Get-ArchitectureName
