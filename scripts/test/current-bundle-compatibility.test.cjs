@@ -110,6 +110,28 @@ test("archive verifier accepts dynamic and fixed useStateDbOnly layouts", () => 
   assert.equal(isVerified(`${marker}useStateDbOnly:!0`, marker), true);
 });
 
+test("26.727 archive verifier accepts the current isError prop layout", () => {
+  const verifierBlock = verifierSourceSlice(
+    "  archivedSettingsOfflineLocalVisibilityPatched ||=",
+    "\n  featureOverridesPreserveMcpConfigPatched ||=",
+  );
+  const isVerified = Function(
+    "content",
+    "ARCHIVED_SETTINGS_OFFLINE_LOCAL_VISIBILITY_PATCH_MARKER",
+    `"use strict";\nlet archivedSettingsOfflineLocalVisibilityPatched = false;\n${verifierBlock}\nreturn archivedSettingsOfflineLocalVisibilityPatched;`,
+  );
+  const marker = "/*codex-offline:archived-settings-offline-local-visibility*/";
+
+  assert.equal(
+    isVerified(`archivedChats:foo,isError:t&&l${marker},onLoadNextPage:d`, marker),
+    true,
+  );
+  assert.equal(
+    isVerified("archivedChats:foo,isError:t&&l,onLoadNextPage:d", marker),
+    false,
+  );
+});
+
 test("26.721 Chrome native pipe patch accepts an inline createConnection return", () => {
   const matchSource = sourceSlice(
     "    const createWithConnectionMatch =",

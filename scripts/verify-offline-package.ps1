@@ -1478,7 +1478,7 @@ for (const entry of javaScriptEntries) {
   archivedSettingsOfflineLocalVisibilityPatched ||=
     content.includes(ARCHIVED_SETTINGS_OFFLINE_LOCAL_VISIBILITY_PATCH_MARKER) &&
     content.includes('archivedChats:') &&
-    /=[A-Za-z_$][\w$]*\/\*codex-offline:archived-settings-offline-local-visibility\*\//.test(content);
+    /(?:isError:|=)[A-Za-z_$][\w$]*(?:&&[A-Za-z_$][\w$]*)?\/\*codex-offline:archived-settings-offline-local-visibility\*\//.test(content);
   featureOverridesPreserveMcpConfigPatched ||=
     content.includes(FEATURE_OVERRIDES_PRESERVE_MCP_CONFIG_PATCH_MARKER) &&
     content.includes('`features.unified_exec`]=!0') &&
