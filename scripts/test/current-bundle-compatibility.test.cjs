@@ -367,3 +367,27 @@ test("26.727 Workspace Dependencies enables the current adjacent gate layout", (
     ),
   );
 });
+
+test("26.727 verifier recognizes the current agent settings surface", () => {
+  const helperSource = verifierSourceSlice(
+    "function hasWorkspaceDependenciesSettingsSurface(",
+    "function directStatsigGateCallRe(",
+  );
+  const hasWorkspaceDependenciesSettingsSurface = Function(
+    `"use strict";\n${helperSource}\nreturn hasWorkspaceDependenciesSettingsSurface;`,
+  )();
+
+  assert.equal(
+    hasWorkspaceDependenciesSettingsSurface(
+      "settings.agent.dependencies.enabled.description",
+    ),
+    true,
+  );
+  assert.equal(
+    hasWorkspaceDependenciesSettingsSurface(
+      "defaultMessage:`Workspace Dependencies`",
+    ),
+    true,
+  );
+  assert.equal(hasWorkspaceDependenciesSettingsSurface("other surface"), false);
+});

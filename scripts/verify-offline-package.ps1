@@ -1135,6 +1135,12 @@ function escapeRegExp(value) {
 function info(message) {
   console.log(`[verify-offline-package] ${message}`);
 }
+function hasWorkspaceDependenciesSettingsSurface(content) {
+  return [
+    'defaultMessage:`Workspace Dependencies`',
+    'settings.agent.dependencies.enabled.description',
+  ].some(marker => content.includes(marker));
+}
 function directStatsigGateCallRe(gateId) {
   return new RegExp(
     `!?(?:\\(0,[$\\w]+\\)|[$\\w]+)\\(\`${escapeRegExp(gateId)}\`\\)`
@@ -1355,7 +1361,7 @@ for (const entry of javaScriptEntries) {
     if (content.includes(RENDERER_KNOWN_STATSIG_GATES_PATCH_MARKER)) {
       rendererKnownStatsigGatesPatched = true;
     }
-    if (content.includes('defaultMessage:`Workspace Dependencies`')) {
+    if (hasWorkspaceDependenciesSettingsSurface(content)) {
       workspaceDependenciesSettingsSurfaceSeen = true;
       if (content.includes(WORKSPACE_DEPENDENCIES_SETTINGS_PATCH_MARKER)) {
         workspaceDependenciesSettingsPatched = true;
