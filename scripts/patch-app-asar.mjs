@@ -2765,7 +2765,7 @@ try {
   const CHROME_DESCRIPTOR_PATCHED_RE =
     /\{installWhenMissing:!0,name:lt,isAvailable:\(\{buildFlavor:[A-Za-z_$][\w$]*,features:[A-Za-z_$][\w$]*\}\)=>\/\*codex-offline:bundled-browser-plugins-no-force-reload\*\/!0\}/;
   const BROWSER_USE_DESCRIPTOR_RE =
-    /(\{autoInstallOptOutKey:([A-Za-z_$][\w$]*)\.([A-Za-z_$][\w$]*)\(\2\.([A-Za-z_$][\w$]*)\),(?:forceReload:!0,)?installWhenMissing:!0,name:\2\.\4,isAvailable:\(\{features:([A-Za-z_$][\w$]*)\}\)=>)(\5\.inAppBrowserUseAllowed)(,migrate:([A-Za-z_$][\w$]*)\})/;
+    /(\{autoInstallOptOutKey:([A-Za-z_$][\w$]*)\.([A-Za-z_$][\w$]*)\(\2\.([A-Za-z_$][\w$]*)\),(?:forceReload:!0,)?installWhenMissing:!0,name:\2\.\4,isAvailable:\(\{features:([A-Za-z_$][\w$]*)\}\)=>)(\5\.inAppBrowserUseAllowed(?:\|\|\5\.externalBrowserUseAllowed)?)(,migrate:([A-Za-z_$][\w$]*)\})/;
   const BROWSER_USE_DESCRIPTOR_PATCHED_RE =
     /\{autoInstallOptOutKey:[A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*\([A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*\),installWhenMissing:!0,name:[A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*,isAvailable:\(\{features:[A-Za-z_$][\w$]*\}\)=>\/\*codex-offline:bundled-browser-plugins-no-force-reload\*\/!0,migrate:[A-Za-z_$][\w$]*\}/;
   const SYNC_EXTERNAL_BROWSER_DESCRIPTOR_RE =

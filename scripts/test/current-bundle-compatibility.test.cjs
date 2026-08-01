@@ -287,6 +287,22 @@ test("26.727 Chrome descriptors accept dotted availability helpers", () => {
   assert.match(fixture, currentRegex);
 });
 
+test("26.727 browser-use descriptor accepts external browser availability", () => {
+  const regexSource = sourceSlice(
+    "  const BROWSER_USE_DESCRIPTOR_RE =",
+    "\n  const BROWSER_USE_DESCRIPTOR_PATCHED_RE =",
+  );
+  const currentRegex = Function(
+    `"use strict";\n${regexSource}\nreturn BROWSER_USE_DESCRIPTOR_RE;`,
+  )();
+  const fixture =
+    "{autoInstallOptOutKey:n.hs(n.rs),installWhenMissing:!0," +
+    "name:n.rs,isAvailable:({features:e})=>e.inAppBrowserUseAllowed||" +
+    "e.externalBrowserUseAllowed,migrate:Ds}";
+
+  assert.match(fixture, currentRegex);
+});
+
 test("26.727 dynamic tools keep node_repl at the top-level namespace boundary", () => {
   const regexSource = sourceSlice(
     "  const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOLS_TOP_LEVEL_CURRENT_RE =",
