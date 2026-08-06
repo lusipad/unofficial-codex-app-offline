@@ -48,6 +48,18 @@ function Assert-NodeSyntax {
     }
 }
 
+function Assert-FileHasNoUtf8Bom {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$Context
+    )
+
+    $bytes = [System.IO.File]::ReadAllBytes($Path)
+    if ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) {
+        throw "$Context must not use a UTF-8 BOM: $Path"
+    }
+}
+
 function Read-CapabilityContract {
     param(
         [Parameter(Mandatory = $true)][string]$ContractPath
@@ -834,6 +846,7 @@ try {
     if (-not (Test-Path $bundledMarketplaceManifestPath -PathType Leaf)) {
         throw 'Bundled OpenAI plugin marketplace manifest was not found in the portable package.'
     }
+    Assert-FileHasNoUtf8Bom -Path $bundledMarketplaceManifestPath -Context 'Bundled OpenAI plugin marketplace manifest'
     $bundledMarketplaceManifest = Get-Content -Path $bundledMarketplaceManifestPath -Raw | ConvertFrom-Json
     $bundledMarketplaceEntries = @($bundledMarketplaceManifest.plugins)
     foreach ($offlineRuntimePluginName in @('computer-use', 'documents', 'spreadsheets', 'presentations')) {
@@ -871,17 +884,12 @@ try {
         }
 
         if ($offlineRuntimePluginName -eq 'computer-use') {
-            $computerUseClientPath = Join-Path $offlineRuntimePluginRoot 'scripts\computer-use-client.mjs'
-            if (-not (Test-Path $computerUseClientPath -PathType Leaf)) {
-                throw 'Bundled computer-use plugin is missing scripts\computer-use-client.mjs.'
-            }
-            Assert-NodeSyntax -Path $computerUseClientPath -Context 'Bundled computer-use client'
-            $computerUseClientContent = Get-Content -Path $computerUseClientPath -Raw
-            if (-not $computerUseClientContent.Contains('codex-offline:computer-use-native-pipe-fallback')) {
-                throw 'Bundled computer-use client is missing the native pipe fallback patch.'
-            }
-            if ($computerUseClientContent.Contains('discoveredPipePaths.length === 1')) {
-                throw 'Bundled computer-use client still ignores multiple discovered native pipes.'
+            $computerUseSkillContent = Get-Content -Path $offlineRuntimeSkillPath -Raw
+            if (
+                -not $computerUseSkillContent.Contains('await import("@oai/sky")') -or
+                -not $computerUseSkillContent.Contains('globalThis.sky = sky')
+            ) {
+                throw 'Bundled computer-use skill is missing its direct @oai/sky runtime instructions.'
             }
             $computerUseSkyRootCandidates = @(
                 (Join-Path $offlineRuntimePluginRoot 'node_modules\@oai\sky'),
@@ -899,6 +907,19 @@ try {
             $encodedComputerUseSkyPackagePath = Join-Path $computerUseNodeModulesRoot '%40oai\sky\package.json'
             if (Test-Path $encodedComputerUseSkyPackagePath -PathType Leaf) {
                 throw 'Bundled computer-use plugin still has URL-encoded node_modules\%40oai\sky.'
+            }
+            $statsigClientCoreSourceRoot = Join-Path $computerUseNodeModulesRoot '@statsig\client-core\src'
+            foreach ($statsigGlobalFileName in @('$_StatsigGlobal.js', '$_StatsigGlobal.d.ts')) {
+                $statsigGlobalPath = Join-Path $statsigClientCoreSourceRoot $statsigGlobalFileName
+                if (-not (Test-Path $statsigGlobalPath -PathType Leaf)) {
+                    throw "Bundled @statsig/client-core is missing $statsigGlobalFileName."
+                }
+            }
+            $encodedStatsigGlobalFiles = @(
+                Get-ChildItem -LiteralPath $statsigClientCoreSourceRoot -File -Filter '%24_StatsigGlobal.*' -ErrorAction SilentlyContinue
+            )
+            if ($encodedStatsigGlobalFiles.Count -gt 0) {
+                throw 'Bundled @statsig/client-core still has URL-encoded %24_StatsigGlobal files.'
             }
             $computerUseHelperPath = Join-Path $computerUseSkyRoot 'bin\windows\codex-computer-use.exe'
             if (-not (Test-Path $computerUseHelperPath -PathType Leaf)) {
@@ -921,10 +942,6 @@ try {
             )
             if ($encodedComputerUsePnpmTslibPaths.Count -gt 0) {
                 throw 'Bundled computer-use plugin still has URL-encoded .pnpm tslib dependency path.'
-            }
-            $computerUseSkillContent = Get-Content -Path $offlineRuntimeSkillPath -Raw
-            if (-not $computerUseSkillContent.Contains('setupComputerUseRuntime')) {
-                throw 'Bundled computer-use skill is missing its runtime setup instructions.'
             }
         }
     }

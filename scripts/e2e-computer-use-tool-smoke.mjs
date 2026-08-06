@@ -27,6 +27,7 @@ const resultPath = path.join(workRoot, 'result.json');
 const finalBodyPath = path.join(workRoot, 'final-body.txt');
 const progressPath = path.join(workRoot, 'progress.json');
 const composerDiagnosticsPath = path.join(workRoot, 'composer-diagnostics.json');
+const runtimeProofPath = path.join(workRoot, 'runtime-proof.json');
 const userDataPath = path.join(workRoot, 'user-data');
 
 const out = fs.openSync(stdoutPath, 'w');
@@ -61,7 +62,7 @@ try {
   await codexWindow.setViewportSize({ width: 1450, height: 900 });
 
   await clickNewChat(codexWindow);
-  await enterComputerPrompt(codexWindow, buildPrompt({ marker }), {
+  await enterComputerPrompt(codexWindow, buildPrompt({ marker, runtimeProofPath }), {
     composerDiagnosticsPath,
   });
   await pollForAnswer(codexWindow, {
@@ -73,32 +74,19 @@ try {
   finalBody = await codexWindow.locator('body').innerText({ timeout: 10_000 });
   fs.writeFileSync(finalBodyPath, finalBody, 'utf8');
   const finalAnswer = extractAnswerAfterMarker(finalBody, marker);
-  const stdout = fs.existsSync(stdoutPath) ? fs.readFileSync(stdoutPath, 'utf8') : '';
   const summary = extractListAppsSummary(finalAnswer);
-  const bridgeEvidence = inspectBridgeEvidence(stdout);
+  const runtimeProof = readRuntimeProof(runtimeProofPath, marker);
   pass = finalAnswer.includes(marker) &&
     /COMPUTER_USE_TOOL_AVAILABLE/i.test(finalAnswer) &&
-    summary != null &&
-    summary.isArray === true &&
-    Number.isInteger(summary.count) &&
-    summary.count > 0 &&
-    Array.isArray(summary.sample) &&
-    summary.sample.length > 0 &&
-    bridgeEvidence.hasNodeReplListAppsCall &&
-    bridgeEvidence.hasSummaryOutput &&
-    !bridgeEvidence.hasSshTarget &&
-    !bridgeEvidence.hasBlockingBridgeError;
+    hasValidListAppsSummary(summary) &&
+    hasValidListAppsSummary(runtimeProof?.summary);
   reason = pass
     ? 'computer-use-list-apps-summary-confirmed'
-    : bridgeEvidence.hasSshTarget
-      ? 'computer-use-js-returned-ssh-target'
-      : bridgeEvidence.hasBlockingBridgeError
-        ? 'computer-use-js-bridge-reported-error'
-        : summary == null
-          ? 'final-answer-missing-list-apps-summary'
-          : !bridgeEvidence.hasSummaryOutput
-            ? 'bridge-missing-list-apps-summary-output'
-            : 'list-apps-summary-did-not-confirm-apps';
+    : summary == null
+      ? 'final-answer-missing-list-apps-summary'
+      : runtimeProof == null
+        ? 'runtime-proof-missing-or-invalid'
+        : 'list-apps-summary-did-not-confirm-apps';
 } catch (error) {
   reason = error instanceof Error ? error.message : String(error);
   try {
@@ -122,6 +110,7 @@ try {
     finalBodyPath,
     progressPath,
     composerDiagnosticsPath,
+    runtimeProofPath,
     userDataPath,
     codexHome,
   };
@@ -212,12 +201,14 @@ async function clickNewChat(window) {
 
 async function enterComputerPrompt(window, prompt, { composerDiagnosticsPath }) {
   const composer = await findComposer(window);
+  await composer.fill('');
   await composer.click();
   await window.keyboard.type('@电脑', { delay: 1 });
   await window.waitForTimeout(1_500);
   await chooseComputerMention(window);
   await window.waitForTimeout(750);
-  const composerDiagnostics = await captureComposerDiagnostics(composer);
+  const selectedComposer = await findComposer(window);
+  const composerDiagnostics = await captureComposerDiagnostics(selectedComposer);
   fs.writeFileSync(composerDiagnosticsPath, JSON.stringify(composerDiagnostics, null, 2), 'utf8');
   if (!composerDiagnostics.hasStructuredComputerUseMention) {
     throw new Error(`computer-use-plugin-mention-not-structured: ${composerDiagnostics.summary}`);
@@ -244,22 +235,11 @@ async function findComposer(window) {
 }
 
 async function chooseComputerMention(window) {
-  const candidates = [
-    window.getByText(/^电脑$/).last(),
-    window.getByText(/^Computer$/i).last(),
-    window.getByText(/^Computer Use$/).last(),
-    window.getByText(/Control Windows apps from Codex/i).last(),
-  ];
-  for (const candidate of candidates) {
-    try {
-      await candidate.click({ timeout: 5_000 });
-      await window.waitForTimeout(500);
-      return;
-    } catch {
-      // Try the next selector.
-    }
-  }
-  await window.keyboard.press('Enter');
+  const candidate = window
+    .getByRole('button')
+    .filter({ hasText: 'Control Windows apps from ChatGPT' })
+    .first();
+  await candidate.click({ timeout: 45_000 });
   await window.waitForTimeout(500);
 }
 
@@ -295,15 +275,18 @@ async function captureComposerDiagnostics(composer) {
   });
 }
 
-function buildPrompt({ marker }) {
+function buildPrompt({ marker, runtimeProofPath }) {
   const markerSuffix = marker.replace(/^E2E_COMPUTER_USE_MARKER_/, '');
+  const runtimeProofPathLiteral = JSON.stringify(runtimeProofPath);
+  const runtimeProofMarkerExpression = `"E2E_COMPUTER_USE_MARKER" + "_" + ${JSON.stringify(markerSuffix)}`;
   return [
     '这是 Computer Use 工具暴露验收，只做无副作用检查。',
     '请使用 Computer Use 插件说明里的官方 JavaScript 入口，不要使用 shell、PowerShell、SendKeys、外部 Playwright/CDP 或其他 Windows 自动化替代路径。',
     '先连接 Windows，再执行轻量检查 list_apps。',
-    '不要因为 globalThis.sky 初始不存在就判定缺入口；必须先通过插件根目录的 scripts/computer-use-client.mjs 导入 setupComputerUseRuntime 并执行 await setupComputerUseRuntime({ globals: globalThis })。',
-    '插件根目录可由 process.env.NODE_REPL_NODE_MODULE_DIRS 的父目录推导；如果该环境变量缺失，再按 Computer Use 技能说明查找插件根目录。',
+    '不要因为 globalThis.sky 初始不存在就判定缺入口；必须先执行 const { sky } = await import("@oai/sky"); globalThis.sky = sky。',
+    '@oai/sky 由内置 cua_node runtime 暴露；不要搜索旧版插件脚本或自行启动 helper。',
     '请在官方 JavaScript 入口里计算一个摘要：const apps = await sky.list_apps(); const summary = { isArray: Array.isArray(apps), count: Array.isArray(apps) ? apps.length : -1, sample: Array.isArray(apps) ? apps.slice(0, 3).map(app => ({ id: String(app?.id ?? ""), displayName: String(app?.displayName ?? ""), windowCount: Array.isArray(app?.windows) ? app.windows.length : 0, isRunning: app?.isRunning === true })) : [] };',
+    `请在同一次官方 JavaScript 执行里用 await (await import("node:fs/promises")).writeFile(${runtimeProofPathLiteral}, JSON.stringify({ marker: ${runtimeProofMarkerExpression}, summary }), "utf8") 写入机器验收证据。`,
     '请用 nodeRepl.write("COMPUTER_USE_LIST_APPS_SUMMARY=" + JSON.stringify(summary)) 输出摘要。',
     `最终回答必须包含一个 marker：把 E2E_COMPUTER_USE_MARKER 和 ${markerSuffix} 用下划线拼接。`,
     '如果 list_apps 返回了 isArray=true 且 count>0 的非错误结果，再回答把 COMPUTER_USE、TOOL、AVAILABLE 三段用下划线拼接后的短语，并单独回显一行 COMPUTER_USE_LIST_APPS_SUMMARY=<JSON>。',
@@ -364,27 +347,22 @@ function extractListAppsSummary(text) {
   }
 }
 
-function inspectBridgeEvidence(stdout) {
-  const bridgeLines = stdout
-    .split(/\r?\n/)
-    .filter(line => line.includes('computer_use_node_repl_js_call'));
-  return {
-    hasNodeReplListAppsCall: bridgeLines.some(line => (
-      line.includes('hasListApps=true') &&
-      line.includes('isError=false')
-    )),
-    hasSummaryOutput: bridgeLines.some(line => (
-      line.includes('COMPUTER_USE_LIST_APPS_SUMMARY=') &&
-      /\\?"isArray\\?":true/.test(line)
-    )),
-    hasSshTarget: bridgeLines.some(line => line.includes('resultPrefix={"kind":"ssh"')),
-    hasBlockingBridgeError:
-      bridgeLines.some(line => line.includes('isError=true')) &&
-      !bridgeLines.some(line => (
-        line.includes('COMPUTER_USE_LIST_APPS_SUMMARY=') &&
-        /\\?"isArray\\?":true/.test(line)
-      )),
-  };
+function readRuntimeProof(runtimeProofPath, marker) {
+  try {
+    const proof = JSON.parse(fs.readFileSync(runtimeProofPath, 'utf8'));
+    return proof?.marker === marker ? proof : null;
+  } catch {
+    return null;
+  }
+}
+
+function hasValidListAppsSummary(summary) {
+  return summary != null &&
+    summary.isArray === true &&
+    Number.isInteger(summary.count) &&
+    summary.count > 0 &&
+    Array.isArray(summary.sample) &&
+    summary.sample.length > 0;
 }
 
 function killProcessTree(pid) {

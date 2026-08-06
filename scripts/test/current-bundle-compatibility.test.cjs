@@ -14,6 +14,18 @@ const verifierScriptSource = fs.readFileSync(
   path.join(repoRoot, "scripts", "verify-offline-package.ps1"),
   "utf8",
 );
+const computerUseSmokeSource = fs.readFileSync(
+  path.join(repoRoot, "scripts", "e2e-computer-use-tool-smoke.mjs"),
+  "utf8",
+);
+const buildScriptSource = fs.readFileSync(
+  path.join(repoRoot, "scripts", "build-offline-package.ps1"),
+  "utf8",
+);
+const setupScriptSource = fs.readFileSync(
+  path.join(repoRoot, "scripts", "setup-codex-offline.ps1"),
+  "utf8",
+);
 
 function sourceSlice(startNeedle, endNeedle) {
   const start = patchScriptSource.indexOf(startNeedle);
@@ -58,56 +70,6 @@ test("26.715 settings IPC keeps its native config handler while patching setting
   assert.match(patched, /case`show-settings`:\{let _win=c\.BrowserWindow\.fromWebContents\(e\)/);
   assert.match(patched, /_url\.searchParams\.set\("initialRoute","\/settings\/"\+t\.section\)/);
   assert.ok(patched.includes("case`open-config-toml`:{await c.shell.openPath(`config.toml`);break}"));
-});
-
-test("26.715 archived list fallback supports a fixed useStateDbOnly value", () => {
-  const archiveSource = sourceSlice(
-    "  const ARCHIVED_THREADS_LIST_ALL_DIRECT_RE =",
-    "\n  // The archived settings panel",
-  );
-  const partialListMarker = "/*codex-offline:archived-threads-partial-list*/";
-  const cacheFallbackMarker = "/*codex-offline:archived-threads-cache-fallback*/";
-  const patchArchivedThreadsPartialList = Function(
-    "ARCHIVED_THREADS_PARTIAL_LIST_PATCH_MARKER",
-    "ARCHIVED_THREADS_CACHE_FALLBACK_PATCH_MARKER",
-    `"use strict";\n${archiveSource}\nreturn patchArchivedThreadsPartialList;`,
-  )(partialListMarker, cacheFallbackMarker);
-  const fixture =
-    "async function XS(e,{modelProviders:t,archived:n=!1,sourceKinds:r=O}){" +
-    "let i=[],a=async o=>{let s={limit:100,cursor:o,sortKey:e.recentConversationsSortKey," +
-    "modelProviders:t,sourceKinds:r,archived:n,useStateDbOnly:!0}," +
-    "c=await e.sendRequest(`thread/list`,s,{priority:`background`,source:`thread_list`});" +
-    "i.push(...c.data),c.nextCursor&&await a(c.nextCursor)};return await a(null),i}";
-
-  const firstPass = patchArchivedThreadsPartialList(fixture);
-  assert.equal(firstPass.patched, true);
-  assert.ok(firstPass.content.includes(partialListMarker));
-  assert.ok(firstPass.content.includes(cacheFallbackMarker));
-  assert.match(firstPass.content, /catch\(_codexOfflineArchiveListError\)\{if\(n\)\{/);
-  assert.match(firstPass.content, /useStateDbOnly:!0/);
-
-  const secondPass = patchArchivedThreadsPartialList(firstPass.content);
-  assert.equal(secondPass.patched, false);
-  assert.equal(secondPass.alreadyCorrect, true);
-});
-
-test("archive verifier accepts dynamic and fixed useStateDbOnly layouts", () => {
-  const verifierBlock = verifierSourceSlice(
-    "  archivedThreadsStateDbOnlyPatched ||=",
-    "\n  archivedSettingsOfflineLocalVisibilityPatched ||=",
-  );
-  const isVerified = Function(
-    "content",
-    "ARCHIVED_THREADS_PARTIAL_LIST_PATCH_MARKER",
-    `"use strict";\nlet archivedThreadsStateDbOnlyPatched = false;\n${verifierBlock}\nreturn archivedThreadsStateDbOnlyPatched;`,
-  );
-  const marker = "/*codex-offline:archived-threads-partial-list*/";
-
-  assert.equal(
-    isVerified(`${marker}useStateDbOnly:n?!0:o`, marker),
-    true,
-  );
-  assert.equal(isVerified(`${marker}useStateDbOnly:!0`, marker), true);
 });
 
 test("26.727 archive verifier accepts the current isError prop layout", () => {
@@ -428,4 +390,132 @@ test("26.727 verifier recognizes the current agent settings surface", () => {
     true,
   );
   assert.equal(hasWorkspaceDependenciesSettingsSurface("other surface"), false);
+});
+
+test("26.730 node_repl config keeps env_vars when adding the sandbox bypass", () => {
+  const helperSource = sourceSlice(
+    "  const NODE_REPL_CONFIG_HELPER_RE =",
+    "\n  const COMPUTER_USE_PLUGIN_ROOT_FALLBACK_NEEDLE =",
+  );
+  const [configHelperRe, replacement] = Function(
+    "NODE_REPL_TOOL_SEARCH_FEATURE_PATCH_MARKER",
+    "NODE_REPL_DISABLE_SANDBOX_PATCH_MARKER",
+    `"use strict";\n${helperSource}\nreturn [NODE_REPL_CONFIG_HELPER_RE, NODE_REPL_CONFIG_HELPER_REPLACEMENT];`,
+  )(
+    "/*codex-offline:node-repl-tool-search-feature*/",
+    "/*codex-offline:node-repl-disable-sandbox*/",
+  );
+  const fixture =
+    "{[`mcp_servers.${ze}`]:{args:[],command:o,env:m," +
+    "...n.length===0?{}:{env_vars:Array.from(n)},startup_timeout_sec:120}}";
+
+  const patched = fixture.replace(configHelperRe, replacement);
+
+  assert.notEqual(patched, fixture);
+  assert.match(patched, /args:\[`--disable-sandbox`\],command:o,env:m,/);
+  assert.ok(patched.includes("...n.length===0?{}:{env_vars:Array.from(n)}"));
+  assert.ok(patched.includes("/*codex-offline:node-repl-disable-sandbox*/"));
+  assert.doesNotMatch(
+    "{[`mcp_servers.${ze}`]:{args:[],command:o,env:m,startup_timeout_sec:120}}",
+    configHelperRe,
+  );
+});
+
+test("26.730 verifier requires the direct @oai/sky Computer Use runtime", () => {
+  const verifierBlock = verifierSourceSlice(
+    "        if ($offlineRuntimePluginName -eq 'computer-use') {",
+    "    if (-not (Test-Path (Join-Path $browserPluginRoot",
+  );
+
+  assert.ok(verifierBlock.includes('await import("@oai/sky")'));
+  assert.ok(verifierBlock.includes("globalThis.sky = sky"));
+  assert.ok(!verifierBlock.includes("computerUseClientPath"));
+  assert.ok(!verifierBlock.includes("setupComputerUseRuntime"));
+});
+
+test("26.730 Computer Use smoke prompt initializes the direct sky runtime", () => {
+  assert.ok(
+    computerUseSmokeSource.includes('const { sky } = await import("@oai/sky")'),
+  );
+  assert.ok(computerUseSmokeSource.includes('import("node:fs/promises")'));
+  assert.ok(computerUseSmokeSource.includes("readRuntimeProof(runtimeProofPath, marker)"));
+  assert.ok(!computerUseSmokeSource.includes("inspectBridgeEvidence(stdout)"));
+  assert.ok(!computerUseSmokeSource.includes("computer_use_node_repl_js_call"));
+  assert.ok(!computerUseSmokeSource.includes("setupComputerUseRuntime"));
+  assert.ok(
+    computerUseSmokeSource.includes(
+      '`"E2E_COMPUTER_USE_MARKER" + "_" + ${JSON.stringify(markerSuffix)}`',
+    ),
+  );
+});
+
+test("26.730 Computer Use smoke reuses caller state and clears the composer", () => {
+  assert.ok(computerUseSmokeSource.includes("process.env.CODEX_HOME"));
+  assert.ok(!computerUseSmokeSource.includes("seedCodexHome"));
+  assert.ok(!computerUseSmokeSource.includes("auth.json"));
+  assert.ok(computerUseSmokeSource.includes("await composer.fill('')"));
+});
+
+test("26.730 packaging does not carry the legacy Computer Use client repair", () => {
+  assert.ok(!buildScriptSource.includes("Repair-ComputerUseClientNativePipeFallback"));
+  assert.ok(!setupScriptSource.includes("Repair-ComputerUseClientNativePipeFallback"));
+  assert.ok(!patchScriptSource.includes("setupComputerUseRuntime"));
+});
+
+test("26.730 packaging repairs the encoded Statsig global module filenames", () => {
+  assert.ok(buildScriptSource.includes("function Repair-EncodedNodeModuleEntries"));
+  assert.ok(buildScriptSource.includes("%24_StatsigGlobal.*"));
+  assert.ok(buildScriptSource.includes(".Replace('%24', '$')"));
+  assert.ok(
+    buildScriptSource.includes(
+      "Repair-EncodedNodeModuleEntries -RootPath (Join-Path $internalRoot 'app/resources/cua_node')",
+    ),
+  );
+  assert.ok(verifierScriptSource.includes("'$_StatsigGlobal.js'"));
+  assert.ok(verifierScriptSource.includes("'$_StatsigGlobal.d.ts'"));
+  assert.ok(verifierScriptSource.includes("'%24_StatsigGlobal.*'"));
+});
+
+test("26.730 patcher does not carry pre-helper node_repl migrations", () => {
+  assert.ok(!patchScriptSource.includes("NODE_REPL_DISABLE_SANDBOX_NEEDLE ="));
+  assert.ok(
+    !patchScriptSource.includes("NODE_REPL_DISABLE_SANDBOX_LEGACY_DIAGNOSTICS_NEEDLE"),
+  );
+  assert.ok(!patchScriptSource.includes("NODE_REPL_TOOL_SEARCH_FEATURE_UPGRADE_RE"));
+  assert.ok(
+    !patchScriptSource.includes("NODE_REPL_TOOL_SEARCH_FEATURE_MISSING_SEPARATOR_RE"),
+  );
+});
+
+test("26.730 runtime marketplace manifest is written without a UTF-8 BOM", () => {
+  assert.ok(
+    buildScriptSource.includes(
+      "[System.IO.File]::WriteAllText($manifestPath, $marketplaceJson, $utf8WithoutBom)",
+    ),
+  );
+  assert.ok(
+    buildScriptSource.includes(
+      "$utf8WithoutBom = New-Object System.Text.UTF8Encoding($false)",
+    ),
+  );
+  assert.ok(
+    !buildScriptSource.includes(
+      "$marketplace | ConvertTo-Json -Depth 8 | Set-Content -Path $manifestPath -Encoding UTF8",
+    ),
+  );
+});
+
+test("26.730 verifier rejects a UTF-8 BOM in the bundled marketplace manifest", () => {
+  assert.ok(
+    verifierScriptSource.includes("function Assert-FileHasNoUtf8Bom {"),
+  );
+  assert.ok(
+    verifierScriptSource.includes(
+      "Assert-FileHasNoUtf8Bom -Path $bundledMarketplaceManifestPath -Context 'Bundled OpenAI plugin marketplace manifest'",
+    ),
+  );
+  assert.match(
+    verifierScriptSource,
+    /\$bytes = \[System\.IO\.File\]::ReadAllBytes\(\$Path\)[\s\S]*\$bytes\[0\] -eq 0xEF[\s\S]*\$bytes\[1\] -eq 0xBB[\s\S]*\$bytes\[2\] -eq 0xBF/,
+  );
 });

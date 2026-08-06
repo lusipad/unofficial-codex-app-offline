@@ -42,6 +42,7 @@ const stderrPath = path.join(workRoot, 'codex-stderr.log');
 const resultPath = path.join(workRoot, 'result.json');
 const finalBodyPath = path.join(workRoot, 'final-body.txt');
 const progressPath = path.join(workRoot, 'progress.json');
+const userDataPath = path.join(workRoot, 'user-data');
 
 fs.writeFileSync(htmlPath, renderHtml({ marker, title }), 'utf8');
 registerNativeHost(appRoot);
@@ -51,12 +52,16 @@ const targetUrl = targetServer.url;
 const debugPort = Number(args.debugPort ?? 9377);
 const out = fs.openSync(stdoutPath, 'w');
 const err = fs.openSync(stderrPath, 'w');
-const appProcess = spawn(path.join(appRoot, 'ChatGPT.exe'), [`--remote-debugging-port=${debugPort}`], {
+const appProcess = spawn(path.join(appRoot, 'ChatGPT.exe'), [
+  `--user-data-dir=${userDataPath}`,
+  `--remote-debugging-port=${debugPort}`,
+], {
   cwd: appRoot,
   detached: false,
   env: {
     ...process.env,
     CODEX_ELECTRON_ENABLE_WINDOWS_COMPUTER_USE: '1',
+    CODEX_ELECTRON_USER_DATA_PATH: userDataPath,
   },
   stdio: ['ignore', out, err],
   windowsHide: false,
@@ -135,6 +140,7 @@ try {
     chromeMode,
     chromeProbe,
     htmlPath,
+    userDataPath,
   };
   fs.writeFileSync(resultPath, JSON.stringify(result, null, 2), 'utf8');
   killProcessTree(appProcess.pid);

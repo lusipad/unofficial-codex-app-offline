@@ -109,16 +109,18 @@
  *
  *   - Required vs optional. If a patch's absence breaks launch or a core
  *     feature, report a miss with failRequiredPatch() so the build fails before
- *     repacking; peripheral patches (diagnostics, resilience, legacy, non-core
- *     plugins) use warn(). A drift summary of both is printed each run.
+ *     repacking; peripheral patches (diagnostics, resilience, user-state
+ *     migrations, non-core plugins) use warn(). A drift summary of both is
+ *     printed each run.
  *   - Prefer stable interface boundaries over minified needles. Intercept at a
  *     durable seam — e.g. process._linkedBinding for the MSIX updater stub, or
  *     init.cjs IPC interception for Statsig gates — instead of string-replacing
  *     compiled tokens, which churn on every upstream build. This is the single
  *     most effective way to reduce per-release patch breakage.
  *   - When a needle is unavoidable, anchor on stable text (API names, error
- *     strings, gate IDs) rather than minified variable names, and keep the
- *     multi-variant fallbacks (V1/V2/V3) that absorb token churn.
+ *     strings, gate IDs) rather than minified variable names. Keep only the
+ *     variants used by the current Store payload; release builds regenerate
+ *     from that payload instead of carrying historical bundle shapes.
  *   - Every required patch needs a matching assertion in
  *     verify-offline-package.ps1 (marker or behaviour) so a silent miss in this
  *     script is still caught downstream.
@@ -1842,8 +1844,6 @@ try {
     contractPatchMarker('/*codex-offline:computer-use-plugin-root-fallback*/');
   const COMPUTER_USE_RESOURCE_RUNTIME_PATHS_PATCH_MARKER =
     contractPatchMarker('/*codex-offline:computer-use-resource-runtime-paths*/');
-  const COMPUTER_USE_THREAD_CONFIG_DIAGNOSTICS_PATCH_MARKER =
-    '/*codex-offline:computer-use-thread-config-diagnostics*/';
   const COMPUTER_USE_FORWARD_THREAD_START_DIAGNOSTICS_PATCH_MARKER =
     '/*codex-offline:computer-use-forward-thread-start-diagnostics*/';
   const COMPUTER_USE_FORWARD_INPUT_DIAGNOSTICS_PATCH_MARKER =
@@ -1973,37 +1973,10 @@ try {
     ';p=await b(e.marketplacePluginDescriptors),t.onReconcileComplete?.()';
   const NODE_REPL_CONFIG_RECONCILE_FINAL_STEP_CURRENT_RE =
     /await ([A-Za-z_$][\w$]*)\(\{appServerConnection:([A-Za-z_$][\w$]*),browserSkillVariant:([A-Za-z_$][\w$]*),chromeExtensionSyncManagedPluginStore:([A-Za-z_$][\w$]*),devRuntimeRepoRoot:([A-Za-z_$][\w$]*),marketplacePluginNames:([A-Za-z_$][\w$]*)\.marketplacePluginNames,forceInstallPluginNames:([A-Za-z_$][\w$]*),installWhenMissingPluginNames:([A-Za-z_$][\w$]*),syncInstallStateWithChromeExtensionPluginNames:([A-Za-z_$][\w$]*),marketplaceName:([A-Za-z_$][\w$]*),resourcesPath:([A-Za-z_$][\w$]*),runtimeMarketplaceRoot:([A-Za-z_$][\w$]*)\}\),await Promise\.all\(\6\.marketplacePluginDescriptors\.map\(async ([A-Za-z_$][\w$]*)=>\{\13\.migrate!=null&&await \13\.migrate\(\{appServerConnection:\2,codexHome:e\.codexHome,marketplaceName:\10,trashItem:e\.trashItem\}\)\}\)\),await ([A-Za-z_$][\w$]*)\(\{appServerConnection:\2,desktopFeatureAvailability:\6\.desktopFeatureAvailability,isPackaged:e\.isPackaged,platform:([A-Za-z_$][\w$]*),repoRoot:e\.repoRoot,resourcesPath:\11\}\),/;
-  const NODE_REPL_DISABLE_SANDBOX_NEEDLE =
-    'let x=Rn({computerUse:h,computerUsePaths:v,hostConfig:r,' +
-    'runtimePaths:_,shouldUseWslPaths:d,availableBrowserUseBackends:g,' +
-    'computerUseNativePipeEnabled:b,trustedBrowserClientSha256s:m||b?p:[]});' +
-    'return x==null?null:(Fn(_),Vn([Tn,x]))';
-  const NODE_REPL_DISABLE_SANDBOX_REPLACEMENT =
-    'let x=Rn({computerUse:h,computerUsePaths:v,hostConfig:r,' +
-    'runtimePaths:_,shouldUseWslPaths:d,availableBrowserUseBackends:g,' +
-    'computerUseNativePipeEnabled:b,trustedBrowserClientSha256s:m||b?p:[]});' +
-    'if(x!=null&&h&&f===`win32`){let S=`mcp_servers.${e.jn}`,C=x[S];' +
-    'C&&typeof C==`object`&&!Array.isArray(C)&&' +
-    '(x={...x,[S]:{...C,args:Array.from(new Set([' +
-    '...(Array.isArray(C.args)?C.args:[]),`--disable-sandbox`]))}});' +
-    'x={...x,[`features.tool_search`]:!0}' +
-    NODE_REPL_TOOL_SEARCH_FEATURE_PATCH_MARKER +
-    '}' +
-    NODE_REPL_DISABLE_SANDBOX_PATCH_MARKER +
-    'Cn.info(`computer_use_thread_config_resolved`,{safe:{computerUse:h,' +
-    'computerUseNativePipeEnabled:b,hasNodeReplConfig:x?.[`mcp_servers.${e.jn}`]!=null,' +
-    'hasWindowsHelperPath:v.windowsHelperPath!=null,' +
-    'hasWindowsHelperTransportModulePath:v.windowsHelperTransportModulePath!=null,' +
-    'nodeModuleDirCount:Array.isArray(v.nodeModuleDirs)?v.nodeModuleDirs.length:0,' +
-    'platform:_.platform},sensitive:{nodeModuleDirs:v.nodeModuleDirs,' +
-    'windowsHelperPath:v.windowsHelperPath,' +
-    'windowsHelperTransportModulePath:v.windowsHelperTransportModulePath}});' +
-    COMPUTER_USE_THREAD_CONFIG_DIAGNOSTICS_PATCH_MARKER +
-    'return x==null?null:(Fn(_),Vn([Tn,x]))';
   const NODE_REPL_CONFIG_HELPER_RE =
-    /\{\[`mcp_servers\.\$\{([A-Za-z_$][\w$]*)\}`\]:\{args:\[\],command:([A-Za-z_$][\w$]*),env:([A-Za-z_$][\w$]*),startup_timeout_sec:120\}\}/;
+    /\{\[`mcp_servers\.\$\{([A-Za-z_$][\w$]*)\}`\]:\{args:\[\],command:([A-Za-z_$][\w$]*),env:([A-Za-z_$][\w$]*)(,\.\.\.[A-Za-z_$][\w$]*\.length===0\?\{\}:\{env_vars:Array\.from\([A-Za-z_$][\w$]*\)\}),startup_timeout_sec:120\}\}/;
   const NODE_REPL_CONFIG_HELPER_REPLACEMENT =
-    '{[`mcp_servers.${$1}`]:{args:[`--disable-sandbox`],command:$2,env:$3,startup_timeout_sec:120},' +
+    '{[`mcp_servers.${$1}`]:{args:[`--disable-sandbox`],command:$2,env:$3$4,startup_timeout_sec:120},' +
     '[`features.tool_search`]:!0,' +
     '[`features.js_repl_tools_only`]:!0,' +
     '[`features.tool_suggest`]:!0,' +
@@ -2013,31 +1986,6 @@ try {
     NODE_REPL_TOOL_SEARCH_FEATURE_PATCH_MARKER +
     '}' +
     NODE_REPL_DISABLE_SANDBOX_PATCH_MARKER;
-  const NODE_REPL_DISABLE_SANDBOX_LEGACY_DIAGNOSTICS_NEEDLE =
-    NODE_REPL_DISABLE_SANDBOX_PATCH_MARKER +
-    'return x==null?null:(Fn(_),Vn([Tn,x]))';
-  const NODE_REPL_DISABLE_SANDBOX_LEGACY_DIAGNOSTICS_REPLACEMENT =
-    NODE_REPL_DISABLE_SANDBOX_PATCH_MARKER +
-    'Cn.info(`computer_use_thread_config_resolved`,{safe:{computerUse:h,' +
-    'computerUseNativePipeEnabled:b,hasNodeReplConfig:x?.[`mcp_servers.${e.jn}`]!=null,' +
-    'hasWindowsHelperPath:v.windowsHelperPath!=null,' +
-    'hasWindowsHelperTransportModulePath:v.windowsHelperTransportModulePath!=null,' +
-    'nodeModuleDirCount:Array.isArray(v.nodeModuleDirs)?v.nodeModuleDirs.length:0,' +
-    'platform:_.platform},sensitive:{nodeModuleDirs:v.nodeModuleDirs,' +
-    'windowsHelperPath:v.windowsHelperPath,' +
-    'windowsHelperTransportModulePath:v.windowsHelperTransportModulePath}});' +
-    COMPUTER_USE_THREAD_CONFIG_DIAGNOSTICS_PATCH_MARKER +
-    'return x==null?null:(Fn(_),Vn([Tn,x]))';
-  const NODE_REPL_TOOL_SEARCH_FEATURE_UPGRADE_RE =
-    /(if\(x!=null&&h&&f===`win32`\)\{let S=`mcp_servers\.\$\{e\.jn\}`,C=x\[S\];C&&typeof C==`object`&&!Array\.isArray\(C\)&&\(x=\{\.\.\.x,\[S\]:\{\.\.\.C,args:Array\.from\(new Set\(\[\.\.\.\(Array\.isArray\(C\.args\)\?C\.args:\[\]\),`--disable-sandbox`\]\)\)\}\}\))(\})(\/\*codex-offline:node-repl-disable-sandbox\*\/)/;
-  const NODE_REPL_TOOL_SEARCH_FEATURE_UPGRADE_REPLACEMENT =
-    '$1;x={...x,[`features.tool_search`]:!0}' +
-    NODE_REPL_TOOL_SEARCH_FEATURE_PATCH_MARKER +
-    '$2$3';
-  const NODE_REPL_TOOL_SEARCH_FEATURE_MISSING_SEPARATOR_RE =
-    /(\))x=\{\.\.\.x,\[`features\.tool_search`\]:!0\}(\/\*codex-offline:node-repl-tool-search-feature\*\/)/;
-  const NODE_REPL_TOOL_SEARCH_FEATURE_MISSING_SEPARATOR_REPLACEMENT =
-    '$1;x={...x,[`features.tool_search`]:!0}$2';
   const COMPUTER_USE_PLUGIN_ROOT_FALLBACK_NEEDLE =
     'function Tt({codexHome:t,env:r=process.env,marketplaceName:i=e.ir(n.j.resolve()),' +
     'marketplaces:a,pathExists:o=c.existsSync}){for(let n of ft({marketplaceName:i,marketplaces:a}))' +
@@ -2297,7 +2245,7 @@ try {
     'if(($3.namespace===`node_repl`&&$5===`js`)||($3.namespace==null&&$5===`js`)){let _codexOfflineNodeReplResult,_codexOfflineNodeReplResponse;try{' +
     '_codexOfflineNodeReplResult=await ln(`call-mcp-tool`,{hostId:n,threadId:$4,server:`node_repl`,tool:`js`,arguments:$3.arguments});' +
     COMPUTER_USE_NODE_REPL_RESULT_TEXT_CODE +
-    'G.info(`computer_use_node_repl_js_call`,{safe:{namespace:$3.namespace??null,tool:$5,codePrefix:String($3.arguments?.code??``).slice(0,500),hasSetupComputerUseRuntime:String($3.arguments?.code??``).includes(`setupComputerUseRuntime`),hasDirectSkyImport:String($3.arguments?.code??``).includes(`@oai/sky`),hasListApps:String($3.arguments?.code??``).includes(`list_apps`),resultPrefix:_codexOfflineNodeReplText.slice(0,500),isError:_codexOfflineNodeReplResult?.isError===!0},sensitive:{}});' +
+    'G.info(`computer_use_node_repl_js_call`,{safe:{namespace:$3.namespace??null,tool:$5,codePrefix:String($3.arguments?.code??``).slice(0,500),hasDirectSkyImport:String($3.arguments?.code??``).includes(`@oai/sky`),hasListApps:String($3.arguments?.code??``).includes(`list_apps`),resultPrefix:_codexOfflineNodeReplText.slice(0,500),isError:_codexOfflineNodeReplResult?.isError===!0},sensitive:{}});' +
     '_codexOfflineNodeReplResponse={contentItems:[{type:`inputText`,text:_codexOfflineNodeReplText}],success:_codexOfflineNodeReplResult?.isError!==!0}' +
     '}catch(_codexOfflineNodeReplError){_codexOfflineNodeReplResponse=Ge(String(_codexOfflineNodeReplError?.message??_codexOfflineNodeReplError))}' +
     COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_PATCH_MARKER +
@@ -2306,7 +2254,7 @@ try {
     'if(($7.namespace===`node_repl`&&$9===`js`)||($7.namespace==null&&$9===`js`)){let _codexOfflineNodeReplResult,_codexOfflineNodeReplResponse;try{' +
     '_codexOfflineNodeReplResult=await ln(`call-mcp-tool`,{hostId:$4,threadId:$8,server:`node_repl`,tool:`js`,arguments:$7.arguments});' +
     COMPUTER_USE_NODE_REPL_RESULT_TEXT_CODE +
-    'G.info(`computer_use_node_repl_js_call`,{safe:{namespace:$7.namespace??null,tool:$9,codePrefix:String($7.arguments?.code??``).slice(0,500),hasSetupComputerUseRuntime:String($7.arguments?.code??``).includes(`setupComputerUseRuntime`),hasDirectSkyImport:String($7.arguments?.code??``).includes(`@oai/sky`),hasListApps:String($7.arguments?.code??``).includes(`list_apps`),resultPrefix:_codexOfflineNodeReplText.slice(0,500),isError:_codexOfflineNodeReplResult?.isError===!0},sensitive:{}});' +
+    'G.info(`computer_use_node_repl_js_call`,{safe:{namespace:$7.namespace??null,tool:$9,codePrefix:String($7.arguments?.code??``).slice(0,500),hasDirectSkyImport:String($7.arguments?.code??``).includes(`@oai/sky`),hasListApps:String($7.arguments?.code??``).includes(`list_apps`),resultPrefix:_codexOfflineNodeReplText.slice(0,500),isError:_codexOfflineNodeReplResult?.isError===!0},sensitive:{}});' +
     '_codexOfflineNodeReplResponse={contentItems:[{type:`inputText`,text:_codexOfflineNodeReplText}],success:_codexOfflineNodeReplResult?.isError!==!0}' +
     '}catch(_codexOfflineNodeReplError){_codexOfflineNodeReplResponse=Ge(String(_codexOfflineNodeReplError?.message??_codexOfflineNodeReplError))}' +
     COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_PATCH_MARKER +
@@ -2334,7 +2282,6 @@ try {
       `${groups.logger}.info(\`computer_use_node_repl_js_call\`,{safe:{` +
       `namespace:${groups.params}.namespace??null,tool:${groups.tool},` +
       `codePrefix:String(${groups.params}.arguments?.code??\`\`).slice(0,500),` +
-      `hasSetupComputerUseRuntime:String(${groups.params}.arguments?.code??\`\`).includes(\`setupComputerUseRuntime\`),` +
       `hasDirectSkyImport:String(${groups.params}.arguments?.code??\`\`).includes(\`@oai/sky\`),` +
       `hasListApps:String(${groups.params}.arguments?.code??\`\`).includes(\`list_apps\`),` +
       'resultPrefix:_codexOfflineNodeReplText.slice(0,500),' +
@@ -2752,7 +2699,7 @@ try {
     'if(($1.namespace===`node_repl`&&$2===`js`)||($1.namespace==null&&$2===`js`)){let _codexOfflineNodeReplResult,_codexOfflineNodeReplResponse;try{' +
     '_codexOfflineNodeReplResult=await ln(`call-mcp-tool`,{hostId:$4,threadId:$3,server:`node_repl`,tool:`js`,arguments:$1.arguments});' +
     COMPUTER_USE_NODE_REPL_RESULT_TEXT_CODE +
-    'G.info(`computer_use_node_repl_js_call`,{safe:{namespace:$1.namespace??null,tool:$2,codePrefix:String($1.arguments?.code??``).slice(0,500),hasSetupComputerUseRuntime:String($1.arguments?.code??``).includes(`setupComputerUseRuntime`),hasDirectSkyImport:String($1.arguments?.code??``).includes(`@oai/sky`),hasListApps:String($1.arguments?.code??``).includes(`list_apps`),resultPrefix:_codexOfflineNodeReplText.slice(0,500),isError:_codexOfflineNodeReplResult?.isError===!0},sensitive:{}});' +
+    'G.info(`computer_use_node_repl_js_call`,{safe:{namespace:$1.namespace??null,tool:$2,codePrefix:String($1.arguments?.code??``).slice(0,500),hasDirectSkyImport:String($1.arguments?.code??``).includes(`@oai/sky`),hasListApps:String($1.arguments?.code??``).includes(`list_apps`),resultPrefix:_codexOfflineNodeReplText.slice(0,500),isError:_codexOfflineNodeReplResult?.isError===!0},sensitive:{}});' +
     '_codexOfflineNodeReplResponse={contentItems:[{type:`inputText`,text:_codexOfflineNodeReplText}],success:_codexOfflineNodeReplResult?.isError!==!0}' +
     '}catch(_codexOfflineNodeReplError){_codexOfflineNodeReplResponse=Ge(String(_codexOfflineNodeReplError?.message??_codexOfflineNodeReplError))}' +
     COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_PATCH_MARKER +
@@ -3383,49 +3330,12 @@ try {
   for (const filePath of mainBundleFiles) {
     let content = fs.readFileSync(filePath, 'utf8');
     if (content.includes(NODE_REPL_DISABLE_SANDBOX_PATCH_MARKER)) {
-      const originalContent = content;
-      if (!content.includes(NODE_REPL_TOOL_SEARCH_FEATURE_PATCH_MARKER)) {
-        content = content.replace(
-          NODE_REPL_TOOL_SEARCH_FEATURE_UPGRADE_RE,
-          NODE_REPL_TOOL_SEARCH_FEATURE_UPGRADE_REPLACEMENT,
-        );
-        if (!content.includes(NODE_REPL_TOOL_SEARCH_FEATURE_PATCH_MARKER)) {
-          warn(
-            'Could not locate legacy node_repl --disable-sandbox patch to ' +
-            'upgrade with features.tool_search for Computer Use (app version may have changed).',
-          );
-        }
-      } else if (NODE_REPL_TOOL_SEARCH_FEATURE_MISSING_SEPARATOR_RE.test(content)) {
-        content = content.replace(
-          NODE_REPL_TOOL_SEARCH_FEATURE_MISSING_SEPARATOR_RE,
-          NODE_REPL_TOOL_SEARCH_FEATURE_MISSING_SEPARATOR_REPLACEMENT,
-        );
-      }
-      if (
-        !content.includes(COMPUTER_USE_THREAD_CONFIG_DIAGNOSTICS_PATCH_MARKER) &&
-        content.includes(NODE_REPL_DISABLE_SANDBOX_LEGACY_DIAGNOSTICS_NEEDLE)
-      ) {
-        content = content.replace(
-          NODE_REPL_DISABLE_SANDBOX_LEGACY_DIAGNOSTICS_NEEDLE,
-          NODE_REPL_DISABLE_SANDBOX_LEGACY_DIAGNOSTICS_REPLACEMENT,
-        );
-      }
-      if (content !== originalContent) {
-        fs.writeFileSync(filePath, content, 'utf8');
-        nodeReplDisableSandboxPatched = true;
-      } else {
-        nodeReplDisableSandboxAlreadyCorrect = true;
-      }
+      nodeReplDisableSandboxAlreadyCorrect = true;
       nodeReplDisableSandboxPatchedFiles.push(path.relative(tmpDir, filePath));
       continue;
     }
 
-    if (content.includes(NODE_REPL_DISABLE_SANDBOX_NEEDLE)) {
-      content = content.replace(
-        NODE_REPL_DISABLE_SANDBOX_NEEDLE,
-        NODE_REPL_DISABLE_SANDBOX_REPLACEMENT,
-      );
-    } else if (NODE_REPL_CONFIG_HELPER_RE.test(content)) {
+    if (NODE_REPL_CONFIG_HELPER_RE.test(content)) {
       content = content.replace(
         NODE_REPL_CONFIG_HELPER_RE,
         NODE_REPL_CONFIG_HELPER_REPLACEMENT,
