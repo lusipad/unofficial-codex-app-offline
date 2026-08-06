@@ -49,9 +49,12 @@ const requiredOfflineUiGates = {
   "2106641128": "experimental features settings",
   "3693343337": "model features settings",
   "3026692602": "workspace dependencies settings",
+  "2177625257": "browser history and profile import",
+  "3413548395": "plugins management in Skills",
+  "717035860": "sidebar customization and destination discovery",
 };
 
-test("offline builds force the product-mode and configuration UI gates", () => {
+test("offline builds force the supported product and navigation UI gates", () => {
   for (const [gateId, label] of Object.entries(requiredOfflineUiGates)) {
     assert.equal(
       contract.STATSIG_DEFAULT_FEATURE_OVERRIDES[gateId],

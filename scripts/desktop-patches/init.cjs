@@ -115,6 +115,7 @@
     '410262010': true,    // Browser use agent
     '410065390': true,    // External Chrome plugin @mentions
     '4250630194': true,   // In-app browser
+    '2177625257': true,   // Browser history and profile import
     '2679188970': true,   // Avatar overlay
     '1060282072': true,   // Thread overlay
     '1506311413': true,   // Computer Use
@@ -151,6 +152,7 @@
     '1907601843': true,   // Local env cloud onboarding
     '588076040': true,    // Bundled plugins marketplace
     '533078438': true,    // Plugins nav (bypass API-key lockout)
+    '3413548395': true,   // Plugins management in Skills
     '1609556872': true,   // Slash commands menu
     '1221508807': true,   // Background subagents
     '459748632': true,    // Multi-window
@@ -158,6 +160,7 @@
     '4100906017': true,   // Global dictation (alt)
     '2574306096': true,   // Chronicle
     '1444479692': true,   // Agent personality
+    '717035860': true,    // Sidebar customization and destination discovery
     '1042620455': true,   // Remote connections
     '4114442250': true,   // Remote connections feature flag
     '839469903': true,    // Artifact Electron native

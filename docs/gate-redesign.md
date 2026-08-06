@@ -1,13 +1,13 @@
 # 离线 gate 策略重设计草案（未实施：默认开 + 黑名单 + 发现报告）
 
-当前生产路径仍是：`init.cjs` 注入 36 个已知 gate id，加上
+当前生产路径仍是：`init.cjs` 注入 allowlist 中的已知 gate id，加上
 `patch-app-asar.mjs` 的 `patchDirectStatsigGateCalls(..., DESKTOP_ASAR_KNOWN_GATE_IDS)`
 通用兜底。本文只记录下一阶段方案，不能当作已落地契约使用。
 
 ## 1. 现状与"太傻"在哪
 
 `init.cjs` 的 `injectStatsigGatesIntoObject` 只遍历 `STATSIG_GATE_OVERRIDES` 里
-**列出的 36 个 gate id** 强制置 true（在伪造的 statsig initialize 响应的
+**列出的 gate id** 强制置 true（在伪造的 statsig initialize 响应的
 `feature_gates` 里），其余 gate 不动。renderer 的 `checkGate(id)` 对未列出的 gate
 默认返回 `false`。
 
@@ -28,7 +28,7 @@
   cache 版（不同 hash）文本一致——**跨版本稳定**。
 
 结论：真正的"默认开"只能在这个中心 `checkGate` 接缝上包一层。这是一个 renderer 补丁，
-但是**一个稳定的 SDK 方法接缝**，远比原来 36 个 gate-id needle 稳。
+但是**一个稳定的 SDK 方法接缝**，远比逐个 gate-id needle 稳。
 
 ## 3. 方案草案（未实施）
 
@@ -48,12 +48,12 @@ checkGate(e,t){return __DENY__.indexOf(e)>=0?this.getFeatureGate(e,t).value:!0}
 - `__DENY__` 是**打补丁时从契约 `DESKTOP_GATE_DENYLIST` 内联**进去的 id 数组。
 
 **失效保护**：这个 needle 是 **optional（warn 不 fail）**。若某天 SDK 改了这行匹配不上，
-构建不中断——退回到现有的"枚举 36 个 floor"行为（已知功能仍可用，只是新功能不再自动开）。
+构建不中断——退回到现有的"枚举 allowlist"行为（已知功能仍可用，只是新功能不再自动开）。
 即：坏也只是退化，不会 crash、不会 break 构建。
 
 ### 3.2 枚举注入作为"地板"
 
-保留 `init.cjs` 现有的 36 个 gate 数据注入不动。它现在就是生产路径。若后续实现
+保留 `init.cjs` 现有的 gate 数据注入不动。它现在就是生产路径。若后续实现
 包裹 needle，它会变成**保底地板**：即使包裹 needle 失效，已知核心功能仍被强制开。
 
 ### 3.3 发现报告（构建期）
