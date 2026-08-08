@@ -878,6 +878,18 @@ $buildInfo | ConvertTo-Json -Depth 8 | Set-Content -Path (Join-Path $internalRoo
 
 $assets = [System.Collections.Generic.List[string]]::new()
 
+Write-BuildTrace 'Building optional API model catalog release asset.'
+$modelCatalogBuilder = Join-Path $scriptRoot 'build-api-model-catalog.mjs'
+$modelCatalogAsset = Join-Path $artifactRoot 'models-api.json'
+$bundledCodexBinary = Join-Path $internalRoot 'app\resources\codex.exe'
+& node $modelCatalogBuilder `
+    --codex-binary $bundledCodexBinary `
+    --output $modelCatalogAsset
+if ($LASTEXITCODE -ne 0) {
+    throw "API model catalog generation failed with exit code $LASTEXITCODE."
+}
+$assets.Add($modelCatalogAsset) | Out-Null
+
 Write-BuildTrace 'Creating archives.'
 # Hide implementation details AFTER creating portable zip so Compress-Archive includes hidden items.
 if ($config.packaging.portableZip) {

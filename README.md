@@ -136,11 +136,13 @@ pwsh -NoProfile -File ./scripts/build-offline-package.ps1
 3. 给 `app.asar` 打补丁（脱离 MSIX、绕 feature gate、路径修复等）
 4. 拉取官方 skills、下载 primary runtime 插件、Chrome 扩展
 5. 编译 web-gateway TypeScript
-6. 打包：便携 ZIP + 跨平台 Web ZIP + 安装器 EXE
+6. 生成可选 API 模型目录，并打包：便携 ZIP + 跨平台 Web ZIP + 安装器 EXE
 
 ### CI
 
 每天 UTC 3:15 自动检查 Store 版本，有新版则构建发布。`[force-rebuild]` 提交标记可强制重建。
+
+每个 Release 还会提供一个可选的 `models-api.json`，用于 API Key、CRS 和 DeepSeek 等 Responses API 场景。它不会自动启用；下载、配置、原生搜索验证和临时补丁退出条件见 [API/custom provider 模型目录](docs/models-api.md)。
 
 ## 配置
 
@@ -210,7 +212,7 @@ npx playwright install chromium
 pwsh -NoProfile -File ./scripts/build-offline-package.ps1
 ```
 
-Artifacts: `dist/offline/<release>/` — portable zip, web zip, setup exe, SHA256SUMS.
+Artifacts: `dist/offline/<release>/` — portable zip, web zip, setup exe, optional `models-api.json`, and SHA256SUMS.
 
 ### Config
 
@@ -225,6 +227,8 @@ See `config/offline-package.json`. Key fields:
 | `packaging.setupExe` | Generate Inno Setup installer |
 
 CI runs daily at 3:15 UTC. Commits tagged `[force-rebuild]` trigger a rebuild even if the Store version hasn't changed.
+
+Each Release also includes an optional, version-matched `models-api.json` for API-key, CRS, DeepSeek, and other Responses-compatible providers. It is not enabled automatically; see the [API/custom provider model catalog guide](docs/models-api.md).
 
 ### Risks
 

@@ -4,18 +4,21 @@
 
 ### 中文
 
+- CI 现在额外发布一个与包内 Codex CLI 精确匹配的 `models-api.json`，合并 DeepSeek 官方条目，并为 GPT-5.6 custom provider 搜索问题提供受校验的临时目录覆盖。
 - 恢复 Activity View 的优先级筛选入口，并让 Fast 模式在离线/API Key 场景保持可见可选。
 - 兼容 Codex `26.803.5235.0` 的 Chrome native pipe、平台分发器和运行时环境变量读取结构，修复最新版无法生成离线包的问题。
 - 增加当前 bundle 结构与离线 UI gate 的回归测试。
 
 ### English
 
+- CI now publishes a `models-api.json` catalog matched to the bundled Codex CLI, combining official DeepSeek entries with a guarded temporary GPT-5.6 custom-provider compatibility override.
 - Restored the Activity View priority filter and kept Fast mode available in offline/API-key sessions.
 - Added compatibility for Codex `26.803.5235.0` Chrome native-pipe, platform-dispatch, and runtime environment-reader shapes, fixing offline package generation for the latest release.
 - Added regression coverage for the current bundle structure and offline UI gates.
 
 ### Verification
 
+- `node --test scripts/test/api-model-catalog.test.cjs`
 - `node --test scripts/test/*.test.cjs`
 - `npm --prefix web-gateway run build:gateway`
 - Full installer and portable package build for Codex `26.803.5235.0`
