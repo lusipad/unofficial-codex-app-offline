@@ -51,6 +51,7 @@ const requiredOfflineUiGates = {
   "3026692602": "workspace dependencies settings",
   "2177625257": "browser history and profile import",
   "3413548395": "plugins management in Skills",
+  "4039078146": "sidebar activity view",
   "717035860": "sidebar customization and destination discovery",
 };
 
@@ -154,6 +155,46 @@ test("workspace dependencies settings gate handles imported and prepatched sibli
   );
   assert.equal(unrelated.seen, false);
   assert.equal(unrelated.content.includes(patchMarker), false);
+});
+
+test("current Fast mode availability falls back after legacy patterns do not match", () => {
+  const functionStart = patchScriptSource.indexOf("function patchFastModeAvailability");
+  const functionEnd = patchScriptSource.indexOf(
+    "\n// end patchFastModeAvailability",
+    functionStart,
+  );
+  assert.notEqual(functionStart, -1, "Fast mode availability patch helper is missing");
+  assert.notEqual(functionEnd, -1, "Fast mode availability helper terminator is missing");
+
+  const helperSource = patchScriptSource.slice(functionStart, functionEnd);
+  const patchFastModeAvailability = Function(
+    `"use strict";\n${helperSource}\nreturn patchFastModeAvailability;`,
+  )();
+  const marker = "/*codex-offline:fast-mode-auth-method*/";
+  const legacyBundle =
+    "function availability(e,t){if(e?.authMethod!==`chatgpt`||t){" +
+    "return{canUseFastMode:a,isDisabledByRequirement:t,isLoading:n}}}" +
+    "const feature=`fast_mode`;";
+  const legacyResult = patchFastModeAvailability(legacyBundle, marker);
+  assert.equal(legacyResult.patched, true);
+  assert.match(legacyResult.content, new RegExp(`canUseFastMode:!0${escapeRegExp(marker)}`));
+  assert.doesNotThrow(() => Function(legacyResult.content));
+
+  const currentBundle =
+    "function legacyNoise(e){return e.authMethod!==`chatgpt`}" +
+    "function availability(e){let a=e?.authMethod===`chatgpt`," +
+    "o=!!e?.isLoading||a&&pending,d=a&&!o&&config!=null&&" +
+    "config?.requirements?.featureRequirements?.fast_mode!==!1,f;" +
+    "return{isServiceTierAllowed:d,isLoading:o}}";
+
+  const result = patchFastModeAvailability(currentBundle, marker);
+  assert.equal(result.patched, true);
+  assert.match(result.content, new RegExp(`d=!0${escapeRegExp(marker)}`));
+  assert.doesNotThrow(() => Function(result.content));
+
+  const secondPass = patchFastModeAvailability(result.content, marker);
+  assert.equal(secondPass.patched, false);
+  assert.equal(secondPass.content, result.content);
 });
 
 test("ultra reasoning effort stays available for models that already support max", () => {

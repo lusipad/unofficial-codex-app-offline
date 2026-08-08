@@ -1,5 +1,26 @@
 # Changelog
 
+## 2026-08-08
+
+### 中文
+
+- 恢复 Activity View 的优先级筛选入口，并让 Fast 模式在离线/API Key 场景保持可见可选。
+- 兼容 Codex `26.803.5235.0` 的 Chrome native pipe、平台分发器和运行时环境变量读取结构，修复最新版无法生成离线包的问题。
+- 增加当前 bundle 结构与离线 UI gate 的回归测试。
+
+### English
+
+- Restored the Activity View priority filter and kept Fast mode available in offline/API-key sessions.
+- Added compatibility for Codex `26.803.5235.0` Chrome native-pipe, platform-dispatch, and runtime environment-reader shapes, fixing offline package generation for the latest release.
+- Added regression coverage for the current bundle structure and offline UI gates.
+
+### Verification
+
+- `node --test scripts/test/*.test.cjs`
+- `npm --prefix web-gateway run build:gateway`
+- Full installer and portable package build for Codex `26.803.5235.0`
+- Offline package verification and 30-second direct-launch smoke test
+
 ## 2026-05-17
 
 ### English

@@ -821,6 +821,43 @@ function patchUltraReasoningEffortAvailability(content) {
 }
 // end patchUltraReasoningEffortAvailability
 
+function patchFastModeAvailability(content, patchMarker) {
+  if (content.includes(patchMarker) || !content.includes('fast_mode')) {
+    return { content, patched: false };
+  }
+
+  const authMethodRe =
+    /return!\(([A-Za-z_$][\w$]*)\?\.authMethod!==`chatgpt`\|\|([A-Za-z_$][\w$]*)\)\}/g;
+  const hookAuthMethodRe =
+    /if\(([A-Za-z_$][\w$]*)\?\.authMethod!==`chatgpt`\|\|([A-Za-z_$][\w$]*)\)\{/g;
+  const hookCanUseRe =
+    /canUseFastMode:([A-Za-z_$][\w$]*),isDisabledByRequirement:([A-Za-z_$][\w$]*),isLoading:([A-Za-z_$][\w$]*)/g;
+
+  let next = content.replace(
+    authMethodRe,
+    (_match, _authMethodVar, disabledRequirementVar) =>
+      `return ${disabledRequirementVar}!==!0${patchMarker}}`,
+  );
+  next = next.replace(
+    hookAuthMethodRe,
+    (_match, _authMethodVar, disabledRequirementVar) =>
+      `if(${disabledRequirementVar}===!0${patchMarker}){`,
+  );
+  next = next.replace(
+    hookCanUseRe,
+    (_match, _canUseVar, disabledRequirementVar, isLoadingVar) =>
+      `canUseFastMode:!0${patchMarker},` +
+      `isDisabledByRequirement:${disabledRequirementVar},isLoading:${isLoadingVar}`,
+  );
+  if (next !== content) return { content: next, patched: true };
+
+  const serviceTierAllowedRe =
+    /([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)&&!([A-Za-z_$][\w$]*)&&([A-Za-z_$][\w$]*)!=null&&\4\?\.requirements\?\.featureRequirements\?\.fast_mode!==!1(?=,)/;
+  next = content.replace(serviceTierAllowedRe, `$1=!0${patchMarker}`);
+  return { content: next, patched: next !== content };
+}
+// end patchFastModeAvailability
+
 const MODEL_DISPLAY_NAME_FALLBACK_PATCH_MARKER =
   contractPatchMarker('/*codex-offline:model-id-display-name-fallback*/');
 
@@ -1031,9 +1068,7 @@ function patchChromeBrowserClient(filePath) {
       /function ([A-Za-z_$][\w$]*)\(\)\{let ([A-Za-z_$][\w$]*)="privileged native pipe bridge is not available; browser-client is not trusted";return [A-Za-z_$][\w$]*\(\)==="production"\?\2:`\$\{\2\}[^`]*`\}/,
     );
     const platformImportMatch = content.match(
-      /import [A-Za-z_$][\w$]*,\{platform as ([A-Za-z_$][\w$]*)\}from"node:os";/,
-    ) ?? content.match(
-      /import\{platform as ([A-Za-z_$][\w$]*)\}from"node:os";/,
+      /import(?: [A-Za-z_$][\w$]*,)?\{[^}]*\bplatform as ([A-Za-z_$][\w$]*)\b[^}]*\}from"node:os";/,
     );
     const pipePrefixMatch = content.match(
       /var ([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)=>\2==="win32"\?"[^"]*codex-browser-use":"\/tmp\/codex-browser-use"/,
@@ -1181,31 +1216,60 @@ function patchChromeBrowserClient(filePath) {
   if (content.includes(chromePipeFilterPatchMarker)) {
     log('Chrome browser client Windows Chrome pipe filter already patched.');
   } else {
-    const pipeListMatch = content.match(
+    const legacyPipeListMatch = content.match(
       /([A-Za-z_$][\w$]*)=async\(\)=>\{let ([A-Za-z_$][\w$]*)="\\\\\\\\\.\\\\pipe\\\\";return\(await ([A-Za-z_$][\w$]*)\(\2\)\)\.map\(([A-Za-z_$][\w$]*)=>([A-Za-z_$][\w$]*)\.resolve\(\2,\4\)\)\.filter\(([A-Za-z_$][\w$]*)=>\6\.startsWith\(([A-Za-z_$][\w$]*)\)\)\}/,
     );
+    const platformPipeListMatch = content.match(
+      /([A-Za-z_$][\w$]*)=async ([A-Za-z_$][\w$]*)=>\{let ([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\(\2\.platform\),([A-Za-z_$][\w$]*)="\\\\\\\\\.\\\\pipe\\\\";return\(await ([A-Za-z_$][\w$]*)\(\5\)\)\.map\(([A-Za-z_$][\w$]*)=>([A-Za-z_$][\w$]*)\.resolve\(\5,\7\)\)\.filter\(([A-Za-z_$][\w$]*)=>\9\.startsWith\(\3\)\)\}/,
+    );
+    const pipeListMatch = legacyPipeListMatch ?? platformPipeListMatch;
     if (!pipeListMatch) {
       throw new Error(
         'Could not locate Chrome browser-client Windows pipe listing flow.',
       );
     }
 
-    const [
-      pipeListNeedle,
-      listFunction,
-      rootVar,
-      readdirFunction,
-      entryVar,
-      pathModule,
-      pipeVar,
-      pipePrefixVar,
-    ] = pipeListMatch;
-    const pipeListReplacement =
-      `${listFunction}=async()=>{let ${rootVar}="\\\\\\\\.\\\\pipe\\\\";` +
-      `let _codexOfflineBrowserUsePipes=(await ${readdirFunction}(${rootVar})).map(${entryVar}=>${pathModule}.resolve(${rootVar},${entryVar})).filter(${pipeVar}=>${pipeVar}.startsWith(${pipePrefixVar}));` +
-      `let _codexOfflineChromePipes=_codexOfflineBrowserUsePipes.filter(${pipeVar}=>${pipeVar}.startsWith(${pipePrefixVar}+"\\\\"));` +
-      `return(_codexOfflineChromePipes.length>0?_codexOfflineChromePipes:_codexOfflineBrowserUsePipes)}` +
-      chromePipeFilterPatchMarker;
+    let pipeListNeedle;
+    let pipeListReplacement;
+    if (platformPipeListMatch) {
+      const [
+        needle,
+        listFunction,
+        platformArg,
+        pipePrefixVar,
+        pipePrefixFunction,
+        rootVar,
+        readdirFunction,
+        entryVar,
+        pathModule,
+        pipeVar,
+      ] = platformPipeListMatch;
+      pipeListNeedle = needle;
+      pipeListReplacement =
+        `${listFunction}=async ${platformArg}=>{let ${pipePrefixVar}=${pipePrefixFunction}(${platformArg}.platform),${rootVar}="\\\\\\\\.\\\\pipe\\\\";` +
+        `let _codexOfflineBrowserUsePipes=(await ${readdirFunction}(${rootVar})).map(${entryVar}=>${pathModule}.resolve(${rootVar},${entryVar})).filter(${pipeVar}=>${pipeVar}.startsWith(${pipePrefixVar}));` +
+        `let _codexOfflineChromePipes=_codexOfflineBrowserUsePipes.filter(${pipeVar}=>${pipeVar}.startsWith(${pipePrefixVar}+"\\\\"));` +
+        `return(_codexOfflineChromePipes.length>0?_codexOfflineChromePipes:_codexOfflineBrowserUsePipes)}` +
+        chromePipeFilterPatchMarker;
+    } else {
+      const [
+        needle,
+        listFunction,
+        rootVar,
+        readdirFunction,
+        entryVar,
+        pathModule,
+        pipeVar,
+        pipePrefixVar,
+      ] = legacyPipeListMatch;
+      pipeListNeedle = needle;
+      pipeListReplacement =
+        `${listFunction}=async()=>{let ${rootVar}="\\\\\\\\.\\\\pipe\\\\";` +
+        `let _codexOfflineBrowserUsePipes=(await ${readdirFunction}(${rootVar})).map(${entryVar}=>${pathModule}.resolve(${rootVar},${entryVar})).filter(${pipeVar}=>${pipeVar}.startsWith(${pipePrefixVar}));` +
+        `let _codexOfflineChromePipes=_codexOfflineBrowserUsePipes.filter(${pipeVar}=>${pipeVar}.startsWith(${pipePrefixVar}+"\\\\"));` +
+        `return(_codexOfflineChromePipes.length>0?_codexOfflineChromePipes:_codexOfflineBrowserUsePipes)}` +
+        chromePipeFilterPatchMarker;
+    }
     content = content.replace(pipeListNeedle, pipeListReplacement);
     changed = true;
     log('Chrome browser client Windows Chrome pipe filter patched.');
@@ -1233,22 +1297,32 @@ function patchChromeBrowserClient(filePath) {
     const directSetupGuardMatch = content.match(
       /if\(([A-Za-z_$][\w$]*)\(\)==null\)throw new Error\(([A-Za-z_$][\w$]*)\(\)\);?/,
     );
-    if (!directSetupGuardMatch) {
+    const platformAwareSetupMatch = content.match(
+      /var [A-Za-z_$][\w$]*=([A-Za-z_$][\w$]*)=>\1\.platform===(?:`win32`|"win32")\?[A-Za-z_$][\w$]*\(\1\):[A-Za-z_$][\w$]*\(\1\)/,
+    );
+    if (!directSetupGuardMatch && !platformAwareSetupMatch) {
       throw new Error(
         'Could not locate Chrome browser-client setup guard to enable direct Windows pipe setup.',
       );
     }
 
-    const [
-      directSetupGuardNeedle,
-      bridgeGetter,
-      unavailableMessage,
-    ] = directSetupGuardMatch;
-    const directSetupGuardReplacement =
-      `if(${bridgeGetter}()==null&&!_codexOfflineCanUseNativePipeDirect())throw new Error(${unavailableMessage}());${directSetupPatchMarker}`;
-    content = content
-      .replace(directSetupHelperNeedle, directSetupHelperReplacement)
-      .replace(directSetupGuardNeedle, directSetupGuardReplacement);
+    if (directSetupGuardMatch) {
+      const [
+        directSetupGuardNeedle,
+        bridgeGetter,
+        unavailableMessage,
+      ] = directSetupGuardMatch;
+      const directSetupGuardReplacement =
+        `if(${bridgeGetter}()==null&&!_codexOfflineCanUseNativePipeDirect())throw new Error(${unavailableMessage}());${directSetupPatchMarker}`;
+      content = content
+        .replace(directSetupHelperNeedle, directSetupHelperReplacement)
+        .replace(directSetupGuardNeedle, directSetupGuardReplacement);
+    } else {
+      content = content.replace(
+        chromePipeFilterPatchMarker,
+        chromePipeFilterPatchMarker + directSetupPatchMarker,
+      );
+    }
     changed = true;
     log('Chrome browser client direct Windows pipe setup patched.');
   }
@@ -1319,8 +1393,27 @@ function patchChromeBrowserClient(filePath) {
         )
         : null;
       const rawReader = rawReaderMatch?.[2];
+      const scopedEnvGuardMatch = ambientEnvVar
+        ? content.match(
+          new RegExp(
+            `function ([A-Za-z_$][\\w$]*)\\(([A-Za-z_$][\\w$]*)\\)\\{return ([A-Za-z_$][\\w$]*)\\(\\2,${escapeRegExp(ambientEnvVar)}\\)\\}`,
+          ),
+        )
+        : null;
+      const scopedBooleanReader = scopedEnvGuardMatch?.[3];
+      const scopedRawReaderMatch = scopedBooleanReader
+        ? content.match(
+          new RegExp(
+            `function ${escapeRegExp(scopedBooleanReader)}\\(([A-Za-z_$][\\w$]*),([A-Za-z_$][\\w$]*)\\)\\{return ([A-Za-z_$][\\w$]*)\\(\\1,\\2\\)==="1"\\}`,
+          ),
+        )
+        : null;
 
-      if (envGuardMatch && rawReader && ambientEnvVar) {
+      if (scopedEnvGuardMatch && scopedRawReaderMatch && ambientEnvVar) {
+        ambientNetworkNeedle = scopedEnvGuardMatch[0];
+        ambientNetworkReplacement =
+          `function ${scopedEnvGuardMatch[1]}(${scopedEnvGuardMatch[2]}){let t=${scopedRawReaderMatch[3]}(${scopedEnvGuardMatch[2]},${ambientEnvVar});return t==="0"||t==="false"?!1:!0}${ambientNetworkPatchMarker}`;
+      } else if (envGuardMatch && rawReader && ambientEnvVar) {
         ambientNetworkNeedle = envGuardMatch[0];
         ambientNetworkReplacement =
           `function ${envGuardMatch[1]}(){let t=${rawReader}(${ambientEnvVar});return t==="0"||t==="false"?!1:!0}${ambientNetworkPatchMarker}`;
@@ -3836,7 +3929,6 @@ try {
   // after Fast is selected, hiding the only UI that can switch back to
   // Standard.  Patch only the selector visibility helper; the service-tier
   // setter still writes null/"fast" exactly as upstream does.
-  const FAST_MODE_KEY_MARKER = FAST_MODE_CONTRACT.featureKey;
   const FAST_MODE_SELECTOR_PATCH_MARKER =
     contractPatchMarker(FAST_MODE_CONTRACT.selectorPatchMarker);
   const FAST_MODE_AUTH_METHOD_PATCH_MARKER =
@@ -3849,18 +3941,10 @@ try {
   const FAST_MODE_AVAILABILITY_MARKERS = Array.from(FAST_MODE_CONTRACT.availabilityMarkers);
   const FAST_MODE_AVAILABILITY_RE =
     /function\s+([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*)\)\{return\s+[A-Za-z_$][\w$]*\(\2\)\.canUseFastMode\}/;
-  const FAST_MODE_AUTH_METHOD_RE =
-    /return!\(([A-Za-z_$][\w$]*)\?\.authMethod!==`chatgpt`\|\|([A-Za-z_$][\w$]*)\)\}/g;
-  const FAST_MODE_HOOK_AUTH_METHOD_RE =
-    /if\(([A-Za-z_$][\w$]*)\?\.authMethod!==`chatgpt`\|\|([A-Za-z_$][\w$]*)\)\{/g;
-  const FAST_MODE_HOOK_CAN_USE_RE =
-    /canUseFastMode:([A-Za-z_$][\w$]*),isDisabledByRequirement:([A-Za-z_$][\w$]*),isLoading:([A-Za-z_$][\w$]*)/g;
   // v26.608+: fast mode availability is gated on ChatGPT auth AND a backend API response
   // (featureRequirements.fast_mode). API-key users are always excluded. Patch the
   // isServiceTierAllowed computation to remove the chatgpt-auth requirement and treat a
   // null backend response as "allowed" (same intent as the old canUseFastMode:!0 patch).
-  const FAST_MODE_SERVICE_TIER_ALLOWED_RE =
-    /([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)&&!([A-Za-z_$][\w$]*)&&([A-Za-z_$][\w$]*)!=null&&\4\?\.requirements\?\.featureRequirements\?\.fast_mode!==!1(?=,)/;
   const FAST_MODE_SERVICE_TIER_GET_RE =
     /function\s+([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*),([A-Za-z_$][\w$]*)\)\{return \3==null\?null:\3===`fast`\?([A-Za-z_$][\w$]*)\(\2\):\2\?\.serviceTiers\?\.find\(([A-Za-z_$][\w$]*)=>\5\.id===\3\)\?\?null\}/;
   const FAST_MODE_SERVICE_TIER_OPTIONS_RE =
@@ -4063,48 +4147,16 @@ try {
         localeSourcePatched = true;
         changed = true;
       }
-      if (content.includes(FAST_MODE_AUTH_METHOD_PATCH_MARKER)) {
+      const fastModeAvailabilityPatch = patchFastModeAvailability(
+        content,
+        FAST_MODE_AUTH_METHOD_PATCH_MARKER,
+      );
+      if (fastModeAvailabilityPatch.patched) {
+        content = fastModeAvailabilityPatch.content;
         fastModeAuthPatched = true;
-      } else if (
-        content.includes(FAST_MODE_KEY_MARKER) &&
-        content.includes('authMethod!==`chatgpt`')
-      ) {
-        let patchedFastModeContent = content.replace(
-          FAST_MODE_AUTH_METHOD_RE,
-          (_match, _authMethodVar, disabledRequirementVar) =>
-            `return ${disabledRequirementVar}!==!0${FAST_MODE_AUTH_METHOD_PATCH_MARKER}}`,
-        );
-        patchedFastModeContent = patchedFastModeContent.replace(
-          FAST_MODE_HOOK_AUTH_METHOD_RE,
-          (_match, _authMethodVar, disabledRequirementVar) =>
-            `if(${disabledRequirementVar}===!0${FAST_MODE_AUTH_METHOD_PATCH_MARKER}){`,
-        );
-        patchedFastModeContent = patchedFastModeContent.replace(
-          FAST_MODE_HOOK_CAN_USE_RE,
-          (_match, _canUseVar, disabledRequirementVar, isLoadingVar) =>
-            `canUseFastMode:!0${FAST_MODE_AUTH_METHOD_PATCH_MARKER},` +
-            `isDisabledByRequirement:${disabledRequirementVar},isLoading:${isLoadingVar}`,
-        );
-        if (patchedFastModeContent !== content) {
-          content = patchedFastModeContent;
-          fastModeAuthPatched = true;
-          changed = true;
-        }
-      } else if (
-        content.includes(FAST_MODE_KEY_MARKER) &&
-        FAST_MODE_SERVICE_TIER_ALLOWED_RE.test(content)
-      ) {
-        // v26.608+: force isServiceTierAllowed to true unconditionally, ignoring auth and any
-        // backend response — so the Fast/Standard speed selector is always shown and selectable.
-        const patched = content.replace(
-          FAST_MODE_SERVICE_TIER_ALLOWED_RE,
-          `$1=!0${FAST_MODE_AUTH_METHOD_PATCH_MARKER}`,
-        );
-        if (patched !== content) {
-          content = patched;
-          fastModeAuthPatched = true;
-          changed = true;
-        }
+        changed = true;
+      } else if (content.includes(FAST_MODE_AUTH_METHOD_PATCH_MARKER)) {
+        fastModeAuthPatched = true;
       }
       if (changed) {
         fs.writeFileSync(filePath, content, 'utf8');

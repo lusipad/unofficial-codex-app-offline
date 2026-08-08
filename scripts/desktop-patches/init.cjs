@@ -112,6 +112,7 @@
     '2106641128': true,   // Experimental features settings
     '3693343337': true,   // Model features settings
     '3026692602': true,   // Workspace dependencies settings
+    '4039078146': true,   // Sidebar activity view
     '410262010': true,    // Browser use agent
     '410065390': true,    // External Chrome plugin @mentions
     '4250630194': true,   // In-app browser

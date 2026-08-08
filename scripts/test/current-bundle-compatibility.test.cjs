@@ -120,6 +120,88 @@ test("26.721 Chrome native pipe patch accepts an inline createConnection return"
   assert.deepEqual(result.createNeedleMatch.slice(1), ["t", "r", "e"]);
 });
 
+test("26.803 Chrome native pipe patch accepts additional node:os imports", () => {
+  const matchSource = sourceSlice(
+    "    const helperNeedleMatch =",
+    "\n    if (!helperNeedleMatch",
+  );
+  const matchSymbols = Function(
+    "content",
+    `"use strict";\n${matchSource}\nreturn { helperNeedleMatch, unavailableMessageMatch, platformImportMatch, pipePrefixMatch };`,
+  );
+  const fixture =
+    'import{platform as jK,tmpdir as qK}from"node:os";' +
+    'var ys=e=>e==="win32"?"pipe-codex-browser-use":"/tmp/codex-browser-use";' +
+    'function OM(){let e="privileged native pipe bridge is not available; browser-client is not trusted";' +
+    'return ro()==="production"?e:`${e}. Reload bundled plugins.`}' +
+    'function tm(){let e=globalThis.nodeRepl?.nativePipe;' +
+    'return e==null||typeof e.createConnection!="function"?null:e}';
+
+  const result = matchSymbols(fixture);
+  assert.equal(result.helperNeedleMatch?.[1], "tm");
+  assert.equal(result.unavailableMessageMatch?.[1], "OM");
+  assert.equal(result.platformImportMatch?.[1], "jK");
+  assert.equal(result.pipePrefixMatch?.[1], "ys");
+});
+
+test("26.803 Chrome pipe filter accepts platform-aware listing functions", () => {
+  const matchSource = sourceSlice(
+    "    const legacyPipeListMatch =",
+    "\n    if (!pipeListMatch",
+  );
+  const matchPipeList = Function(
+    "content",
+    `"use strict";\n${matchSource}\nreturn pipeListMatch;`,
+  );
+  const fixture =
+    't4=async e=>{let t=ys(e.platform),r="\\\\\\\\.\\\\pipe\\\\";' +
+    'return(await BE(r)).map(i=>NE.resolve(r,i)).filter(i=>i.startsWith(t))}';
+
+  const result = matchPipeList(fixture);
+  assert.ok(result);
+  assert.equal(result[0], fixture);
+});
+
+test("26.803 Chrome direct setup recognizes the platform dispatcher", () => {
+  const matchSource = sourceSlice(
+    "    const directSetupGuardMatch =",
+    "\n    if (!directSetupGuardMatch && !platformAwareSetupMatch)",
+  );
+  const matchDirectSetup = Function(
+    "content",
+    `"use strict";\n${matchSource}\nreturn { directSetupGuardMatch, platformAwareSetupMatch };`,
+  );
+  const fixture = "var Q6=e=>e.platform===`win32`?t4(e):e4(e)";
+
+  const result = matchDirectSetup(fixture);
+  assert.equal(result.directSetupGuardMatch, null);
+  assert.ok(result.platformAwareSetupMatch);
+});
+
+test("26.803 Chrome ambient network default accepts runtime-scoped env readers", () => {
+  const matchSource = sourceSlice(
+    "      const ambientEnvVarMatch =",
+    "\n      if (scopedEnvGuardMatch &&",
+  );
+  const matchAmbientNetwork = Function(
+    "content",
+    "escapeRegExp",
+    `"use strict";\n${matchSource}\nreturn { ambientEnvVarMatch, scopedEnvGuardMatch, scopedRawReaderMatch };`,
+  );
+  const fixture =
+    'var Jy="BROWSER_USE_DISABLE_AMBIENT_NETWORK";' +
+    'function $r(e,t){return _s(e,t)==="1"}' +
+    'function qn(e){return $r(e,Jy)}';
+
+  const result = matchAmbientNetwork(
+    fixture,
+    value => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
+  );
+  assert.equal(result.ambientEnvVarMatch?.[1], "Jy");
+  assert.equal(result.scopedEnvGuardMatch?.[1], "qn");
+  assert.equal(result.scopedRawReaderMatch?.[3], "_s");
+});
+
 test("26.721 Computer Use accepts resource-based Windows runtime paths", () => {
   const regexSource = sourceSlice(
     "  const COMPUTER_USE_RESOURCE_RUNTIME_PATHS_CURRENT_RE =",
