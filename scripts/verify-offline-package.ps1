@@ -208,6 +208,7 @@ $webAssets = @($metadataAssets | Where-Object { $_.fileName -like '*-web.zip' })
 $skillsAssets = @($metadataAssets | Where-Object { $_.fileName -like '*-skills.zip' })
 $installerAssets = @($metadataAssets | Where-Object { $_.fileName -like '*-setup.exe' })
 $storeExportAssets = @($metadataAssets | Where-Object { $_.fileName -like '*-store-export.zip' })
+$modelCatalogAssets = @($metadataAssets | Where-Object { $_.fileName -eq 'models-api.json' })
 $checksumAssets = @($metadataAssets | Where-Object { $_.fileName -eq 'SHA256SUMS.txt' })
 $crossPlatformWebEnabled = $null -ne $config.packaging.PSObject.Properties['crossPlatformWeb'] -and [bool]$config.packaging.crossPlatformWeb
 
@@ -249,6 +250,10 @@ if ($checksumAssets.Count -ne 1) {
     throw "Expected exactly one SHA256SUMS.txt asset, found $($checksumAssets.Count)."
 }
 
+if ($modelCatalogAssets.Count -ne 1) {
+    throw "Expected exactly one models-api.json asset, found $($modelCatalogAssets.Count)."
+}
+
 if (-not $config.packaging.sourceExportArchive -and $storeExportAssets.Count -gt 0) {
     throw 'Store export zip is disabled, but a *-store-export.zip asset was still produced.'
 }
@@ -266,6 +271,49 @@ foreach ($asset in $metadataAssets) {
     $assetPath = Join-Path $artifactRoot $asset.fileName
     if (-not (Test-Path $assetPath)) {
         throw "Metadata listed an asset that does not exist on disk: $assetPath"
+    }
+}
+
+$modelCatalogPath = Join-Path $artifactRoot $modelCatalogAssets[0].fileName
+Assert-FileHasNoUtf8Bom -Path $modelCatalogPath -Context 'API model catalog'
+try {
+    $modelCatalog = Get-Content -Path $modelCatalogPath -Raw -Encoding UTF8 | ConvertFrom-Json
+} catch {
+    throw "API model catalog is not valid JSON: $($_.Exception.Message)"
+}
+
+$modelCatalogModels = @($modelCatalog.models)
+if ($modelCatalogModels.Count -eq 0) {
+    throw 'API model catalog does not contain any models.'
+}
+$modelCatalogSlugs = @($modelCatalogModels | ForEach-Object { [string]$_.slug })
+if (@($modelCatalogSlugs | Sort-Object -Unique).Count -ne $modelCatalogSlugs.Count) {
+    throw 'API model catalog contains duplicate model slugs.'
+}
+
+foreach ($slug in @('gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna')) {
+    $model = @($modelCatalogModels | Where-Object { $_.slug -eq $slug })
+    if ($model.Count -ne 1) {
+        throw "API model catalog must contain exactly one $slug entry."
+    }
+    if ($null -ne $model[0].tool_mode -or
+        $null -ne $model[0].multi_agent_version -or
+        $model[0].use_responses_lite -ne $false -or
+        $model[0].supports_search_tool -ne $true -or
+        [string]::IsNullOrWhiteSpace([string]$model[0].web_search_tool_type)) {
+        throw "API model catalog has unexpected custom-provider fields for $slug."
+    }
+}
+
+foreach ($slug in @('deepseek-v4-flash', 'deepseek-v4-pro')) {
+    $model = @($modelCatalogModels | Where-Object { $_.slug -eq $slug })
+    if ($model.Count -ne 1) {
+        throw "API model catalog must contain exactly one $slug entry."
+    }
+    if ($model[0].supports_search_tool -ne $true -or
+        $model[0].web_search_tool_type -ne 'text' -or
+        $model[0].use_responses_lite -ne $false) {
+        throw "API model catalog has unexpected DeepSeek fields for $slug."
     }
 }
 
@@ -314,6 +362,7 @@ try {
         '_internal\tools\Repair Chrome Host.cmd',
         '_internal\app\ChatGPT.exe',
         '_internal\app\resources\app.asar',
+        '_internal\app\resources\codex.exe',
         '_internal\patches\init.cjs',
         '_internal\app\patches\init.cjs',
         '_internal\powershell-shim\CodexOfflineShim\CodexOfflineShim.psd1',
@@ -326,6 +375,32 @@ try {
         $fullPath = Join-Path $portableRoot $relativePath
         if (-not (Test-Path $fullPath)) {
             throw "Portable zip is missing required file: $relativePath"
+        }
+    }
+
+    $portableCodexBinary = Join-Path $portableRoot '_internal\app\resources\codex.exe'
+    $catalogTomlPath = $modelCatalogPath.Replace('\', '/')
+    $catalogOverride = 'model_catalog_json="' + $catalogTomlPath + '"'
+    $previousCodexHome = $env:CODEX_HOME
+    try {
+        $env:CODEX_HOME = Join-Path $tempRoot 'model-catalog-codex-home'
+        New-Item -ItemType Directory -Force -Path $env:CODEX_HOME | Out-Null
+        $catalogDebugOutput = & $portableCodexBinary -c $catalogOverride debug models
+        if ($LASTEXITCODE -ne 0) {
+            throw "Bundled Codex rejected models-api.json with exit code $LASTEXITCODE."
+        }
+        $loadedCatalog = $catalogDebugOutput -join [Environment]::NewLine | ConvertFrom-Json
+        $loadedSlugs = @($loadedCatalog.models | ForEach-Object { [string]$_.slug })
+        foreach ($slug in @('gpt-5.6-sol', 'deepseek-v4-flash', 'deepseek-v4-pro')) {
+            if ($loadedSlugs -notcontains $slug) {
+                throw "Bundled Codex did not load expected model from models-api.json: $slug"
+            }
+        }
+    } finally {
+        if ($null -eq $previousCodexHome) {
+            Remove-Item Env:CODEX_HOME -ErrorAction SilentlyContinue
+        } else {
+            $env:CODEX_HOME = $previousCodexHome
         }
     }
 

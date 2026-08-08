@@ -24,6 +24,7 @@ on:
       - 'README.md'
       - 'CHANGELOG.md'
       - 'config/**'
+      - 'docs/models-api.md'
       - 'installer/**'
       - 'package.json'
       - 'package-lock.json'
@@ -38,6 +39,7 @@ on:
       - 'README.md'
       - 'CHANGELOG.md'
       - 'config/**'
+      - 'docs/models-api.md'
       - 'installer/**'
       - 'package.json'
       - 'package-lock.json'
@@ -94,7 +96,9 @@ jobs:
           node --check './scripts/patch-app-asar.mjs'
           node --check './scripts/offline-direct-launch-smoke.mjs'
           node --check './scripts/extract-webview-from-asar.mjs'
+          node --check './scripts/build-api-model-catalog.mjs'
           node --check './web-gateway/start-web.mjs'
+          node --test './scripts/test/api-model-catalog.test.cjs'
           Test-PowerShellSyntax './scripts/build-offline-package.ps1'
           Test-PowerShellSyntax './scripts/verify-offline-package.ps1'
 
@@ -341,6 +345,7 @@ jobs:
           $lines.Add("- portable zip")
           $lines.Add("- setup exe")
           $lines.Add("- bundled skills zip")
+          $lines.Add("- ``models-api.json`` (optional API/custom-provider catalog; see https://github.com/${{ github.repository }}/blob/main/docs/models-api.md)")
           $lines.Add("- SHA256SUMS.txt")
 
           ($lines -join "`n") | Set-Content -Path 'release-notes.md' -Encoding UTF8 -NoNewline
