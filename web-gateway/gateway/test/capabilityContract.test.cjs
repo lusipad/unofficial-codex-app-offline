@@ -204,6 +204,13 @@ test("source data contract covers direct exe asar patch surfaces", () => {
   );
 });
 
+test("offline contract does not force cloud-only remote connection gates", () => {
+  for (const gateId of ["1042620455", "4114442250"]) {
+    assert.equal(contractData.STATSIG_DEFAULT_FEATURE_OVERRIDES[gateId], undefined, gateId);
+    assert.equal(contractData.DESKTOP_ASAR_KNOWN_GATE_IDS.includes(gateId), false, gateId);
+  }
+});
+
 test("desktop script patcher is wired to the source data contract", () => {
   const patcherPath = path.resolve(__dirname, "../../../scripts/patch-app-asar.mjs");
   const patcherSource = require("node:fs").readFileSync(patcherPath, "utf8");

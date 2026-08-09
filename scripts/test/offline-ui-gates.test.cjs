@@ -54,6 +54,7 @@ const requiredOfflineUiGates = {
   "4039078146": "sidebar activity view",
   "717035860": "sidebar customization and destination discovery",
 };
+const cloudOnlyGateIds = ["1042620455", "4114442250"];
 
 test("offline builds force the supported product and navigation UI gates", () => {
   for (const [gateId, label] of Object.entries(requiredOfflineUiGates)) {
@@ -82,6 +83,38 @@ test("offline builds force the supported product and navigation UI gates", () =>
   assert.match(
     verifyScriptSource,
     /requiredPatchMarker\('\/\*codex-offline:workspace-dependencies-settings\*\/'\)/,
+  );
+});
+
+test("offline builds do not force cloud-only remote connection gates", () => {
+  for (const gateId of cloudOnlyGateIds) {
+    assert.equal(contract.STATSIG_DEFAULT_FEATURE_OVERRIDES[gateId], undefined, gateId);
+    assert.equal(contract.DESKTOP_ASAR_KNOWN_GATE_IDS.includes(gateId), false, gateId);
+    assert.doesNotMatch(
+      initSource,
+      new RegExp(`["']${gateId}["']\\s*:\\s*true`),
+      `${gateId}: desktop runtime must preserve the official cloud gate`,
+    );
+  }
+});
+
+test("runtime gate fallback patches custom sessions and asynchronous IPC results", () => {
+  assert.match(
+    initSource,
+    /function setupWebRequestInterceptor\(targetSession\)[\s\S]*targetSession \|\| session\.defaultSession/,
+  );
+  assert.match(
+    initSource,
+    /app\.on\('session-created', function \(createdSession\)[\s\S]*setupWebRequestInterceptor\(createdSession\)/,
+  );
+  assert.match(
+    initSource,
+    /function patchMaybeAsync\(result, patcher\)[\s\S]*result\.then\(function \(resolved\)/,
+  );
+  assert.match(
+    initSource,
+    /statsigConfig\.value\[gateKeys\[j\]\] !== configGateValue/,
+    "runtime fallback must overwrite a stale false gate instead of only filling missing keys",
   );
 });
 
@@ -155,6 +188,302 @@ test("workspace dependencies settings gate handles imported and prepatched sibli
   );
   assert.equal(unrelated.seen, false);
   assert.equal(unrelated.content.includes(patchMarker), false);
+});
+
+test("renderer known gate patch handles direct and second-argument gate calls", () => {
+  const functionStart = patchScriptSource.indexOf("function patchDirectStatsigGateCalls");
+  const functionEnd = patchScriptSource.indexOf(
+    "\nfunction patchOfflinePluginQueries",
+    functionStart,
+  );
+  assert.notEqual(functionStart, -1, "renderer gate patch helper is missing");
+  assert.notEqual(functionEnd, -1, "renderer gate helper terminator is missing");
+
+  const helperSource = patchScriptSource.slice(functionStart, functionEnd);
+  const patchDirectStatsigGateCalls = Function(
+    "escapeRegExp",
+    `"use strict";\n${helperSource}\nreturn patchDirectStatsigGateCalls;`,
+  )(escapeRegExp);
+
+  const patched = patchDirectStatsigGateCalls(
+    "u&&e.get(Mg,`3413548395`)&&x();v&&Fg(`717035860`)&&y();",
+    ["3413548395", "717035860"],
+    "/*codex-offline:renderer-known-statsig-gates*/",
+  );
+  assert.equal(patched.count, 2);
+  assert.ok(
+    patched.content.includes("u&&!0/*codex-offline:renderer-known-statsig-gates*/&&x()"),
+  );
+  assert.ok(
+    patched.content.includes("v&&!0/*codex-offline:renderer-known-statsig-gates*/&&y()"),
+  );
+});
+
+test("renderer defaults run local queries and mutations while the OS is offline", () => {
+  const functionStart = patchScriptSource.indexOf(
+    "function patchOfflineNetworkModeDefaults",
+  );
+  const functionEnd = patchScriptSource.indexOf(
+    "\n// end patchOfflineNetworkModeDefaults",
+    functionStart,
+  );
+  assert.notEqual(functionStart, -1, "offline network-mode helper is missing");
+  assert.notEqual(functionEnd, -1, "offline network-mode helper terminator is missing");
+
+  const helperSource = patchScriptSource.slice(functionStart, functionEnd);
+  const patchOfflineNetworkModeDefaults = Function(
+    "escapeRegExp",
+    `"use strict";\n${helperSource}\nreturn patchOfflineNetworkModeDefaults;`,
+  )(escapeRegExp);
+  const queryMarker = "/*codex-offline:offline-query-network-mode*/";
+  const mutationMarker = "/*codex-offline:offline-mutation-network-mode*/";
+  const fixture =
+    "Gkl={defaultOptions:{queries:{refetchOnWindowFocus:!1,retry:(e,t)=>!1}}}";
+  const result = patchOfflineNetworkModeDefaults(fixture, queryMarker, mutationMarker);
+
+  assert.equal(result.seen, true);
+  assert.equal(result.patched, true);
+  assert.match(
+    result.content,
+    /mutations:\{networkMode:`always`\/\*codex-offline:offline-mutation-network-mode\*\//,
+  );
+  assert.match(
+    result.content,
+    /queries:\{networkMode:`offlineFirst`\/\*codex-offline:offline-query-network-mode\*\//,
+  );
+  assert.doesNotThrow(() => Function(result.content));
+
+  const secondPass = patchOfflineNetworkModeDefaults(
+    result.content,
+    queryMarker,
+    mutationMarker,
+  );
+  assert.equal(secondPass.seen, true);
+  assert.equal(secondPass.alreadyCorrect, true);
+  assert.equal(secondPass.correct, true);
+  assert.equal(secondPass.content, result.content);
+
+  const markerOnly = patchOfflineNetworkModeDefaults(
+    `const unrelated=true;${queryMarker}${mutationMarker}`,
+    queryMarker,
+    mutationMarker,
+  );
+  assert.equal(markerOnly.seen, false);
+  assert.equal(markerOnly.correct, false);
+
+  for (const marker of [queryMarker, mutationMarker]) {
+    assert.ok(contract.DESKTOP_ASAR_PATCH_MARKERS.includes(marker), marker);
+    assert.ok(verifyScriptSource.includes(`requiredPatchMarker('${marker}')`), marker);
+  }
+});
+
+test("offline plugin queries force local IPC online and cloud plugin views degrade gracefully", () => {
+  const functionStart = patchScriptSource.indexOf("function patchOfflinePluginQueries");
+  const functionEnd = patchScriptSource.indexOf(
+    "\nfunction patchWorkspaceDependenciesSettingsGate",
+    functionStart,
+  );
+  assert.notEqual(functionStart, -1, "offline plugin query patch helper is missing");
+  assert.notEqual(functionEnd, -1, "offline plugin query helper terminator is missing");
+
+  const helperSource = patchScriptSource.slice(functionStart, functionEnd);
+  const patchOfflinePluginQueries = Function(
+    "PLUGIN_QUERY_NETWORK_MODE_PATCH_MARKER",
+    "PLUGIN_CLOUD_FALLBACK_PATCH_MARKER",
+    `"use strict";\n${helperSource}\nreturn patchOfflinePluginQueries;`,
+  )(
+    "/*codex-offline:plugin-query-network-mode*/",
+    "/*codex-offline:plugin-cloud-fallback*/",
+  );
+
+  const fixture =
+    "queryKey:[...mL,`local`,e,s],queryFn:async()=>{let{featuredPluginIds:t,marketplaces:r}=await _m(`list-plugins`,{hostId:e,...s.length>0?{cwds:s}:{},marketplaceKinds:[`local`]});return{featuredPluginIds:t,plugins:await fii({hostId:e,plugins:pL(r),queryClient:n})}},retry:!1,staleTime:ym.ONE_MINUTE;" +
+    "Mii=Oa(Q,({buildFlavor:e,hostId:t,installSuggestionPluginNames:n,isOpenAICuratedRemoteMarketplaceEnabled:r,marketplaceKinds:i,roots:a,shouldHideOpenAICuratedMarketplaces:o},{queryClient:s})=>{let c=Yri({isOpenAICuratedRemoteMarketplaceEnabled:r,shouldHideOpenAICuratedMarketplaces:o}),l=n==null?qri(t,a,i,r,o):Wri(t,a,Cii,n,r,o);return{queryKey:l,queryFn:async()=>{if(n!=null){let e=await _m(`send-cli-request-for-host`,{hostId:t,method:`plugin/installed`,params:{...a.length>0?{cwds:a}:{},installSuggestionPluginNames:n}}),r=Xri(e.marketplaces,c),i=pL(r,s.getQueryData(l)?.plugins);return{featuredPluginIds:xii,marketplaceLoadErrors:e.marketplaceLoadErrors,marketplaces:dii(r),plugins:await fii({hostId:t,plugins:i,queryClient:s})}}let r=await _m(`list-plugins`,i==null?{hostId:t,...a.length>0?{cwds:a}:{},forceRefetch:bii.has(t)||void 0}:{hostId:t,...a.length>0?{cwds:a}:{},marketplaceKinds:i,forceRefetch:bii.has(t)||void 0}),o=Xri(r.marketplaces,c),u=pL(o,s.getQueryData(l)?.plugins),d=e==null?u:cii({buildFlavor:e,plugins:u}),f=Rri(r.featuredPluginIds).filter(e=>!c.some(t=>e.endsWith(`@${t}`)));return{featuredPluginIds:e==null?f:sii({buildFlavor:e,featuredPluginIds:f}),marketplaceLoadErrors:r.marketplaceLoadErrors,marketplaces:dii(o),plugins:await fii({hostId:t,plugins:d,queryClient:s})}},staleTime:ym.SIX_HOURS,gcTime:1/0}});" +
+    "Nii=Oa(Q,({hostId:e,marketplaceKind:t},{queryClient:n})=>{let r=[...mL,`marketplace-kind`,e,t];return{queryKey:r,queryFn:async()=>fii({hostId:e,plugins:pL((await _m(`list-plugins`,{hostId:e,marketplaceKinds:[t],forceRefetch:bii.has(e)||void 0})).marketplaces,n.getQueryData(r)),queryClient:n}),staleTime:ym.SIX_HOURS}});" +
+    "xDc=Oa(Q,e=>({queryKey:[...mL,`home`,e],queryFn:()=>K_.safeGet(`/ps/plugins/home`),retry:!1,staleTime:ym.ONE_MINUTE}));" +
+    "mi=Xe(Zt,({hostId:e,source:t})=>({queryFn:({signal:e})=>{let n={limit:9};switch(t){case`user`:return yt.safeGet(`/ps/plugins/list`,{parameters:{query:{scope:`USER`,...n}},signal:e});case`workspace-created`:return yt.safeGet(`/ps/plugins/workspace/created`,{parameters:{query:n},signal:e});case`workspace-shared`:return yt.safeGet(`/ps/plugins/workspace/shared`,{parameters:{query:n},signal:e})}},queryKey:[...Ct,`personal`,t,e],retry:!1,select:e=>e.plugins,staleTime:Be.ONE_MINUTE}));" +
+    "Ti=d(Zt,e=>({getNextPageParam:e=>e.pagination.next_page_token??void 0,initialPageParam:null,queryFn:({pageParam:e,signal:t})=>yt.safeGet(`/ps/plugins/list`,{parameters:{query:{scope:`WORKSPACE`,limit:wi,pageToken:e??void 0}},signal:t}),queryKey:[...Ct,`workspace`,e],retry:!1,select:e=>e.pages.flatMap(e=>e.plugins),staleTime:Be.ONE_MINUTE}))";
+
+  const result = patchOfflinePluginQueries(fixture);
+  assert.equal(result.patched, true);
+  for (const key of [
+    "local-directory",
+    "all-marketplaces",
+    "marketplace-kind",
+    "cloud-home",
+    "cloud-personal-network-mode",
+    "cloud-workspace-list",
+  ]) {
+    assert.ok(
+      result.content.includes(
+        `/*codex-offline:plugin-query-network-mode*//*codex-offline:plugin-query-surface:${key}*/`,
+      ),
+      key,
+    );
+  }
+  for (const key of [
+    "cloud-home",
+    "cloud-user-list",
+    "cloud-workspace-created",
+    "cloud-workspace-shared",
+    "cloud-workspace-list",
+  ]) {
+    assert.ok(
+      result.content.includes(
+        `/*codex-offline:plugin-cloud-fallback*//*codex-offline:plugin-fallback-surface:${key}*/`,
+      ),
+      key,
+    );
+  }
+  assert.match(result.content, /globalThis\.navigator\?\.onLine===!1/);
+  assert.match(result.content, /Promise\.reject\(e\)/);
+  assert.equal(result.content.includes(".catch(()=>"), false);
+  assert.equal(
+    result.content.includes(
+      'return yt.safeGet(`/ps/plugins/workspace/shared`,{parameters:{query:n},signal:e})}},queryKey:[...Ct,`personal`,t,e]',
+    ),
+    false,
+    "patched workspace/shared query must not match the verifier's unpatched boundary",
+  );
+  assert.deepEqual(result.correctKeys.sort(), result.expectedKeys.sort());
+
+  const secondPass = patchOfflinePluginQueries(result.content);
+  assert.equal(secondPass.patched, false);
+  assert.deepEqual(secondPass.correctKeys.sort(), secondPass.expectedKeys.sort());
+});
+
+test("offline plugin directory queries stay runnable when the renderer is offline", () => {
+  assert.ok(
+    contract.DESKTOP_ASAR_PATCH_MARKERS.includes("/*codex-offline:plugin-query-network-mode*/"),
+    "capability contract must declare the plugin query network-mode marker",
+  );
+  assert.match(
+    patchScriptSource,
+    /plugin-query-network-mode/,
+    "patcher must keep local plugin directory IPC queries alive while offline",
+  );
+  assert.match(
+    verifyScriptSource,
+    /offlinePluginQueryResiduals|missingPluginQuerySurfaces/,
+    "verifier must fail if local plugin directory queries still pause when offline",
+  );
+});
+
+test("offline plugins page preserves the local marketplace when cloud plugin catalogs fail", () => {
+  assert.ok(
+    contract.DESKTOP_ASAR_PATCH_MARKERS.includes("/*codex-offline:plugin-cloud-fallback*/"),
+    "capability contract must declare the plugin cloud fallback marker",
+  );
+  assert.match(
+    patchScriptSource,
+    /plugin-cloud-fallback|\/ps\/plugins\/home[\s\S]{0,1200}catch\(/,
+    "patcher must convert cloud plugin catalog failures into a local-marketplace fallback",
+  );
+  assert.match(
+    verifyScriptSource,
+    /offlinePluginCloudResiduals|missingPluginFallbackSurfaces/,
+    "verifier must cover the local-marketplace fallback when cloud plugin catalogs fail",
+  );
+});
+
+test("priority and plugin-prefetch surfaces carry dedicated static gate markers", () => {
+  const functionStart = patchScriptSource.indexOf(
+    "function patchIndirectRendererGateSurfaces",
+  );
+  const functionEnd = patchScriptSource.indexOf(
+    "\nfunction patchWorkspaceDependenciesSettingsGate",
+    functionStart,
+  );
+  assert.notEqual(functionStart, -1, "indirect gate helper is missing");
+  assert.notEqual(functionEnd, -1, "indirect gate helper terminator is missing");
+
+  const sidebarMarker = "/*codex-offline:sidebar-activity-view*/";
+  const pluginsMarker = "/*codex-offline:plugins-management-in-skills*/";
+  const helperSource = patchScriptSource.slice(functionStart, functionEnd);
+  const patchIndirectRendererGateSurfaces = Function(
+    "SIDEBAR_ACTIVITY_VIEW_PATCH_MARKER",
+    "PLUGINS_MANAGEMENT_IN_SKILLS_PATCH_MARKER",
+    "escapeRegExp",
+    `"use strict";\n${helperSource}\nreturn patchIndirectRendererGateSurfaces;`,
+  )(sidebarMarker, pluginsMarker, escapeRegExp);
+  const fixture =
+    "function Fvc(){let e=Fg(Lvc),t=q(Sw);return e&&(t.status===`allowed`||t.status===`loading`)}" +
+    "Lvc=`4039078146`;function tOc(e,t,n){t&&e.get(Mg,`3413548395`)&&Promise.all([])}";
+  const result = patchIndirectRendererGateSurfaces(fixture);
+
+  assert.equal(result.patched, true);
+  assert.equal(result.sidebarSurfaceSeen, true);
+  assert.equal(result.pluginsSurfaceSeen, true);
+  assert.equal(result.sidebarCorrect, true);
+  assert.equal(result.pluginsCorrect, true);
+  assert.ok(result.content.includes(`e=!0${sidebarMarker},t=q(Sw)`));
+  assert.ok(result.content.includes(`t&&!0${pluginsMarker}&&Promise.all`));
+
+  const secondPass = patchIndirectRendererGateSurfaces(result.content);
+  assert.equal(secondPass.patched, false);
+  assert.equal(secondPass.sidebarCorrect, true);
+  assert.equal(secondPass.pluginsCorrect, true);
+
+  const markerOnly = patchIndirectRendererGateSurfaces(sidebarMarker + pluginsMarker);
+  assert.equal(markerOnly.sidebarSurfaceSeen, false);
+  assert.equal(markerOnly.pluginsSurfaceSeen, false);
+  assert.equal(markerOnly.sidebarCorrect, false);
+  assert.equal(markerOnly.pluginsCorrect, false);
+  for (const marker of [sidebarMarker, pluginsMarker]) {
+    assert.ok(contract.DESKTOP_ASAR_PATCH_MARKERS.includes(marker), marker);
+    assert.ok(verifyScriptSource.includes(`requiredPatchMarker('${marker}')`), marker);
+  }
+});
+
+test("renderer gate verifier covers method-style gate reads and scoped alias surfaces", () => {
+  assert.ok(
+    patchScriptSource.includes('const callablePattern') &&
+      patchScriptSource.includes('(?:\\\\.[$\\\\w]+)*'),
+    "patcher must recognize method-style gate readers like e.get(...)",
+  );
+  assert.match(
+    verifyScriptSource,
+    /secondArgumentStatsigGateCallRe|sidebarActivityUnpatchedSurfaceRe/,
+    "verifier must inspect indirect gate call shapes, not only literal direct calls",
+  );
+  assert.doesNotMatch(
+    verifyScriptSource,
+    /aliasStatsigGateCallRe/,
+    "alias checks must stay scoped to their known surface instead of the full bundle",
+  );
+});
+
+test("renderer gate verifier always blocks residual indirect gate calls", () => {
+  assert.match(
+    verifyScriptSource,
+    /rendererKnownStatsigGateResiduals\.length > 0/,
+    "verifier must fail on indirect residual gate calls",
+  );
+  assert.match(
+    verifyScriptSource,
+    /secondArgumentStatsigGateCallRe\(gateId\)\.test\(content\)/,
+    "verifier must reject second-argument gate reads that escaped static patching",
+  );
+  assert.match(
+    verifyScriptSource,
+    /for \(const gateId of DESKTOP_ASAR_KNOWN_GATE_IDS\) \{\s*if \(!content\.includes\(gateId\)\) continue;/,
+    "verifier must skip expensive gate regexes for chunks that do not contain the gate id",
+  );
+  assert.doesNotMatch(
+    verifyScriptSource,
+    /if \(!rendererKnownStatsigGatesPatched && rendererKnownStatsigGateLiteralEntries\.length > 0\)/,
+    "a global marker must never mask a residual gate call",
+  );
+  assert.match(
+    verifyScriptSource,
+    /sidebarActivityPatchedSurfaceRe\.test\(content\)[\s\S]*sidebarActivityViewResiduals/,
+    "priority verification must bind the marker to its live surface",
+  );
+  assert.match(
+    verifyScriptSource,
+    /offlineNetworkModePatchedSurfaceRe\.test\(content\)[\s\S]*offlineNetworkModeResiduals/,
+    "QueryClient verification must reject a stale marker in an unrelated chunk",
+  );
 });
 
 test("current Fast mode availability falls back after legacy patterns do not match", () => {

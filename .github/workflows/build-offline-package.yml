@@ -98,7 +98,7 @@ jobs:
           node --check './scripts/extract-webview-from-asar.mjs'
           node --check './scripts/build-api-model-catalog.mjs'
           node --check './web-gateway/start-web.mjs'
-          node --test './scripts/test/api-model-catalog.test.cjs'
+          node --test './scripts/test/*.test.cjs'
           Test-PowerShellSyntax './scripts/build-offline-package.ps1'
           Test-PowerShellSyntax './scripts/verify-offline-package.ps1'
 

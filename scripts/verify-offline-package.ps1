@@ -1235,7 +1235,12 @@ function hasWorkspaceDependenciesSettingsSurface(content) {
 }
 function directStatsigGateCallRe(gateId) {
   return new RegExp(
-    `!?(?:\\(0,[$\\w]+\\)|[$\\w]+)\\(\`${escapeRegExp(gateId)}\`\\)`
+    `!?(?:\\(0,[$\\w]+\\)|[$\\w]+(?:\\.[$\\w]+)*)\\(\`${escapeRegExp(gateId)}\`\\)`
+  );
+}
+function secondArgumentStatsigGateCallRe(gateId) {
+  return new RegExp(
+    `!?(?:\\(0,[$\\w]+\\)|[$\\w]+(?:\\.[$\\w]+)*)\\([A-Za-z_$][\\w$]*\\s*,\\s*\\\`${escapeRegExp(gateId)}\\\`\\)`
   );
 }
 const PATCH_MARKER = requiredPatchMarker('/* codex-offline:windowsStore-patch */');
@@ -1294,12 +1299,68 @@ const FEATURE_ENABLEMENT_PRESERVE_UNIFIED_EXEC_PATCH_MARKER =
   requiredPatchMarker('/*codex-offline:feature-enablement-preserve-unified-exec*/');
 const BUNDLED_PLUGIN_CACHE_LOCK_NONFATAL_PATCH_MARKER =
   requiredPatchMarker('/*codex-offline:bundled-plugin-cache-lock-nonfatal*/');
-const RENDERER_KNOWN_STATSIG_GATES_PATCH_MARKER =
-  requiredPatchMarker('/*codex-offline:renderer-known-statsig-gates*/');
+const SIDEBAR_ACTIVITY_VIEW_PATCH_MARKER =
+  requiredPatchMarker('/*codex-offline:sidebar-activity-view*/');
+const PLUGINS_MANAGEMENT_IN_SKILLS_PATCH_MARKER =
+  requiredPatchMarker('/*codex-offline:plugins-management-in-skills*/');
 const WORKSPACE_DEPENDENCIES_SETTINGS_PATCH_MARKER =
   requiredPatchMarker('/*codex-offline:workspace-dependencies-settings*/');
 const MODEL_DISPLAY_NAME_FALLBACK_PATCH_MARKER =
   requiredPatchMarker('/*codex-offline:model-id-display-name-fallback*/');
+const OFFLINE_QUERY_NETWORK_MODE_PATCH_MARKER =
+  requiredPatchMarker('/*codex-offline:offline-query-network-mode*/');
+const OFFLINE_MUTATION_NETWORK_MODE_PATCH_MARKER =
+  requiredPatchMarker('/*codex-offline:offline-mutation-network-mode*/');
+const PLUGIN_QUERY_NETWORK_MODE_PATCH_MARKER =
+  requiredPatchMarker('/*codex-offline:plugin-query-network-mode*/');
+const PLUGIN_CLOUD_FALLBACK_PATCH_MARKER =
+  requiredPatchMarker('/*codex-offline:plugin-cloud-fallback*/');
+const REQUIRED_PLUGIN_QUERY_SURFACES = [
+  'local-directory',
+  'all-marketplaces',
+  'marketplace-kind',
+  'cloud-home',
+  'cloud-personal-network-mode',
+  'cloud-workspace-list',
+];
+const REQUIRED_PLUGIN_FALLBACK_SURFACES = [
+  'cloud-home',
+  'cloud-user-list',
+  'cloud-workspace-created',
+  'cloud-workspace-shared',
+  'cloud-workspace-list',
+];
+function pluginQuerySurfaceMarker(key) {
+  return PLUGIN_QUERY_NETWORK_MODE_PATCH_MARKER +
+    `/*codex-offline:plugin-query-surface:${key}*/`;
+}
+function pluginFallbackSurfaceMarker(key) {
+  return PLUGIN_CLOUD_FALLBACK_PATCH_MARKER +
+    `/*codex-offline:plugin-fallback-surface:${key}*/`;
+}
+const sidebarActivityPatchedSurfaceRe = new RegExp(
+  `([A-Za-z_$][\\w$]*)=!0${escapeRegExp(SIDEBAR_ACTIVITY_VIEW_PATCH_MARKER)},` +
+    `([A-Za-z_$][\\w$]*)=q\\(Sw\\);return \\1&&` +
+    '\\(\\2\\.status===`allowed`\\|\\|\\2\\.status===`loading`\\)'
+);
+const sidebarActivityUnpatchedSurfaceRe =
+  /([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*)\),([A-Za-z_$][\w$]*)=q\(Sw\);return \1&&\(\4\.status===`allowed`\|\|\4\.status===`loading`\)\}[^]*?\3=`4039078146`/;
+const pluginsManagementPatchedSurfaceRe = new RegExp(
+  `([A-Za-z_$][\\w$]*)&&!0${escapeRegExp(PLUGINS_MANAGEMENT_IN_SKILLS_PATCH_MARKER)}` +
+    '&&Promise\\.all\\(\\['
+);
+const pluginsManagementUnpatchedSurfaceRe =
+  /([A-Za-z_$][\w$]*)&&[A-Za-z_$][\w$]*\.get\(Mg,`3413548395`\)&&Promise\.all\(\[/;
+const offlineNetworkModePatchedSurfaceRe = new RegExp(
+  `([A-Za-z_$][\\w$]*)=\\{defaultOptions:\\{` +
+    'mutations:\\{networkMode:`always`' +
+    escapeRegExp(OFFLINE_MUTATION_NETWORK_MODE_PATCH_MARKER) + '\\},' +
+    'queries:\\{networkMode:`offlineFirst`' +
+    escapeRegExp(OFFLINE_QUERY_NETWORK_MODE_PATCH_MARKER) + ',' +
+    'refetchOnWindowFocus:!1,retry:'
+);
+const offlineNetworkModeUnpatchedSurfaceRe =
+  /([A-Za-z_$][\w$]*)=\{defaultOptions:\{queries:\{refetchOnWindowFocus:!1,retry:/;
 const ULTRA_REASONING_EFFORT_PATCH_MARKER =
   requiredPatchMarker('/*codex-offline:ultra-reasoning-effort*/');
 const bundledPluginCacheLockFatalResultRe =
@@ -1424,10 +1485,18 @@ let featureEnablementPreserveUnifiedExecPatched = false;
 let bundledPluginCacheLockNonfatalPatched = false;
 let pluginsApiKeyNavPatched = false;
 let pluginsApiKeyRoutePatched = false;
-let rendererKnownStatsigGatesPatched = false;
+let sidebarActivityViewSurfaceSeen = false;
+let sidebarActivityViewPatched = false;
+let pluginsManagementInSkillsSurfaceSeen = false;
+let pluginsManagementInSkillsPatched = false;
 let workspaceDependenciesSettingsSurfaceSeen = false;
 let workspaceDependenciesSettingsPatched = false;
 let modelDisplayNameFallbackPatched = false;
+let offlineNetworkModeSurfaceSeen = false;
+let offlineQueryNetworkModePatched = false;
+let offlineMutationNetworkModePatched = false;
+const pluginQueryPatchedSurfaces = new Set();
+const pluginFallbackPatchedSurfaces = new Set();
 let ultraReasoningEffortSurfaceSeen = false;
 let ultraReasoningEffortPatched = false;
 let codexMobileRemoteControlMfaEndpointSeen = false;
@@ -1439,7 +1508,11 @@ const legacyElectronNamespacePatchResiduals = [];
 const bundledPluginCacheLockFatalResiduals = [];
 const webviewBrokenBooleanPatchResiduals = [];
 const rendererKnownStatsigGateResiduals = [];
-const rendererKnownStatsigGateLiteralEntries = [];
+const sidebarActivityViewResiduals = [];
+const pluginsManagementInSkillsResiduals = [];
+const offlineNetworkModeResiduals = [];
+const offlinePluginQueryResiduals = [];
+const offlinePluginCloudResiduals = [];
 const ultraReasoningEffortResiduals = [];
 
 for (const entry of javaScriptEntries) {
@@ -1450,8 +1523,27 @@ for (const entry of javaScriptEntries) {
     webviewBrokenBooleanPatchResiduals.push(entry);
   }
   if (isWebviewAsset) {
-    if (content.includes(RENDERER_KNOWN_STATSIG_GATES_PATCH_MARKER)) {
-      rendererKnownStatsigGatesPatched = true;
+    if (sidebarActivityPatchedSurfaceRe.test(content)) {
+      sidebarActivityViewSurfaceSeen = true;
+      sidebarActivityViewPatched = true;
+    }
+    if (
+      content.includes('`4039078146`') &&
+      sidebarActivityUnpatchedSurfaceRe.test(content)
+    ) {
+      sidebarActivityViewSurfaceSeen = true;
+      sidebarActivityViewResiduals.push(entry);
+    }
+    if (pluginsManagementPatchedSurfaceRe.test(content)) {
+      pluginsManagementInSkillsSurfaceSeen = true;
+      pluginsManagementInSkillsPatched = true;
+    }
+    if (
+      content.includes('`3413548395`') &&
+      pluginsManagementUnpatchedSurfaceRe.test(content)
+    ) {
+      pluginsManagementInSkillsSurfaceSeen = true;
+      pluginsManagementInSkillsResiduals.push(entry);
     }
     if (hasWorkspaceDependenciesSettingsSurface(content)) {
       workspaceDependenciesSettingsSurfaceSeen = true;
@@ -1461,6 +1553,25 @@ for (const entry of javaScriptEntries) {
     }
     if (content.includes(MODEL_DISPLAY_NAME_FALLBACK_PATCH_MARKER)) {
       modelDisplayNameFallbackPatched = true;
+    }
+    if (offlineNetworkModePatchedSurfaceRe.test(content)) {
+      offlineNetworkModeSurfaceSeen = true;
+      offlineQueryNetworkModePatched = true;
+      offlineMutationNetworkModePatched = true;
+    }
+    if (offlineNetworkModeUnpatchedSurfaceRe.test(content)) {
+      offlineNetworkModeSurfaceSeen = true;
+      offlineNetworkModeResiduals.push(entry);
+    }
+    for (const key of REQUIRED_PLUGIN_QUERY_SURFACES) {
+      if (content.includes(pluginQuerySurfaceMarker(key))) {
+        pluginQueryPatchedSurfaces.add(key);
+      }
+    }
+    for (const key of REQUIRED_PLUGIN_FALLBACK_SURFACES) {
+      if (content.includes(pluginFallbackSurfaceMarker(key))) {
+        pluginFallbackPatchedSurfaces.add(key);
+      }
     }
     if (content.includes('hasModelSupportingUltraReasoningEffort')) {
       ultraReasoningEffortSurfaceSeen = true;
@@ -1477,17 +1588,31 @@ for (const entry of javaScriptEntries) {
         ultraReasoningEffortPatched = true;
       }
     }
-    const literalGateIds = [];
     for (const gateId of DESKTOP_ASAR_KNOWN_GATE_IDS) {
-      if (content.includes('`' + gateId + '`')) {
-        literalGateIds.push(gateId);
-      }
-      if (directStatsigGateCallRe(gateId).test(content)) {
+      if (!content.includes(gateId)) continue;
+      if (
+        directStatsigGateCallRe(gateId).test(content) ||
+        secondArgumentStatsigGateCallRe(gateId).test(content)
+      ) {
         rendererKnownStatsigGateResiduals.push(`${entry}:${gateId}`);
       }
     }
-    if (literalGateIds.length > 0) {
-      rendererKnownStatsigGateLiteralEntries.push(`${entry}:${literalGateIds.join(',')}`);
+    if (
+      content.includes('queryFn:async()=>{let{featuredPluginIds:t,marketplaces:r}=await _m(`list-plugins`,{hostId:e,...s.length>0?{cwds:s}:{},marketplaceKinds:[`local`]});return{featuredPluginIds:t,plugins:await fii({hostId:e,plugins:pL(r),queryClient:n})}},retry:!1,staleTime:ym.ONE_MINUTE') ||
+      content.includes('return{queryKey:l,queryFn:async()=>{if(n!=null){let e=await _m(`send-cli-request-for-host`,{hostId:t,method:`plugin/installed`,params:{...a.length>0?{cwds:a}:{},installSuggestionPluginNames:n}}),r=Xri(e.marketplaces,c),i=pL(r,s.getQueryData(l)?.plugins);return{featuredPluginIds:xii,marketplaceLoadErrors:e.marketplaceLoadErrors,marketplaces:dii(r),plugins:await fii({hostId:t,plugins:i,queryClient:s})}}let r=await _m(`list-plugins`,i==null?{hostId:t,...a.length>0?{cwds:a}:{},forceRefetch:bii.has(t)||void 0}:{hostId:t,...a.length>0?{cwds:a}:{},marketplaceKinds:i,forceRefetch:bii.has(t)||void 0}),o=Xri(r.marketplaces,c),u=pL(o,s.getQueryData(l)?.plugins),d=e==null?u:cii({buildFlavor:e,plugins:u}),f=Rri(r.featuredPluginIds).filter(e=>!c.some(t=>e.endsWith(`@${t}`)));return{featuredPluginIds:e==null?f:sii({buildFlavor:e,featuredPluginIds:f}),marketplaceLoadErrors:r.marketplaceLoadErrors,marketplaces:dii(o),plugins:await fii({hostId:t,plugins:d,queryClient:s})}},staleTime:ym.SIX_HOURS,gcTime:1/0') ||
+      content.includes('return{queryKey:r,queryFn:async()=>fii({hostId:e,plugins:pL((await _m(`list-plugins`,{hostId:e,marketplaceKinds:[t],forceRefetch:bii.has(e)||void 0})).marketplaces,n.getQueryData(r)),queryClient:n}),staleTime:ym.SIX_HOURS}')
+    ) {
+      offlinePluginQueryResiduals.push(entry);
+    }
+    if (
+      content.includes('queryFn:()=>K_.safeGet(`/ps/plugins/home`),retry:!1,staleTime:ym.ONE_MINUTE') ||
+      content.includes('queryKey:[...Ct,`personal`,t,e],retry:!1,select:e=>e.plugins,staleTime:Be.ONE_MINUTE') ||
+      content.includes('return yt.safeGet(`/ps/plugins/list`,{parameters:{query:{scope:`USER`,...n}},signal:e});') ||
+      content.includes('return yt.safeGet(`/ps/plugins/workspace/created`,{parameters:{query:n},signal:e});') ||
+      content.includes('return yt.safeGet(`/ps/plugins/workspace/shared`,{parameters:{query:n},signal:e})}},queryKey:[...Ct,`personal`,t,e]') ||
+      content.includes('queryFn:({pageParam:e,signal:t})=>yt.safeGet(`/ps/plugins/list`,{parameters:{query:{scope:`WORKSPACE`,limit:wi,pageToken:e??void 0}},signal:t}),queryKey:[...Ct,`workspace`,e],retry:!1,select:e=>e.pages.flatMap(e=>e.plugins),staleTime:Be.ONE_MINUTE')
+    ) {
+      offlinePluginCloudResiduals.push(entry);
     }
   }
   bundledBrowserPluginsPatched ||= content.includes(BUNDLED_BROWSER_PLUGINS_PATCH_MARKER);
@@ -1649,11 +1774,29 @@ if (rendererKnownStatsigGateResiduals.length > 0) {
     rendererKnownStatsigGateResiduals.join(', ')
   );
 }
-if (!rendererKnownStatsigGatesPatched && rendererKnownStatsigGateLiteralEntries.length > 0) {
+if (sidebarActivityViewResiduals.length > 0) {
   throw new Error(
-    'Renderer webview assets contain offline-known Statsig gate literals but no direct-gate patch marker: ' +
-    rendererKnownStatsigGateLiteralEntries.join(', ')
+    'Sidebar Activity priority surface still uses its aliased Statsig gate: ' +
+    sidebarActivityViewResiduals.join(', ')
   );
+}
+if (!sidebarActivityViewSurfaceSeen) {
+  throw new Error('Sidebar Activity priority surface is missing from app.asar.');
+}
+if (!sidebarActivityViewPatched) {
+  throw new Error('Sidebar Activity priority surface is not statically enabled in app.asar.');
+}
+if (pluginsManagementInSkillsResiduals.length > 0) {
+  throw new Error(
+    'Skills plugin-management prefetch still uses its Statsig gate: ' +
+    pluginsManagementInSkillsResiduals.join(', ')
+  );
+}
+if (!pluginsManagementInSkillsSurfaceSeen) {
+  throw new Error('Skills plugin-management prefetch surface is missing from app.asar.');
+}
+if (!pluginsManagementInSkillsPatched) {
+  throw new Error('Skills plugin-management prefetch surface is not statically enabled.');
 }
 if (!workspaceDependenciesSettingsSurfaceSeen) {
   throw new Error('Workspace Dependencies settings surface is missing from app.asar.');
@@ -1663,6 +1806,51 @@ if (!workspaceDependenciesSettingsPatched) {
 }
 if (!modelDisplayNameFallbackPatched) {
   throw new Error('Renderer formatted model-ID fallback marker is missing from app.asar.');
+}
+if (offlineNetworkModeResiduals.length > 0) {
+  throw new Error(
+    'Renderer QueryClient still pauses local work when the OS is offline: ' +
+    offlineNetworkModeResiduals.join(', ')
+  );
+}
+if (!offlineNetworkModeSurfaceSeen) {
+  throw new Error('Renderer QueryClient default-options surface is missing from app.asar.');
+}
+if (!offlineQueryNetworkModePatched) {
+  throw new Error('Renderer QueryClient does not use the offline-first query default.');
+}
+if (!offlineMutationNetworkModePatched) {
+  throw new Error('Renderer QueryClient does not run mutations while offline.');
+}
+if (offlinePluginQueryResiduals.length > 0) {
+  throw new Error(
+    'Offline plugin app-server queries still lack networkMode:`always`: ' +
+    offlinePluginQueryResiduals.join(', ')
+  );
+}
+const missingPluginQuerySurfaces = REQUIRED_PLUGIN_QUERY_SURFACES.filter(
+  key => !pluginQueryPatchedSurfaces.has(key)
+);
+if (missingPluginQuerySurfaces.length > 0) {
+  throw new Error(
+    'Offline plugin query network-mode patches are missing from: ' +
+    missingPluginQuerySurfaces.join(', ')
+  );
+}
+if (offlinePluginCloudResiduals.length > 0) {
+  throw new Error(
+    'Plugins cloud queries still fail hard instead of degrading to empty offline state: ' +
+    offlinePluginCloudResiduals.join(', ')
+  );
+}
+const missingPluginFallbackSurfaces = REQUIRED_PLUGIN_FALLBACK_SURFACES.filter(
+  key => !pluginFallbackPatchedSurfaces.has(key)
+);
+if (missingPluginFallbackSurfaces.length > 0) {
+  throw new Error(
+    'Offline plugin cloud fallback patches are missing from: ' +
+    missingPluginFallbackSurfaces.join(', ')
+  );
 }
 if (ultraReasoningEffortResiduals.length > 0) {
   throw new Error(

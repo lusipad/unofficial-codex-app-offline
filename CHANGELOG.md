@@ -1,5 +1,29 @@
 # Changelog
 
+## 2026-08-09
+
+### 中文
+
+- 修复系统处于离线状态时，本地和内网插件市场查询被暂停的问题；本地插件查询与安装保持可用，云端目录失败时降级为空结果，不再遮蔽可用的内网市场。
+- 恢复离线状态下 Activity 视图的优先级筛选入口，并让 Skills 页面继续加载本地插件管理数据。
+- 不再强制开启依赖云服务的远程连接功能开关，避免离线界面暴露不可用入口。
+- 将完整脚本回归测试纳入发布工作流，覆盖离线 UI、插件市场和模型目录补丁。
+
+### English
+
+- Fixed local and intranet plugin marketplace queries being paused when Windows reports an offline network state. Local plugin queries and installs remain runnable, while unavailable cloud catalogs degrade to empty results without hiding reachable intranet marketplaces.
+- Restored the Activity priority filter while offline and kept local plugin-management data loading on the Skills page.
+- Stopped forcing cloud-only remote connection gates in offline builds, avoiding unusable UI entries.
+- Added the complete script regression suite to the release workflow, covering offline UI, plugin marketplace, and model-catalog patches.
+
+### Verification
+
+- `node --test scripts/test/*.test.cjs`
+- `node --test web-gateway/gateway/test/*.test.cjs`
+- `npm --prefix web-gateway run build:gateway`
+- Full installer and portable package build for Codex `26.803.5235.0`
+- Offline package verification and direct-launch UI smoke test
+
 ## 2026-08-08
 
 ### 中文

@@ -162,8 +162,6 @@
     '2574306096': true,   // Chronicle
     '1444479692': true,   // Agent personality
     '717035860': true,    // Sidebar customization and destination discovery
-    '1042620455': true,   // Remote connections
-    '4114442250': true,   // Remote connections feature flag
     '839469903': true,    // Artifact Electron native
   };
 
@@ -244,10 +242,11 @@
       if (!isPlainObject(container)) continue;
       for (var i = 0; i < gateKeys.length; i++) {
         var gateName = gateKeys[i];
+        var gateValue = STATSIG_GATE_OVERRIDES[gateName] === true;
         var existing = container[gateName];
         var next = {
           name: gateName,
-          value: true,
+          value: gateValue,
           rule_id: existing && existing.rule_id ? existing.rule_id : 'desktop_override',
           secondary_exposures: existing && Array.isArray(existing.secondary_exposures)
             ? existing.secondary_exposures : [],
@@ -255,7 +254,7 @@
         if (isPlainObject(existing)) {
           Object.keys(existing).forEach(function (k) { if (!(k in next)) next[k] = existing[k]; });
         }
-        next.value = true;
+        next.value = gateValue;
         if (JSON.stringify(existing) !== JSON.stringify(next)) {
           container[gateName] = next;
           changed = true;
@@ -275,8 +274,9 @@
       }
       if (!isPlainObject(statsigConfig.value)) statsigConfig.value = {};
       for (var j = 0; j < gateKeys.length; j++) {
-        if (!(gateKeys[j] in statsigConfig.value)) {
-          statsigConfig.value[gateKeys[j]] = true;
+        var configGateValue = STATSIG_GATE_OVERRIDES[gateKeys[j]] === true;
+        if (statsigConfig.value[gateKeys[j]] !== configGateValue) {
+          statsigConfig.value[gateKeys[j]] = configGateValue;
           changed = true;
         }
       }
@@ -307,9 +307,9 @@
 
   var STATSIG_INITIALIZE_URL_PATTERN = '*://ab.chatgpt.com/v1/initialize*';
 
-  function setupWebRequestInterceptor() {
+  function setupWebRequestInterceptor(targetSession) {
     try {
-      var ses = session.defaultSession;
+      var ses = targetSession || session.defaultSession;
       if (!ses || !ses.webRequest) return;
 
       ses.webRequest.onBeforeRequest(
@@ -336,7 +336,11 @@
 
   if (app && typeof app.on === 'function') {
     // Re-register after session is fully initialized
-    try { app.on('session-created', function () { setupWebRequestInterceptor(); }); } catch (_e) {}
+    try {
+      app.on('session-created', function (createdSession) {
+        setupWebRequestInterceptor(createdSession);
+      });
+    } catch (_e) {}
   }
 
   // ═══════════════════════════════════════════════════════════════════════
@@ -424,6 +428,13 @@
     return result;
   }
 
+  function patchMaybeAsync(result, patcher) {
+    if (result && typeof result.then === 'function') {
+      return result.then(function (resolved) { return patcher(resolved); });
+    }
+    return patcher(result);
+  }
+
   ipcMain.handle = function (channel, listener) {
     // ── Statsig shared-object channels: inject gate overrides ──
     if (isStatsigChannel(channel)) {
@@ -436,8 +447,7 @@
           patchSharedObjectPayload(payload);
         }
         // Patch the result returned to the renderer
-        var patched = patchSharedObjectPayload(result);
-        return patched;
+        return patchMaybeAsync(result, patchSharedObjectPayload);
       });
     }
 
@@ -446,9 +456,11 @@
       _diag('ipc: wrapping config channel: ' + channel);
       return _origHandle(channel, function (_event, payload) {
         var result = listener(_event, payload);
-        var patched = patchConfigResult(result);
-        _diag('ipc: patched config channel ' + channel + ' response');
-        return patched;
+        return patchMaybeAsync(result, function (resolved) {
+          var patched = patchConfigResult(resolved);
+          _diag('ipc: patched config channel ' + channel + ' response');
+          return patched;
+        });
       });
     }
 

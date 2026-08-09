@@ -9,7 +9,11 @@ const test = require("node:test");
 const repoRoot = path.resolve(__dirname, "../..");
 const initPath = path.join(repoRoot, "scripts", "desktop-patches", "init.cjs");
 const patchScriptPath = path.join(repoRoot, "scripts", "patch-app-asar.mjs");
+const buildScriptPath = path.join(repoRoot, "scripts", "build-offline-package.ps1");
+const modelCatalogBuilderPath = path.join(repoRoot, "scripts", "build-api-model-catalog.mjs");
 const verifyScriptPath = path.join(repoRoot, "scripts", "verify-offline-package.ps1");
+const modelCatalogDocPath = path.join(repoRoot, "docs", "models-api.md");
+const readmePath = path.join(repoRoot, "README.md");
 const capabilityContractPath = path.join(
   repoRoot,
   "web-gateway",
@@ -153,4 +157,35 @@ test("package verification requires both model availability patches", () => {
   assert.match(verifier, /desktopModelAvailabilityMarkers/);
   assert.match(verifier, /STATSIG_MODEL_AVAILABILITY_CONFIG = '107580212'/);
   assert.match(verifier, /result\.key === STATSIG_MODEL_AVAILABILITY_CONFIG/);
+});
+
+test("models-api.json is generated as a single release artifact with GPT-5.6 and DeepSeek compatibility fields", () => {
+  const buildSource = fs.readFileSync(buildScriptPath, "utf8");
+  const builderSource = fs.readFileSync(modelCatalogBuilderPath, "utf8");
+  const verifierSource = fs.readFileSync(verifyScriptPath, "utf8");
+  const docSource = fs.readFileSync(modelCatalogDocPath, "utf8");
+  const readmeSource = fs.readFileSync(readmePath, "utf8");
+
+  assert.match(buildSource, /build-api-model-catalog\.mjs/);
+  assert.match(buildSource, /models-api\.json/);
+  assert.match(builderSource, /OPENAI_CATALOG_URL/);
+  assert.match(builderSource, /DEEPSEEK_SETUP_URL/);
+  assert.match(builderSource, /GPT_56_SLUGS/);
+  assert.match(builderSource, /GPT_56_CUSTOM_PROVIDER_PATCH/);
+  assert.match(builderSource, /deepseek-v4-flash/);
+  assert.match(builderSource, /deepseek-v4-pro/);
+  assert.match(builderSource, /tool_mode: null/);
+  assert.match(builderSource, /supports_search_tool !== true/);
+  assert.match(builderSource, /web_search_tool_type !== "text"/);
+
+  assert.match(verifierSource, /Expected exactly one models-api\.json asset/);
+  assert.match(verifierSource, /API model catalog does not contain any models/);
+  assert.match(verifierSource, /API model catalog has unexpected custom-provider fields for/);
+  assert.match(verifierSource, /API model catalog has unexpected DeepSeek fields for/);
+
+  assert.match(readmeSource, /models-api\.json/);
+  assert.match(readmeSource, /docs\/models-api\.md/);
+  assert.match(docSource, /codex\.exe --version/);
+  assert.match(docSource, /deepseek-v4-flash/);
+  assert.match(docSource, /退出条件/);
 });
