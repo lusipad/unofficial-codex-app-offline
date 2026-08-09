@@ -1330,6 +1330,16 @@ const REQUIRED_PLUGIN_FALLBACK_SURFACES = [
   'cloud-workspace-shared',
   'cloud-workspace-list',
 ];
+const REQUIRED_PLUGIN_CLOUD_UNAVAILABLE_ERRORS = [
+  'ERR_NETWORK_ACCESS_DENIED',
+  'ERR_PROXY_CONNECTION_FAILED',
+  'ERR_INTERNET_DISCONNECTED',
+  'ERR_NAME_NOT_RESOLVED',
+  'ERR_NAME_RESOLUTION_FAILED',
+  'ERR_ADDRESS_UNREACHABLE',
+  'ERR_CONNECTION_REFUSED',
+  'ERR_CONNECTION_TIMED_OUT',
+];
 function pluginQuerySurfaceMarker(key) {
   return PLUGIN_QUERY_NETWORK_MODE_PATCH_MARKER +
     `/*codex-offline:plugin-query-surface:${key}*/`;
@@ -1569,7 +1579,16 @@ for (const entry of javaScriptEntries) {
       }
     }
     for (const key of REQUIRED_PLUGIN_FALLBACK_SURFACES) {
-      if (content.includes(pluginFallbackSurfaceMarker(key))) {
+      const markerIndex = content.indexOf(pluginFallbackSurfaceMarker(key));
+      const catchIndex = content.lastIndexOf('.catch(e=>', markerIndex);
+      const fallbackSource = content.slice(catchIndex, markerIndex);
+      if (
+        markerIndex >= 0 &&
+        catchIndex >= 0 &&
+        REQUIRED_PLUGIN_CLOUD_UNAVAILABLE_ERRORS.every(errorName =>
+          fallbackSource.includes(errorName)
+        )
+      ) {
         pluginFallbackPatchedSurfaces.add(key);
       }
     }
