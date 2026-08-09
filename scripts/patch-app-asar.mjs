@@ -778,10 +778,39 @@ function patchOfflinePluginQueries(content) {
   const pluginQueryNetworkMode = key =>
     `networkMode:\`always\`${PLUGIN_QUERY_NETWORK_MODE_PATCH_MARKER}` +
     `/*codex-offline:plugin-query-surface:${key}*/`;
+  const cloudUnavailableErrorNames = [
+    'ERR_NETWORK_ACCESS_DENIED',
+    'ERR_PROXY_CONNECTION_FAILED',
+    'ERR_INTERNET_DISCONNECTED',
+    'ERR_NAME_NOT_RESOLVED',
+    'ERR_NAME_RESOLUTION_FAILED',
+    'ERR_ADDRESS_UNREACHABLE',
+    'ERR_CONNECTION_REFUSED',
+    'ERR_CONNECTION_TIMED_OUT',
+  ];
+  const cloudUnavailable =
+    `globalThis.navigator?.onLine===!1||/(?:${cloudUnavailableErrorNames.join('|')})/` +
+    '.test(String(e?.message??e))';
   const offlineCloudFallback = (key, emptyValue) =>
+    `.catch(e=>${cloudUnavailable}?(${emptyValue}):Promise.reject(e))` +
+    `${PLUGIN_CLOUD_FALLBACK_PATCH_MARKER}` +
+    `/*codex-offline:plugin-fallback-surface:${key}*/`;
+  const legacyOfflineCloudFallback = (key, emptyValue) =>
     `.catch(e=>globalThis.navigator?.onLine===!1?(${emptyValue}):Promise.reject(e))` +
     `${PLUGIN_CLOUD_FALLBACK_PATCH_MARKER}` +
     `/*codex-offline:plugin-fallback-surface:${key}*/`;
+  for (const [key, emptyValue] of [
+    ['cloud-home', '{sections:[]}'],
+    ['cloud-user-list', '{plugins:[]}'],
+    ['cloud-workspace-created', '{plugins:[]}'],
+    ['cloud-workspace-shared', '{plugins:[]}'],
+    ['cloud-workspace-list', '{plugins:[],pagination:{next_page_token:null}}'],
+  ]) {
+    const legacy = legacyOfflineCloudFallback(key, emptyValue);
+    if (!next.includes(legacy)) continue;
+    next = next.replace(legacy, offlineCloudFallback(key, emptyValue));
+    patched = true;
+  }
   const replacements = [
     [
       'local-directory',

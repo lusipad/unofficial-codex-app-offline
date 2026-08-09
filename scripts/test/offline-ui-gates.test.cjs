@@ -277,7 +277,7 @@ test("renderer defaults run local queries and mutations while the OS is offline"
   }
 });
 
-test("offline plugin queries force local IPC online and cloud plugin views degrade gracefully", () => {
+test("offline plugin queries force local IPC online and cloud plugin views degrade gracefully", async () => {
   const functionStart = patchScriptSource.indexOf("function patchOfflinePluginQueries");
   const functionEnd = patchScriptSource.indexOf(
     "\nfunction patchWorkspaceDependenciesSettingsGate",
@@ -336,6 +336,16 @@ test("offline plugin queries force local IPC online and cloud plugin views degra
     );
   }
   assert.match(result.content, /globalThis\.navigator\?\.onLine===!1/);
+  assert.match(result.content, /ERR_NETWORK_ACCESS_DENIED/);
+  assert.match(result.content, /ERR_PROXY_CONNECTION_FAILED/);
+  assert.ok(
+    verifyScriptSource.includes(
+      "ERR_NETWORK_ACCESS_DENIED",
+    ) && verifyScriptSource.includes(
+      "ERR_PROXY_CONNECTION_FAILED",
+    ),
+    "package verifier must reject the navigator-only fallback",
+  );
   assert.match(result.content, /Promise\.reject\(e\)/);
   assert.equal(result.content.includes(".catch(()=>"), false);
   assert.equal(
@@ -346,6 +356,65 @@ test("offline plugin queries force local IPC online and cloud plugin views degra
     "patched workspace/shared query must not match the verifier's unpatched boundary",
   );
   assert.deepEqual(result.correctKeys.sort(), result.expectedKeys.sort());
+
+  for (const [key, emptyValue] of [
+    ["cloud-home", { sections: [] }],
+    ["cloud-user-list", { plugins: [] }],
+    ["cloud-workspace-created", { plugins: [] }],
+    ["cloud-workspace-shared", { plugins: [] }],
+    ["cloud-workspace-list", { plugins: [], pagination: { next_page_token: null } }],
+  ]) {
+    const marker =
+      `/*codex-offline:plugin-cloud-fallback*/` +
+      `/*codex-offline:plugin-fallback-surface:${key}*/`;
+    const markerIndex = result.content.indexOf(marker);
+    const catchIndex = result.content.lastIndexOf(".catch(", markerIndex);
+    assert.notEqual(markerIndex, -1, key);
+    assert.notEqual(catchIndex, -1, key);
+    const callbackSource = result.content.slice(
+      catchIndex + ".catch(".length,
+      markerIndex - 1,
+    );
+    const callback = Function(
+      "globalThis",
+      `"use strict"; return (${callbackSource});`,
+    )({ navigator: { onLine: true } });
+
+    for (const errorName of [
+      "ERR_NETWORK_ACCESS_DENIED",
+      "ERR_PROXY_CONNECTION_FAILED",
+      "ERR_INTERNET_DISCONNECTED",
+      "ERR_NAME_NOT_RESOLVED",
+      "ERR_NAME_RESOLUTION_FAILED",
+      "ERR_ADDRESS_UNREACHABLE",
+      "ERR_CONNECTION_REFUSED",
+      "ERR_CONNECTION_TIMED_OUT",
+    ]) {
+      assert.deepEqual(
+        await callback(new Error(`net::${errorName}`)),
+        emptyValue,
+        `${key} must degrade ${errorName} to its empty cloud result`,
+      );
+    }
+
+    const serviceError = new Error("HTTP 503 Service Unavailable");
+    await assert.rejects(callback(serviceError), error => error === serviceError);
+  }
+
+  const legacyCloudHomeFixture =
+    "queryKey:[...mL,`home`,e],queryFn:()=>K_.safeGet(`/ps/plugins/home`).catch(e=>globalThis.navigator?.onLine===!1?({sections:[]}):Promise.reject(e))" +
+    "/*codex-offline:plugin-cloud-fallback*//*codex-offline:plugin-fallback-surface:cloud-home*/,retry:!1," +
+    "networkMode:`always`/*codex-offline:plugin-query-network-mode*//*codex-offline:plugin-query-surface:cloud-home*/,staleTime:ym.ONE_MINUTE";
+  const legacyUpgrade = patchOfflinePluginQueries(legacyCloudHomeFixture);
+  assert.equal(legacyUpgrade.patched, true);
+  assert.match(legacyUpgrade.content, /ERR_NETWORK_ACCESS_DENIED/);
+  assert.equal(
+    legacyUpgrade.content.includes(
+      ".catch(e=>globalThis.navigator?.onLine===!1?",
+    ),
+    false,
+    "packages built with the navigator-only fallback must be upgraded",
+  );
 
   const secondPass = patchOfflinePluginQueries(result.content);
   assert.equal(secondPass.patched, false);
