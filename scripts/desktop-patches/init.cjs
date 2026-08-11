@@ -19,6 +19,12 @@
   var ipcMain = _electron.ipcMain;
   var app = _electron.app;
   var session = _electron.session;
+  var _pluginServiceCompat;
+  try {
+    _pluginServiceCompat = require('./plugin-service-compat.cjs');
+  } catch (_e) {
+    _pluginServiceCompat = null;
+  }
 
   // ── Diagnostics ──────────────────────────────────────────────────────────
   // Set CODEX_OFFLINE_PATCH_DEBUG=1 to enable diagnostic logging
@@ -42,6 +48,10 @@
     } catch (_e) { /* best-effort */ }
   }
 
+  if (!_pluginServiceCompat) {
+    _diag('plugin-service compatibility core is unavailable');
+  }
+
   // Marker so other code can detect we're active
   try { process.env.CODEX_OFFLINE_PATCH_ACTIVE = '1'; } catch (_e) {}
 
@@ -50,6 +60,67 @@
   // ═══════════════════════════════════════════════════════════════════════
   // This catches responses to ipcRenderer.send() that flow back via
   // webContents.send() (the main→renderer direction).
+
+  var _pendingPluginFetches = new Map();
+  var PLUGIN_FETCH_TTL_MS = 5 * 60 * 1000;
+
+  function pluginFetchKey(webContentsId, requestId) {
+    return String(webContentsId) + ':' + String(requestId);
+  }
+
+  function clearPendingPluginFetch(key) {
+    var pending = _pendingPluginFetches.get(key);
+    if (!pending) return null;
+    _pendingPluginFetches.delete(key);
+    if (pending.timer) clearTimeout(pending.timer);
+    return pending;
+  }
+
+  function rememberPluginFetch(event, payload) {
+    if (!_pluginServiceCompat || !isPlainObject(payload)) return;
+    var senderId = event && event.sender && event.sender.id;
+    var requestId = payload.requestId;
+    if (senderId == null || requestId == null) return;
+    var key = pluginFetchKey(senderId, requestId);
+    if (payload.type === 'cancel-fetch') {
+      clearPendingPluginFetch(key);
+      return;
+    }
+    if (payload.type !== 'fetch') return;
+    if (!_pluginServiceCompat.matchPluginServiceRequest(payload)) return;
+
+    clearPendingPluginFetch(key);
+    var timer = setTimeout(function () {
+      _pendingPluginFetches.delete(key);
+    }, PLUGIN_FETCH_TTL_MS);
+    if (timer && typeof timer.unref === 'function') timer.unref();
+    _pendingPluginFetches.set(key, {
+      request: {
+        requestId: String(requestId),
+        method: payload.method,
+        url: payload.url,
+      },
+      timer: timer,
+    });
+    _diag('plugin-service fetch tracked: ' + payload.url);
+  }
+
+  function patchPluginFetchResponse(wc, payload) {
+    if (!_pluginServiceCompat || !isPlainObject(payload) ||
+        payload.type !== 'fetch-response' || payload.requestId == null ||
+        !wc || wc.id == null) {
+      return payload;
+    }
+    var pending = clearPendingPluginFetch(pluginFetchKey(wc.id, payload.requestId));
+    if (!pending || payload.responseType !== 'error') return payload;
+    var fallback = _pluginServiceCompat.pluginServiceFallbackForError(
+      pending.request,
+      payload
+    );
+    if (!fallback) return payload;
+    _diag('plugin-service transport failure degraded: ' + pending.request.url);
+    return Object.assign({ type: 'fetch-response' }, fallback);
+  }
 
   function wrapWebContentsSend(wc) {
     if (!wc || !wc.send || wc._codexOfflineWrapped) return;
@@ -66,6 +137,7 @@
       // Attempt to inject gate overrides
       for (var i = 1; i < arguments.length; i++) {
         if (isPlainObject(arguments[i])) {
+          arguments[i] = patchPluginFetchResponse(wc, arguments[i]);
           patchSharedObjectPayload(arguments[i]);
         }
       }
@@ -153,7 +225,7 @@
     '1907601843': true,   // Local env cloud onboarding
     '588076040': true,    // Bundled plugins marketplace
     '533078438': true,    // Plugins nav (bypass API-key lockout)
-    '3413548395': true,   // Plugins management in Skills
+    '3413548395': false,  // Unified plugins page; true selects the legacy storefront
     '1609556872': true,   // Slash commands menu
     '1221508807': true,   // Background subagents
     '459748632': true,    // Multi-window
@@ -513,7 +585,13 @@
       });
     }
 
-    // ── Default: pass-through ──
+    // ── Default: track stable fetch/fetch-response protocol surfaces ──
+    if (_pluginServiceCompat) {
+      return _origHandle(channel, function (_event, payload) {
+        rememberPluginFetch(_event, payload);
+        return listener.apply(this, arguments);
+      });
+    }
     return _origHandle(channel, listener);
   };
 

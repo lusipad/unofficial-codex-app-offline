@@ -189,6 +189,7 @@ test("source data contract covers direct exe asar patch surfaces", () => {
     "/*codex-offline:fast-mode-service-tier-options*/",
     "/*codex-offline:context-usage-visible*/",
     "/*codex-offline:renderer-known-statsig-gates*/",
+    "/*codex-offline:unified-plugins-page*/",
     "/*codex-offline:electron-namespace-no-auto-updater*/",
   ]) {
     assert.ok(contractData.DESKTOP_ASAR_PATCH_MARKERS.includes(marker), marker);

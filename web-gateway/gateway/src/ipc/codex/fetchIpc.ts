@@ -2,6 +2,9 @@
 export {};
 
 const path = require("path");
+const {
+  pluginServiceFallbackForError,
+} = require("./pluginServiceCompat.cjs");
 
 function createFetchIpcHandlers(deps) {
   const broadcast = deps.broadcast;
@@ -293,6 +296,12 @@ function createFetchIpcHandlers(deps) {
       return true;
     } catch (error) {
       logger.warn(`[fetch] ${url} failed`, error);
+      const pluginFallback = pluginServiceFallbackForError(message, error);
+      if (pluginFallback) {
+        logger && logger.info(`[fetch] local plugin-service fallback for ${pathname}`);
+        broadcastFetchHttpResponse(requestId, pluginFallback, targetClientId);
+        return true;
+      }
       // fetch 形态的 IPC 不走 invoke 响应体，必须把 url 带回 WebSocket 消息，前端才能展示具体失败来源。
       broadcastFetchError(requestId, error, 500, targetClientId, { url });
       return false;

@@ -772,127 +772,57 @@ function patchOfflineNetworkModeDefaults(
 
 // end patchOfflineNetworkModeDefaults
 
-function patchOfflinePluginQueries(content) {
+function removeLegacyOfflinePluginQueryPatches(content) {
   let next = content;
-  let patched = false;
-  const pluginQueryNetworkMode = key =>
-    `networkMode:\`always\`${PLUGIN_QUERY_NETWORK_MODE_PATCH_MARKER}` +
-    `/*codex-offline:plugin-query-surface:${key}*/`;
-  const cloudUnavailableErrorNames = [
-    'ERR_NETWORK_ACCESS_DENIED',
-    'ERR_PROXY_CONNECTION_FAILED',
-    'ERR_INTERNET_DISCONNECTED',
-    'ERR_NAME_NOT_RESOLVED',
-    'ERR_NAME_RESOLUTION_FAILED',
-    'ERR_ADDRESS_UNREACHABLE',
-    'ERR_CONNECTION_REFUSED',
-    'ERR_CONNECTION_TIMED_OUT',
-  ];
-  const cloudUnavailable =
-    `globalThis.navigator?.onLine===!1||/(?:${cloudUnavailableErrorNames.join('|')})/` +
-    '.test(String(e?.message??e))';
-  const offlineCloudFallback = (key, emptyValue) =>
-    `.catch(e=>${cloudUnavailable}?(${emptyValue}):Promise.reject(e))` +
-    `${PLUGIN_CLOUD_FALLBACK_PATCH_MARKER}` +
-    `/*codex-offline:plugin-fallback-surface:${key}*/`;
-  const legacyOfflineCloudFallback = (key, emptyValue) =>
-    `.catch(e=>globalThis.navigator?.onLine===!1?(${emptyValue}):Promise.reject(e))` +
-    `${PLUGIN_CLOUD_FALLBACK_PATCH_MARKER}` +
-    `/*codex-offline:plugin-fallback-surface:${key}*/`;
-  for (const [key, emptyValue] of [
-    ['cloud-home', '{sections:[]}'],
-    ['cloud-user-list', '{plugins:[]}'],
-    ['cloud-workspace-created', '{plugins:[]}'],
-    ['cloud-workspace-shared', '{plugins:[]}'],
-    ['cloud-workspace-list', '{plugins:[],pagination:{next_page_token:null}}'],
-  ]) {
-    const legacy = legacyOfflineCloudFallback(key, emptyValue);
-    if (!next.includes(legacy)) continue;
-    next = next.replace(legacy, offlineCloudFallback(key, emptyValue));
-    patched = true;
-  }
-  const replacements = [
-    [
-      'local-directory',
-      'queryFn:async()=>{let{featuredPluginIds:t,marketplaces:r}=await _m(`list-plugins`,{hostId:e,...s.length>0?{cwds:s}:{},marketplaceKinds:[`local`]});return{featuredPluginIds:t,plugins:await fii({hostId:e,plugins:pL(r),queryClient:n})}},retry:!1,staleTime:ym.ONE_MINUTE',
-      `queryFn:async()=>{let{featuredPluginIds:t,marketplaces:r}=await _m(\`list-plugins\`,{hostId:e,...s.length>0?{cwds:s}:{},marketplaceKinds:[\`local\`]});return{featuredPluginIds:t,plugins:await fii({hostId:e,plugins:pL(r),queryClient:n})}},retry:!1,${pluginQueryNetworkMode('local-directory')},staleTime:ym.ONE_MINUTE`,
-    ],
-    [
-      'all-marketplaces',
-      'return{queryKey:l,queryFn:async()=>{if(n!=null){let e=await _m(`send-cli-request-for-host`,{hostId:t,method:`plugin/installed`,params:{...a.length>0?{cwds:a}:{},installSuggestionPluginNames:n}}),r=Xri(e.marketplaces,c),i=pL(r,s.getQueryData(l)?.plugins);return{featuredPluginIds:xii,marketplaceLoadErrors:e.marketplaceLoadErrors,marketplaces:dii(r),plugins:await fii({hostId:t,plugins:i,queryClient:s})}}let r=await _m(`list-plugins`,i==null?{hostId:t,...a.length>0?{cwds:a}:{},forceRefetch:bii.has(t)||void 0}:{hostId:t,...a.length>0?{cwds:a}:{},marketplaceKinds:i,forceRefetch:bii.has(t)||void 0}),o=Xri(r.marketplaces,c),u=pL(o,s.getQueryData(l)?.plugins),d=e==null?u:cii({buildFlavor:e,plugins:u}),f=Rri(r.featuredPluginIds).filter(e=>!c.some(t=>e.endsWith(`@${t}`)));return{featuredPluginIds:e==null?f:sii({buildFlavor:e,featuredPluginIds:f}),marketplaceLoadErrors:r.marketplaceLoadErrors,marketplaces:dii(o),plugins:await fii({hostId:t,plugins:d,queryClient:s})}},staleTime:ym.SIX_HOURS,gcTime:1/0',
-      `return{queryKey:l,queryFn:async()=>{if(n!=null){let e=await _m(\`send-cli-request-for-host\`,{hostId:t,method:\`plugin/installed\`,params:{...a.length>0?{cwds:a}:{},installSuggestionPluginNames:n}}),r=Xri(e.marketplaces,c),i=pL(r,s.getQueryData(l)?.plugins);return{featuredPluginIds:xii,marketplaceLoadErrors:e.marketplaceLoadErrors,marketplaces:dii(r),plugins:await fii({hostId:t,plugins:i,queryClient:s})}}let r=await _m(\`list-plugins\`,i==null?{hostId:t,...a.length>0?{cwds:a}:{},forceRefetch:bii.has(t)||void 0}:{hostId:t,...a.length>0?{cwds:a}:{},marketplaceKinds:i,forceRefetch:bii.has(t)||void 0}),o=Xri(r.marketplaces,c),u=pL(o,s.getQueryData(l)?.plugins),d=e==null?u:cii({buildFlavor:e,plugins:u}),f=Rri(r.featuredPluginIds).filter(e=>!c.some(t=>e.endsWith(\`@\${t}\`)));return{featuredPluginIds:e==null?f:sii({buildFlavor:e,featuredPluginIds:f}),marketplaceLoadErrors:r.marketplaceLoadErrors,marketplaces:dii(o),plugins:await fii({hostId:t,plugins:d,queryClient:s})}},${pluginQueryNetworkMode('all-marketplaces')},staleTime:ym.SIX_HOURS,gcTime:1/0`,
-    ],
-    [
-      'marketplace-kind',
-      'return{queryKey:r,queryFn:async()=>fii({hostId:e,plugins:pL((await _m(`list-plugins`,{hostId:e,marketplaceKinds:[t],forceRefetch:bii.has(e)||void 0})).marketplaces,n.getQueryData(r)),queryClient:n}),staleTime:ym.SIX_HOURS}',
-      `return{queryKey:r,queryFn:async()=>fii({hostId:e,plugins:pL((await _m(\`list-plugins\`,{hostId:e,marketplaceKinds:[t],forceRefetch:bii.has(e)||void 0})).marketplaces,n.getQueryData(r)),queryClient:n}),${pluginQueryNetworkMode('marketplace-kind')},staleTime:ym.SIX_HOURS}`,
-    ],
-    [
-      'cloud-home',
-      'queryKey:[...mL,`home`,e],queryFn:()=>K_.safeGet(`/ps/plugins/home`),retry:!1,staleTime:ym.ONE_MINUTE',
-      `queryKey:[...mL,\`home\`,e],queryFn:()=>K_.safeGet(\`/ps/plugins/home\`)${offlineCloudFallback('cloud-home', '{sections:[]}')},retry:!1,${pluginQueryNetworkMode('cloud-home')},staleTime:ym.ONE_MINUTE`,
-    ],
-    [
-      'cloud-personal-network-mode',
-      'queryKey:[...Ct,`personal`,t,e],retry:!1,select:e=>e.plugins,staleTime:Be.ONE_MINUTE',
-      `queryKey:[...Ct,\`personal\`,t,e],retry:!1,${pluginQueryNetworkMode('cloud-personal-network-mode')},select:e=>e.plugins,staleTime:Be.ONE_MINUTE`,
-    ],
-    [
-      'cloud-user-list',
-      'return yt.safeGet(`/ps/plugins/list`,{parameters:{query:{scope:`USER`,...n}},signal:e});',
-      `return yt.safeGet(\`/ps/plugins/list\`,{parameters:{query:{scope:\`USER\`,...n}},signal:e})${offlineCloudFallback('cloud-user-list', '{plugins:[]}')};`,
-    ],
-    [
-      'cloud-workspace-created',
-      'return yt.safeGet(`/ps/plugins/workspace/created`,{parameters:{query:n},signal:e});',
-      `return yt.safeGet(\`/ps/plugins/workspace/created\`,{parameters:{query:n},signal:e})${offlineCloudFallback('cloud-workspace-created', '{plugins:[]}')};`,
-    ],
-    [
-      'cloud-workspace-shared',
-      'return yt.safeGet(`/ps/plugins/workspace/shared`,{parameters:{query:n},signal:e})',
-      `return yt.safeGet(\`/ps/plugins/workspace/shared\`,{parameters:{query:n},signal:e})${offlineCloudFallback('cloud-workspace-shared', '{plugins:[]}')}`,
-    ],
-    [
-      'cloud-workspace-list',
-      'queryFn:({pageParam:e,signal:t})=>yt.safeGet(`/ps/plugins/list`,{parameters:{query:{scope:`WORKSPACE`,limit:wi,pageToken:e??void 0}},signal:t}),queryKey:[...Ct,`workspace`,e],retry:!1,select:e=>e.pages.flatMap(e=>e.plugins),staleTime:Be.ONE_MINUTE',
-      `queryFn:({pageParam:e,signal:t})=>yt.safeGet(\`/ps/plugins/list\`,{parameters:{query:{scope:\`WORKSPACE\`,limit:wi,pageToken:e??void 0}},signal:t})${offlineCloudFallback('cloud-workspace-list', '{plugins:[],pagination:{next_page_token:null}}')},queryKey:[...Ct,\`workspace\`,e],retry:!1,${pluginQueryNetworkMode('cloud-workspace-list')},select:e=>e.pages.flatMap(e=>e.plugins),staleTime:Be.ONE_MINUTE`,
-    ],
-  ];
+  let removed = 0;
+  const legacyNetworkModeRe =
+    /networkMode:`always`\/\*codex-offline:plugin-query-network-mode\*\/\/\*codex-offline:plugin-query-surface:[a-z-]+\*\/,/g;
+  next = next.replace(legacyNetworkModeRe, () => {
+    removed += 1;
+    return '';
+  });
 
-  const seenKeys = [];
-  const correctKeys = [];
-  for (const [key, before, after] of replacements) {
-    if (next.includes(after)) {
-      seenKeys.push(key);
-      correctKeys.push(key);
-      continue;
+  const legacyFallbackMarkerRe =
+    /\/\*codex-offline:plugin-cloud-fallback\*\/\/\*codex-offline:plugin-fallback-surface:[a-z-]+\*\//;
+  for (;;) {
+    const marker = legacyFallbackMarkerRe.exec(next);
+    if (!marker) break;
+    const catchIndex = next.lastIndexOf('.catch(e=>', marker.index);
+    const fallbackSource = catchIndex < 0 ? '' : next.slice(catchIndex, marker.index);
+    if (
+      catchIndex < 0 ||
+      fallbackSource.length > 1500 ||
+      !fallbackSource.includes('Promise.reject(e))') ||
+      !(
+        fallbackSource.includes('globalThis.navigator') ||
+        fallbackSource.includes('ERR_NETWORK_ACCESS_DENIED')
+      )
+    ) {
+      throw new Error(
+        'Legacy plugin fallback marker has an unexpected shape; refusing to remove it.',
+      );
     }
-    if (!next.includes(before)) continue;
-    seenKeys.push(key);
-    next = next.replace(before, after);
-    patched = true;
-    if (next.includes(after)) correctKeys.push(key);
+    next =
+      next.slice(0, catchIndex) +
+      next.slice(marker.index + marker[0].length);
+    removed += 1;
   }
 
-  return {
-    content: next,
-    patched,
-    seenKeys,
-    correctKeys,
-    expectedKeys: replacements.map(([key]) => key),
-  };
+  return { content: next, removed };
 }
 
-function patchIndirectRendererGateSurfaces(content) {
+// end removeLegacyOfflinePluginQueryPatches
+
+function patchSidebarActivitySurface(content) {
   let next = content;
   let patched = false;
   const sidebarPatchedSurfaceRe = new RegExp(
     `([A-Za-z_$][\\w$]*)=!0${escapeRegExp(SIDEBAR_ACTIVITY_VIEW_PATCH_MARKER)},` +
-      `([A-Za-z_$][\\w$]*)=q\\(Sw\\);return \\1&&` +
+      `([A-Za-z_$][\\w$]*)=q\\([A-Za-z_$][\\w$]*\\);return \\1&&` +
       '\\(\\2\\.status===`allowed`\\|\\|\\2\\.status===`loading`\\)',
   );
   const sidebarUnpatchedSurfaceRe =
-    /([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*)\),([A-Za-z_$][\w$]*)=q\(Sw\);return \1&&\(\4\.status===`allowed`\|\|\4\.status===`loading`\)\}[^]*?\3=`4039078146`/;
+    /([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*)\),([A-Za-z_$][\w$]*)=q\([A-Za-z_$][\w$]*\);return \1&&\(\4\.status===`allowed`\|\|\4\.status===`loading`\)\}[^]*?\3=`4039078146`/;
   const sidebarAlreadyCorrect = sidebarPatchedSurfaceRe.test(next);
   const sidebarSurfaceSeen =
     sidebarAlreadyCorrect ||
@@ -907,31 +837,51 @@ function patchIndirectRendererGateSurfaces(content) {
     patched = true;
   }
 
-  const pluginsPatchedSurfaceRe = new RegExp(
-    `([A-Za-z_$][\\w$]*)&&!0${escapeRegExp(PLUGINS_MANAGEMENT_IN_SKILLS_PATCH_MARKER)}` +
-      '&&Promise\\.all\\(\\[',
-  );
-  const pluginsUnpatchedSurfaceRe =
-    /([A-Za-z_$][\w$]*)&&[A-Za-z_$][\w$]*\.get\(Mg,`3413548395`\)&&Promise\.all\(\[/;
-  const pluginsAlreadyCorrect = pluginsPatchedSurfaceRe.test(next);
-  const pluginsSurfaceSeen =
-    pluginsAlreadyCorrect ||
-    (next.includes('`3413548395`') && pluginsUnpatchedSurfaceRe.test(next));
-  if (!pluginsAlreadyCorrect && pluginsSurfaceSeen) {
-    next = next.replace(
-      /[A-Za-z_$][\w$]*\.get\(Mg,`3413548395`\)/,
-      `!0${PLUGINS_MANAGEMENT_IN_SKILLS_PATCH_MARKER}`,
-    );
-    patched = true;
-  }
-
   return {
     content: next,
     patched,
     sidebarSurfaceSeen,
     sidebarCorrect: sidebarPatchedSurfaceRe.test(next),
-    pluginsSurfaceSeen,
-    pluginsCorrect: pluginsPatchedSurfaceRe.test(next),
+  };
+}
+
+function migrateLegacyPluginsPageSelection(content) {
+  let next = content;
+  let migratedCount = 0;
+  const legacyPageSelectionSource =
+    `([A-Za-z_$][\\w$]*)=!0${escapeRegExp(RENDERER_KNOWN_STATSIG_GATES_PATCH_MARKER)}` +
+    '&&([A-Za-z_$][\\w$]*)===`plugins`&&\\(' +
+    '([A-Za-z_$][\\w$]*)\\.initialTab===`plugins`\\|\\|\\3\\.initialTab===`skills`\\)';
+  const legacyPageSelectionRe = new RegExp(legacyPageSelectionSource, 'g');
+  const legacyPrefetchRe = new RegExp(
+    `([A-Za-z_$][\\w$]*)&&!0${escapeRegExp(LEGACY_PLUGINS_MANAGEMENT_IN_SKILLS_PATCH_MARKER)}` +
+      '&&Promise\\.all\\(\\[',
+    'g',
+  );
+
+  next = next.replace(
+    legacyPageSelectionRe,
+    (_match, selected, browseTab, initialState) => {
+      migratedCount += 1;
+      return (
+        `${selected}=!1${UNIFIED_PLUGINS_PAGE_PATCH_MARKER}&&` +
+        `${browseTab}===\`plugins\`&&(${initialState}.initialTab===\`plugins\`||` +
+        `${initialState}.initialTab===\`skills\`)`
+      );
+    },
+  );
+  next = next.replace(legacyPrefetchRe, (_match, enabled) => {
+    migratedCount += 1;
+    return `${enabled}&&!1${UNIFIED_PLUGINS_PAGE_PATCH_MARKER}&&Promise.all([`;
+  });
+
+  return {
+    content: next,
+    migratedCount,
+    legacyMarkerResidual: next.includes(
+      LEGACY_PLUGINS_MANAGEMENT_IN_SKILLS_PATCH_MARKER,
+    ),
+    legacySelectionResidual: new RegExp(legacyPageSelectionSource).test(next),
   };
 }
 
@@ -1081,16 +1031,16 @@ const MODEL_DISPLAY_NAME_FALLBACK_PATCH_MARKER =
   contractPatchMarker('/*codex-offline:model-id-display-name-fallback*/');
 const SIDEBAR_ACTIVITY_VIEW_PATCH_MARKER =
   contractPatchMarker('/*codex-offline:sidebar-activity-view*/');
-const PLUGINS_MANAGEMENT_IN_SKILLS_PATCH_MARKER =
-  contractPatchMarker('/*codex-offline:plugins-management-in-skills*/');
+const RENDERER_KNOWN_STATSIG_GATES_PATCH_MARKER =
+  contractPatchMarker('/*codex-offline:renderer-known-statsig-gates*/');
+const LEGACY_PLUGINS_MANAGEMENT_IN_SKILLS_PATCH_MARKER =
+  '/*codex-offline:plugins-management-in-skills*/';
+const UNIFIED_PLUGINS_PAGE_PATCH_MARKER =
+  contractPatchMarker('/*codex-offline:unified-plugins-page*/');
 const OFFLINE_QUERY_NETWORK_MODE_PATCH_MARKER =
   contractPatchMarker('/*codex-offline:offline-query-network-mode*/');
 const OFFLINE_MUTATION_NETWORK_MODE_PATCH_MARKER =
   contractPatchMarker('/*codex-offline:offline-mutation-network-mode*/');
-const PLUGIN_QUERY_NETWORK_MODE_PATCH_MARKER =
-  contractPatchMarker('/*codex-offline:plugin-query-network-mode*/');
-const PLUGIN_CLOUD_FALLBACK_PATCH_MARKER =
-  contractPatchMarker('/*codex-offline:plugin-cloud-fallback*/');
 
 function patchModelDisplayNameFallback(content) {
   const patchMarker = MODEL_DISPLAY_NAME_FALLBACK_PATCH_MARKER;
@@ -4207,8 +4157,6 @@ try {
       '`' +
       String.raw`,)!0(\))`,
   );
-  const RENDERER_KNOWN_STATSIG_GATES_PATCH_MARKER =
-    contractPatchMarker('/*codex-offline:renderer-known-statsig-gates*/');
   const WORKSPACE_DEPENDENCIES_SETTINGS_PATCH_MARKER =
     contractPatchMarker('/*codex-offline:workspace-dependencies-settings*/');
   const FEATURE_ENABLEMENT_PRESERVE_UNIFIED_EXEC_PATCH_MARKER =
@@ -4257,6 +4205,8 @@ try {
   if (!fs.existsSync(assetsDir)) {
     throw new Error('webview/assets directory not found. Package structure may have changed.');
   }
+  let legacyPluginRendererPatchesRemoved = 0;
+  let legacyPluginsPagePatchMigrations = 0;
   {
     const webviewJsFiles = listJavaScriptFiles(assetsDir);
     let patchedCount = 0;
@@ -4266,16 +4216,10 @@ try {
     let rendererKnownStatsigGatePatchCount = 0;
     let sidebarActivitySurfaceSeen = false;
     let sidebarActivityViewPatched = false;
-    let pluginsManagementSurfaceSeen = false;
-    let pluginsManagementInSkillsPatched = false;
+    const legacyPluginsPagePatchResidualFiles = [];
     let offlineQueryNetworkModePatched = false;
     let offlineMutationNetworkModePatched = false;
-    let pluginQueryNetworkModePatched = false;
-    let pluginCloudFallbackPatched = false;
     let offlineNetworkModeSurfaceSeen = false;
-    const offlinePluginExpectedKeys = new Set();
-    const offlinePluginSeenKeys = new Set();
-    const offlinePluginCorrectKeys = new Set();
     let workspaceDependenciesSettingsSeen = false;
     const workspaceDependenciesSettingsPatchedFiles = [];
     const computerUseNodeReplDynamicToolPatchedFiles = [];
@@ -4371,15 +4315,26 @@ try {
         workspaceDependenciesSettingsAlreadyCorrect = true;
       }
 
-      const indirectRendererGatePatch = patchIndirectRendererGateSurfaces(content);
-      sidebarActivitySurfaceSeen ||= indirectRendererGatePatch.sidebarSurfaceSeen;
-      pluginsManagementSurfaceSeen ||= indirectRendererGatePatch.pluginsSurfaceSeen;
-      if (indirectRendererGatePatch.patched) {
-        content = indirectRendererGatePatch.content;
+      const sidebarActivityPatch = patchSidebarActivitySurface(content);
+      sidebarActivitySurfaceSeen ||= sidebarActivityPatch.sidebarSurfaceSeen;
+      if (sidebarActivityPatch.patched) {
+        content = sidebarActivityPatch.content;
         changed = true;
       }
-      sidebarActivityViewPatched ||= indirectRendererGatePatch.sidebarCorrect;
-      pluginsManagementInSkillsPatched ||= indirectRendererGatePatch.pluginsCorrect;
+      sidebarActivityViewPatched ||= sidebarActivityPatch.sidebarCorrect;
+
+      const pluginsPageMigration = migrateLegacyPluginsPageSelection(content);
+      if (pluginsPageMigration.migratedCount > 0) {
+        content = pluginsPageMigration.content;
+        legacyPluginsPagePatchMigrations += pluginsPageMigration.migratedCount;
+        changed = true;
+      }
+      if (
+        pluginsPageMigration.legacyMarkerResidual ||
+        pluginsPageMigration.legacySelectionResidual
+      ) {
+        legacyPluginsPagePatchResidualFiles.push(path.relative(tmpDir, filePath));
+      }
 
       const rendererKnownStatsigGatePatch = patchDirectStatsigGateCalls(
         content,
@@ -4404,18 +4359,11 @@ try {
       offlineQueryNetworkModePatched ||= offlineNetworkModePatch.correct;
       offlineMutationNetworkModePatched ||= offlineNetworkModePatch.correct;
 
-      const offlinePluginQueryPatch = patchOfflinePluginQueries(content);
-      for (const key of offlinePluginQueryPatch.expectedKeys) {
-        offlinePluginExpectedKeys.add(key);
-      }
-      for (const key of offlinePluginQueryPatch.seenKeys) {
-        offlinePluginSeenKeys.add(key);
-      }
-      for (const key of offlinePluginQueryPatch.correctKeys) {
-        offlinePluginCorrectKeys.add(key);
-      }
-      if (offlinePluginQueryPatch.patched) {
-        content = offlinePluginQueryPatch.content;
+      const legacyPluginPatchCleanup =
+        removeLegacyOfflinePluginQueryPatches(content);
+      if (legacyPluginPatchCleanup.removed > 0) {
+        content = legacyPluginPatchCleanup.content;
+        legacyPluginRendererPatchesRemoved += legacyPluginPatchCleanup.removed;
         changed = true;
       }
       if (content.includes(I18N_NEEDLE)) {
@@ -4517,13 +4465,10 @@ try {
         'Could not statically enable the sidebar Activity priority surface.',
       );
     }
-    if (!pluginsManagementSurfaceSeen) {
+    if (legacyPluginsPagePatchResidualFiles.length > 0) {
       failRequiredPatch(
-        'Could not locate the Skills plugin-management prefetch surface.',
-      );
-    } else if (!pluginsManagementInSkillsPatched) {
-      failRequiredPatch(
-        'Could not statically enable the Skills plugin-management prefetch surface.',
+        'Could not migrate legacy plugin-page gate patches in ' +
+          `${legacyPluginsPagePatchResidualFiles.join(', ')}.`,
       );
     }
     if (!offlineNetworkModeSurfaceSeen) {
@@ -4539,43 +4484,6 @@ try {
       if (!offlineMutationNetworkModePatched) {
         failRequiredPatch(
           'Renderer mutations were not configured to run while offline.',
-        );
-      }
-    }
-    const missingOfflinePluginKeys = [...offlinePluginExpectedKeys].filter(
-      key => !offlinePluginCorrectKeys.has(key),
-    );
-    pluginQueryNetworkModePatched = [
-      'local-directory',
-      'all-marketplaces',
-      'marketplace-kind',
-      'cloud-home',
-      'cloud-personal-network-mode',
-      'cloud-workspace-list',
-    ].every(key => offlinePluginCorrectKeys.has(key));
-    pluginCloudFallbackPatched = [
-      'cloud-home',
-      'cloud-user-list',
-      'cloud-workspace-created',
-      'cloud-workspace-shared',
-      'cloud-workspace-list',
-    ].every(key => offlinePluginCorrectKeys.has(key));
-    if (offlinePluginSeenKeys.size === 0) {
-      failRequiredPatch('Could not locate the renderer plugin-service surfaces.');
-    } else if (missingOfflinePluginKeys.length > 0) {
-      failRequiredPatch(
-        'Could not patch every renderer plugin-service surface: ' +
-        missingOfflinePluginKeys.join(', '),
-      );
-    } else {
-      if (!pluginQueryNetworkModePatched) {
-        failRequiredPatch(
-          'Could not keep local plugin queries runnable while offline.',
-        );
-      }
-      if (!pluginCloudFallbackPatched) {
-        failRequiredPatch(
-          'Could not make cloud plugin catalogs fail soft for the local marketplace.',
         );
       }
     }
@@ -4603,6 +4511,17 @@ try {
         'Could not locate the renderer Ultra reasoning effort model filter.',
       );
     }
+  }
+  if (legacyPluginRendererPatchesRemoved > 0) {
+    log(
+      `Removed ${legacyPluginRendererPatchesRemoved} legacy renderer plugin-service injections.`,
+    );
+  }
+  if (legacyPluginsPagePatchMigrations > 0) {
+    log(
+      `Migrated ${legacyPluginsPagePatchMigrations} legacy plugin-page gate patches ` +
+        'to the unified plugins page.',
+    );
   }
   log('Renderer Statsig gates handled by static surface patches plus init.cjs runtime fallback.');
 
