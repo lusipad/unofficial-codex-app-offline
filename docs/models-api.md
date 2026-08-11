@@ -2,11 +2,17 @@
 
 [English](#english)
 
-`models-api.json` 是每个 GitHub Release 附带的可选 Codex 模型目录。它面向 API Key、CRS 和其他 Responses API 兼容 provider；项目不会自动安装或启用它，也不会在文件中写入 API Key。
+`models-api.json` 是每个 GitHub Release 附带的可选 Codex 模型目录。它面向 API Key、CRS 和其他 Responses API 兼容 provider；项目不会默认安装或启用它，也不会在文件中写入 API Key。
 
 该文件是完整目录，不是增量补丁：CI 从安装包内 `codex.exe --version` 读取精确的 `codex-cli` 版本，下载对应 `rust-v<version>` 的 OpenAI 官方目录，应用 GPT-5.6 custom-provider 临时修正，再合并 DeepSeek 官方 Codex 目录。
 
-## 安装
+## Windows 安装器选项
+
+运行同版本的 `*-setup.exe` 时，可以勾选“自定义 model 目录”。安装器会把包内目录复制为 `CODEX_HOME\models-api-offline.json`，并在 `config.toml` 的根级写入 `model_catalog_json`。该选项默认不勾选。
+
+重新安装时取消勾选或卸载，会删除这个安装器管理的文件及指向它的根级配置项。其他 Provider、API Key、配置项和用户自行维护的目录文件不会被删除。
+
+## 手动安装
 
 1. 从与当前安装包相同版本的 [Releases](https://github.com/lusipad/unofficial-codex-app-offline/releases) 下载 `models-api.json`。
 2. 将文件放到 `CODEX_HOME`；未设置该变量时，默认目录是 `%USERPROFILE%\.codex`。
@@ -95,7 +101,9 @@ wire_api = "responses"
 
 ## English
 
-`models-api.json` is an optional, version-matched Codex catalog for API-key and Responses-compatible custom providers. It is a full replacement catalog, not a partial overlay.
+`models-api.json` is an optional, version-matched Codex catalog for API-key and Responses-compatible custom providers. It is a full replacement catalog, not a partial overlay, and it is not enabled by default.
+
+The matching Windows `*-setup.exe` can install its bundled copy as `CODEX_HOME/models-api-offline.json` and write a root-level `model_catalog_json` entry when the custom-model task is selected. Unchecking that task on a later install or uninstalling removes only the installer-managed file and matching entry; providers, API keys, other settings, and user-managed catalog files are preserved.
 
 Download it from the same GitHub Release as the app, copy it into `CODEX_HOME`, set an absolute `model_catalog_json` path in `CODEX_HOME/config.toml` (by default `%USERPROFILE%/.codex/config.toml`), and fully restart Codex. The catalog lists both GPT and DeepSeek models, but it does not bind models to providers; keep `gpt-*` on the matching OpenAI/CRS provider and `deepseek-*` on the DeepSeek provider.
 

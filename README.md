@@ -28,6 +28,8 @@
 
 > 完整包同时包含桌面版和浏览器版。桌面版开箱即用；浏览器版需要额外安装 Node.js。
 
+也可以下载同版本的 `*-setup.exe` 直接安装。安装器里的“自定义 model 目录”默认不勾选；勾选后会安装包内目录并更新 `config.toml`。重新安装时取消勾选或卸载，只会清除安装器管理的目录和配置项，其他 Provider、API Key 与用户配置会保留。
+
 ### 浏览器版独立包（Web-Only / Windows / Linux / macOS）
 
 ```bash
@@ -142,7 +144,17 @@ pwsh -NoProfile -File ./scripts/build-offline-package.ps1
 
 每天 UTC 3:15 自动检查 Store 版本，有新版则构建发布。`[force-rebuild]` 提交标记可强制重建。
 
-每个 Release 还会提供一个可选的 `models-api.json`，用于 API Key、CRS 和 DeepSeek 等 Responses API 场景。它不会自动启用；下载、配置、原生搜索验证和临时补丁退出条件见 [API/custom provider 模型目录](docs/models-api.md)。
+每个 Release 还会提供一个可选的 `models-api.json`，用于 API Key、CRS 和 DeepSeek 等 Responses API 场景。它不会默认启用；Windows 安装器可以按用户勾选安装包内副本，手动下载、配置、原生搜索验证和临时补丁退出条件见 [API/custom provider 模型目录](docs/models-api.md)。
+
+### 维护文档
+
+- [Gateway 与桌面补丁边界分析](docs/issue-59-gateway-vs-patch-analysis.md)
+- [方案 B 补丁迁移清单](docs/plan-b-patch-migration-inventory.md)
+- [离线 gate 策略重设计草案](docs/gate-redesign.md)
+- [Priority filter 与 Fast mode 实施记录](docs/implementation-notes-priority-filter-fast-mode.md)
+- [插件服务兼容迁移计划](docs/plugin-service-compat-migration-plan.md)
+- [插件服务兼容实施记录](docs/implementation-notes-plugin-service-compat.md)
+- [API/custom provider 模型目录](docs/models-api.md)
 
 ## 配置
 
@@ -189,7 +201,7 @@ Two ways to use Codex, sharing the same offline skill seed:
 
 ### Quick Start
 
-**Windows full package:** Download `*-portable.zip` from [Releases](../../releases), extract, run `Setup Codex.cmd` once, then `Codex.cmd` for desktop mode. For browser mode: install Node.js 18+, then run `Codex Web.cmd` and open `http://127.0.0.1:3737`.
+**Windows full package:** Download `*-portable.zip` from [Releases](../../releases), extract, run `Setup Codex.cmd` once, then `Codex.cmd` for desktop mode. For browser mode: install Node.js 18+, then run `Codex Web.cmd` and open `http://127.0.0.1:3737`. You can also use the matching `*-setup.exe`; its optional custom-model task is unchecked by default, and later unchecking or uninstalling removes only the installer-managed catalog while preserving providers, API keys, and other settings.
 
 **Browser mode (all platforms):** Install Node.js 18+ and `npm install -g @openai/codex`, download `*-web.zip`, run `install.bat` / `bash install.sh` once, then run `start.bat` / `bash start.sh`. Open `http://127.0.0.1:3737`. Stop with `stop.bat` / `bash stop.sh`; check status with `status.bat` / `bash status.sh`.
 
@@ -228,7 +240,7 @@ See `config/offline-package.json`. Key fields:
 
 CI runs daily at 3:15 UTC. Commits tagged `[force-rebuild]` trigger a rebuild even if the Store version hasn't changed.
 
-Each Release also includes an optional, version-matched `models-api.json` for API-key, CRS, DeepSeek, and other Responses-compatible providers. It is not enabled automatically; see the [API/custom provider model catalog guide](docs/models-api.md).
+Each Release also includes an optional, version-matched `models-api.json` for API-key, CRS, DeepSeek, and other Responses-compatible providers. It is not enabled by default; the Windows installer can install the bundled copy when selected. See the [API/custom provider model catalog guide](docs/models-api.md).
 
 ### Risks
 

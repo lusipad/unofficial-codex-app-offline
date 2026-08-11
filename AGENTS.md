@@ -36,6 +36,8 @@ Codex Offline - 离线版 Codex AI 编程助手 Web Gateway。
 - 安装、升级与清理逻辑：`scripts/setup-codex-offline.ps1`
 - 构建和安装回归测试：`scripts/test/`
 - 架构决策与版本兼容记录：`docs/`
+- Gateway 与桌面补丁边界分析：[`docs/issue-59-gateway-vs-patch-analysis.md`](docs/issue-59-gateway-vs-patch-analysis.md)
+- 插件服务兼容迁移：[`docs/plugin-service-compat-migration-plan.md`](docs/plugin-service-compat-migration-plan.md) 与 [`docs/implementation-notes-plugin-service-compat.md`](docs/implementation-notes-plugin-service-compat.md)
 
 ## 定位与修改流程
 
