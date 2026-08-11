@@ -104,6 +104,11 @@ function Assert-CapabilityContractDefaults {
         }
     }
 
+    $pluginsPageGate = $Contract.statsigDefaultFeatureOverrides.PSObject.Properties['3413548395']
+    if ($null -eq $pluginsPageGate -or $pluginsPageGate.Value -ne $false) {
+        throw "$Context capability contract does not select the unified plugins page"
+    }
+
     foreach ($needle in @($Contract.requiredDesktopFeatureMarkers | Where-Object { $_ -ne 'setDesktopFeatureValues' })) {
         $featureProperty = $Contract.defaultDesktopFeatureState.PSObject.Properties[[string]$needle]
         if ($null -eq $featureProperty -or $featureProperty.Value -ne $true) {
@@ -154,6 +159,7 @@ foreach ($needle in @(
     'Filename: "{app}\Codex.cmd"; WorkingDir: "{app}"',
     'IconFilename: "{app}\_internal\app\ChatGPT.exe"',
     'zh.TaskSkills=安装默认离线技能（大部分技能需要联网，离线环境下无法使用）',
+    'zh.TaskCustomModels=自定义 model 目录：勾选后安装并写入 config.toml；重新安装时取消勾选或卸载会清除安装器管理的目录（保留 Provider、API Key 和其他配置）',
     'zh.TaskChromeHost=注册 @chrome 本机桥接',
     'zh.TaskCodexLinks=注册用于 CLI /app 的 codex:// 链接',
     'zh.TaskAppShim=安装 CLI /app 的 PowerShell shim（会覆盖 Get-AppxPackage 命令，可能与已安装的商店版 Codex Desktop 冲突）',
@@ -161,6 +167,7 @@ foreach ($needle in @(
     'zh.TaskChromeGuide=打开 Chrome 扩展设置引导',
     'zh.LaunchCodex=启动 Codex',
     'Name: "skills"; Description: "{cm:TaskSkills}"; Flags: unchecked',
+    'Name: "custommodels"; Description: "{cm:TaskCustomModels}"; Flags: unchecked',
     'Name: "chromehost"; Description: "{cm:TaskChromeHost}"; Flags: unchecked',
     'Name: "codexlinks"; Description: "{cm:TaskCodexLinks}"; Flags: unchecked',
     'Name: "computeruse"; Description: "{cm:TaskComputerUse}"; Flags: unchecked',
@@ -173,6 +180,10 @@ foreach ($needle in @(
     'Filename: "{app}\Codex.cmd"; Description: "{cm:LaunchCodex}"; Flags: nowait postinstall skipifsilent shellexec',
     'Result := ''-NonInteractive -Language '' + ActiveLanguage',
     'WizardIsTaskSelected(''skills'')',
+    'WizardIsTaskSelected(''custommodels'')',
+    '-InstallCustomModels',
+    '-RemoveCustomModels',
+    '[UninstallRun]',
     'WizardIsTaskSelected(''chromehost'')',
     'WizardIsTaskSelected(''codexlinks'')',
     'WizardIsTaskSelected(''computeruse'')',
@@ -347,9 +358,11 @@ try {
         'CHANGELOG.md',
         '_internal\bootstrap-codex-skills.ps1',
         '_internal\setup-codex-offline.ps1',
+        '_internal\models-api.json',
         '_internal\repair-chrome-host.ps1',
         '_internal\web\start-web.mjs',
         '_internal\web\gateway\dist\server.js',
+        '_internal\web\gateway\dist\ipc\codex\pluginServiceCompat.cjs',
         '_internal\web\web-shell\index.html',
         '_internal\web\web-shell\codex-bridge-polyfill.js',
         '_internal\web\node_modules\express\package.json',
@@ -363,8 +376,11 @@ try {
         '_internal\app\ChatGPT.exe',
         '_internal\app\resources\app.asar',
         '_internal\app\resources\codex.exe',
+        '_internal\app\resources\cua_node\bin\node_modules\@oai\sky\dist\js-deps\tslib.es6.js',
         '_internal\patches\init.cjs',
+        '_internal\patches\plugin-service-compat.cjs',
         '_internal\app\patches\init.cjs',
+        '_internal\app\patches\plugin-service-compat.cjs',
         '_internal\powershell-shim\CodexOfflineShim\CodexOfflineShim.psd1',
         '_internal\powershell-shim\CodexOfflineShim\CodexOfflineShim.psm1',
         '_internal\powershell-shim\CodexOfflineShim\sync-thread.js',
@@ -416,6 +432,23 @@ try {
         foreach ($marker in $desktopModelAvailabilityMarkers) {
             if (-not $initPatchContent.Contains($marker)) {
                 throw "Packaged init.cjs is missing model availability override '$marker': $relativePath"
+            }
+        }
+        foreach ($marker in @('rememberPluginFetch', 'patchPluginFetchResponse', "require('./plugin-service-compat.cjs')")) {
+            if (-not $initPatchContent.Contains($marker)) {
+                throw "Packaged init.cjs is missing plugin-service adapter '$marker': $relativePath"
+            }
+        }
+        if ($initPatchContent -notmatch "'3413548395'\s*:\s*false") {
+            throw "Packaged init.cjs does not select the unified plugins page: $relativePath"
+        }
+    }
+
+    foreach ($relativePath in @('_internal\patches\plugin-service-compat.cjs', '_internal\app\patches\plugin-service-compat.cjs')) {
+        $pluginCompatContent = Get-Content -LiteralPath (Join-Path $portableRoot $relativePath) -Raw
+        foreach ($marker in @('matchPluginServiceRequest', 'pluginServiceFallbackForError', 'ERR_INTERNET_DISCONNECTED', '/ps/plugins/home')) {
+            if (-not $pluginCompatContent.Contains($marker)) {
+                throw "Packaged plugin-service compatibility core is missing '$marker': $relativePath"
             }
         }
     }
@@ -502,12 +535,19 @@ try {
         'Read-SetupLanguage',
         "[ValidateSet('auto', 'en', 'zh')]",
         '[switch]$InstallSkillSync',
+        '[switch]$InstallCustomModels',
+        '[switch]$RemoveCustomModels',
+        '[switch]$CleanupOnly',
         '[switch]$RegisterChromeHost',
         '[switch]$RegisterCodexLinks',
         '[switch]$RepairComputerUse',
         '[switch]$OpenChromeGuide',
         'Start setup now?',
         'Install the default offline skills profile now?',
+        'Use the bundled custom model catalog?',
+        'models-api-offline.json',
+        'Install-ManagedModelCatalog',
+        'Remove-ManagedModelCatalog',
         '$InstallSkillSync -or',
         "Get-SetupText 'InstallSkillsPrompt') -DefaultYes `$false",
         'Register or repair @chrome native host access now?',
@@ -588,6 +628,14 @@ try {
     foreach ($needle in @('account/read', 'account_user_role', '/wham/accounts/check')) {
         if (-not $webGatewayChatgptBackendContent.Contains($needle)) {
             throw "Web gateway ChatGPT backend is missing expected local account-check marker: $needle"
+        }
+    }
+
+    $webGatewayFetchIpcPath = Join-Path $portableRoot '_internal\web\gateway\dist\ipc\codex\fetchIpc.js'
+    $webGatewayFetchIpcContent = Get-Content -Path $webGatewayFetchIpcPath -Raw
+    foreach ($needle in @('pluginServiceFallbackForError', 'local plugin-service fallback')) {
+        if (-not $webGatewayFetchIpcContent.Contains($needle)) {
+            throw "Web gateway fetch IPC is missing expected plugin-service adapter marker: $needle"
         }
     }
 
@@ -699,6 +747,7 @@ try {
             'package.json',
             'package-lock.json',
             'gateway\dist\server.js',
+            'gateway\dist\ipc\codex\pluginServiceCompat.cjs',
             'web-shell\index.html',
             'web-shell\codex-bridge-polyfill.js',
             'cache\official-bundle\manifest.json',
@@ -714,6 +763,14 @@ try {
         foreach ($needle in @('account/read', 'account_user_role', '/wham/accounts/check')) {
             if (-not $webZipChatgptBackendContent.Contains($needle)) {
                 throw "Web zip ChatGPT backend is missing expected local account-check marker: $needle"
+            }
+        }
+
+        $webZipFetchIpcPath = Join-Path $webRoot 'gateway\dist\ipc\codex\fetchIpc.js'
+        $webZipFetchIpcContent = Get-Content -Path $webZipFetchIpcPath -Raw
+        foreach ($needle in @('pluginServiceFallbackForError', 'local plugin-service fallback')) {
+            if (-not $webZipFetchIpcContent.Contains($needle)) {
+                throw "Web zip fetch IPC is missing expected plugin-service adapter marker: $needle"
             }
         }
 
@@ -1004,19 +1061,28 @@ try {
             if (-not (Test-Path $computerUseTransportPath -PathType Leaf)) {
                 throw 'Bundled computer-use plugin is missing the Windows helper transport module.'
             }
-            $computerUsePnpmRoot = Join-Path $computerUseSkyRoot 'dist\node_modules\.pnpm'
-            $computerUsePnpmTslibPaths = @(
-                Get-ChildItem -LiteralPath $computerUsePnpmRoot -Recurse -Filter 'tslib.es6.js' -File -ErrorAction SilentlyContinue |
-                    Where-Object { $_.FullName -like '*\node_modules\tslib\tslib.es6.js' }
-            )
-            if ($computerUsePnpmTslibPaths.Count -eq 0) {
-                throw 'Bundled computer-use plugin is missing its unencoded .pnpm tslib dependency path.'
+            $computerUseSkyDistRoot = Join-Path $computerUseSkyRoot 'dist'
+            $computerUseShortTslibPath = Join-Path $computerUseSkyDistRoot 'js-deps\tslib.es6.js'
+            if (-not (Test-Path $computerUseShortTslibPath -PathType Leaf)) {
+                throw 'Bundled computer-use runtime is missing its MAX_PATH-safe tslib dependency.'
             }
-            $encodedComputerUsePnpmTslibPaths = @(
-                $computerUsePnpmTslibPaths | Where-Object { $_.FullName -like '*%40rollup_plugin-typescript%40*' }
+            if (Test-Path (Join-Path $computerUseSkyDistRoot 'js-dependency-cache') -PathType Container) {
+                throw 'Bundled computer-use runtime still contains the long Sky dependency cache path.'
+            }
+            $computerUseSkyJavaScript = @(
+                Get-ChildItem -LiteralPath $computerUseSkyDistRoot -Recurse -Filter '*.js' -File
             )
-            if ($encodedComputerUsePnpmTslibPaths.Count -gt 0) {
-                throw 'Bundled computer-use plugin still has URL-encoded .pnpm tslib dependency path.'
+            $shortTslibImports = @(
+                $computerUseSkyJavaScript | Select-String -SimpleMatch 'js-deps/tslib.es6.js'
+            )
+            if ($shortTslibImports.Count -eq 0) {
+                throw 'Bundled computer-use runtime does not import its MAX_PATH-safe tslib dependency.'
+            }
+            $longTslibImports = @(
+                $computerUseSkyJavaScript | Select-String -SimpleMatch 'js-dependency-cache'
+            )
+            if ($longTslibImports.Count -gt 0) {
+                throw 'Bundled computer-use runtime still imports the long Sky dependency cache path.'
             }
         }
     }
@@ -1301,8 +1367,12 @@ const BUNDLED_PLUGIN_CACHE_LOCK_NONFATAL_PATCH_MARKER =
   requiredPatchMarker('/*codex-offline:bundled-plugin-cache-lock-nonfatal*/');
 const SIDEBAR_ACTIVITY_VIEW_PATCH_MARKER =
   requiredPatchMarker('/*codex-offline:sidebar-activity-view*/');
-const PLUGINS_MANAGEMENT_IN_SKILLS_PATCH_MARKER =
-  requiredPatchMarker('/*codex-offline:plugins-management-in-skills*/');
+const RENDERER_KNOWN_STATSIG_GATES_PATCH_MARKER =
+  requiredPatchMarker('/*codex-offline:renderer-known-statsig-gates*/');
+const LEGACY_PLUGINS_MANAGEMENT_IN_SKILLS_PATCH_MARKER =
+  '/*codex-offline:plugins-management-in-skills*/';
+const UNIFIED_PLUGINS_PAGE_PATCH_MARKER =
+  requiredPatchMarker('/*codex-offline:unified-plugins-page*/');
 const WORKSPACE_DEPENDENCIES_SETTINGS_PATCH_MARKER =
   requiredPatchMarker('/*codex-offline:workspace-dependencies-settings*/');
 const MODEL_DISPLAY_NAME_FALLBACK_PATCH_MARKER =
@@ -1311,56 +1381,25 @@ const OFFLINE_QUERY_NETWORK_MODE_PATCH_MARKER =
   requiredPatchMarker('/*codex-offline:offline-query-network-mode*/');
 const OFFLINE_MUTATION_NETWORK_MODE_PATCH_MARKER =
   requiredPatchMarker('/*codex-offline:offline-mutation-network-mode*/');
-const PLUGIN_QUERY_NETWORK_MODE_PATCH_MARKER =
-  requiredPatchMarker('/*codex-offline:plugin-query-network-mode*/');
-const PLUGIN_CLOUD_FALLBACK_PATCH_MARKER =
-  requiredPatchMarker('/*codex-offline:plugin-cloud-fallback*/');
-const REQUIRED_PLUGIN_QUERY_SURFACES = [
-  'local-directory',
-  'all-marketplaces',
-  'marketplace-kind',
-  'cloud-home',
-  'cloud-personal-network-mode',
-  'cloud-workspace-list',
+const LEGACY_PLUGIN_RENDERER_PATCH_MARKERS = [
+  '/*codex-offline:plugin-query-network-mode*/',
+  '/*codex-offline:plugin-cloud-fallback*/',
 ];
-const REQUIRED_PLUGIN_FALLBACK_SURFACES = [
-  'cloud-home',
-  'cloud-user-list',
-  'cloud-workspace-created',
-  'cloud-workspace-shared',
-  'cloud-workspace-list',
-];
-const REQUIRED_PLUGIN_CLOUD_UNAVAILABLE_ERRORS = [
-  'ERR_NETWORK_ACCESS_DENIED',
-  'ERR_PROXY_CONNECTION_FAILED',
-  'ERR_INTERNET_DISCONNECTED',
-  'ERR_NAME_NOT_RESOLVED',
-  'ERR_NAME_RESOLUTION_FAILED',
-  'ERR_ADDRESS_UNREACHABLE',
-  'ERR_CONNECTION_REFUSED',
-  'ERR_CONNECTION_TIMED_OUT',
-];
-function pluginQuerySurfaceMarker(key) {
-  return PLUGIN_QUERY_NETWORK_MODE_PATCH_MARKER +
-    `/*codex-offline:plugin-query-surface:${key}*/`;
-}
-function pluginFallbackSurfaceMarker(key) {
-  return PLUGIN_CLOUD_FALLBACK_PATCH_MARKER +
-    `/*codex-offline:plugin-fallback-surface:${key}*/`;
-}
 const sidebarActivityPatchedSurfaceRe = new RegExp(
   `([A-Za-z_$][\\w$]*)=!0${escapeRegExp(SIDEBAR_ACTIVITY_VIEW_PATCH_MARKER)},` +
-    `([A-Za-z_$][\\w$]*)=q\\(Sw\\);return \\1&&` +
+    `([A-Za-z_$][\\w$]*)=q\\([A-Za-z_$][\\w$]*\\);return \\1&&` +
     '\\(\\2\\.status===`allowed`\\|\\|\\2\\.status===`loading`\\)'
 );
 const sidebarActivityUnpatchedSurfaceRe =
-  /([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*)\),([A-Za-z_$][\w$]*)=q\(Sw\);return \1&&\(\4\.status===`allowed`\|\|\4\.status===`loading`\)\}[^]*?\3=`4039078146`/;
-const pluginsManagementPatchedSurfaceRe = new RegExp(
-  `([A-Za-z_$][\\w$]*)&&!0${escapeRegExp(PLUGINS_MANAGEMENT_IN_SKILLS_PATCH_MARKER)}` +
-    '&&Promise\\.all\\(\\['
+  /([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*)\),([A-Za-z_$][\w$]*)=q\([A-Za-z_$][\w$]*\);return \1&&\(\4\.status===`allowed`\|\|\4\.status===`loading`\)\}[^]*?\3=`4039078146`/;
+const legacyPluginsPageSelectionRe = new RegExp(
+  `([A-Za-z_$][\\w$]*)=!0${escapeRegExp(RENDERER_KNOWN_STATSIG_GATES_PATCH_MARKER)}` +
+    '&&([A-Za-z_$][\\w$]*)===`plugins`&&\\(' +
+    '([A-Za-z_$][\\w$]*)\\.initialTab===`plugins`\\|\\|\\3\\.initialTab===`skills`\\)'
 );
-const pluginsManagementUnpatchedSurfaceRe =
-  /([A-Za-z_$][\w$]*)&&[A-Za-z_$][\w$]*\.get\(Mg,`3413548395`\)&&Promise\.all\(\[/;
+const invalidUnifiedPluginsPageMarkerRe = new RegExp(
+  `!0${escapeRegExp(UNIFIED_PLUGINS_PAGE_PATCH_MARKER)}`
+);
 const offlineNetworkModePatchedSurfaceRe = new RegExp(
   `([A-Za-z_$][\\w$]*)=\\{defaultOptions:\\{` +
     'mutations:\\{networkMode:`always`' +
@@ -1497,16 +1536,12 @@ let pluginsApiKeyNavPatched = false;
 let pluginsApiKeyRoutePatched = false;
 let sidebarActivityViewSurfaceSeen = false;
 let sidebarActivityViewPatched = false;
-let pluginsManagementInSkillsSurfaceSeen = false;
-let pluginsManagementInSkillsPatched = false;
 let workspaceDependenciesSettingsSurfaceSeen = false;
 let workspaceDependenciesSettingsPatched = false;
 let modelDisplayNameFallbackPatched = false;
 let offlineNetworkModeSurfaceSeen = false;
 let offlineQueryNetworkModePatched = false;
 let offlineMutationNetworkModePatched = false;
-const pluginQueryPatchedSurfaces = new Set();
-const pluginFallbackPatchedSurfaces = new Set();
 let ultraReasoningEffortSurfaceSeen = false;
 let ultraReasoningEffortPatched = false;
 let codexMobileRemoteControlMfaEndpointSeen = false;
@@ -1519,15 +1554,19 @@ const bundledPluginCacheLockFatalResiduals = [];
 const webviewBrokenBooleanPatchResiduals = [];
 const rendererKnownStatsigGateResiduals = [];
 const sidebarActivityViewResiduals = [];
-const pluginsManagementInSkillsResiduals = [];
+const legacyPluginsPagePatchResiduals = [];
 const offlineNetworkModeResiduals = [];
-const offlinePluginQueryResiduals = [];
-const offlinePluginCloudResiduals = [];
+const legacyPluginRendererPatchResiduals = [];
 const ultraReasoningEffortResiduals = [];
 
 for (const entry of javaScriptEntries) {
   const content = asar.extractFile(asarPath, entryMap.get(entry)).toString('utf8');
   allJavaScriptContent.push(content);
+  for (const marker of LEGACY_PLUGIN_RENDERER_PATCH_MARKERS) {
+    if (content.includes(marker)) {
+      legacyPluginRendererPatchResiduals.push(`${entry}:${marker}`);
+    }
+  }
   const isWebviewAsset = /(^|\/)webview\/assets\/[^/]+\.js$/.test(entry);
   if (isWebviewAsset && WEBVIEW_BROKEN_BOOLEAN_PATCH_RE.test(content)) {
     webviewBrokenBooleanPatchResiduals.push(entry);
@@ -1544,16 +1583,12 @@ for (const entry of javaScriptEntries) {
       sidebarActivityViewSurfaceSeen = true;
       sidebarActivityViewResiduals.push(entry);
     }
-    if (pluginsManagementPatchedSurfaceRe.test(content)) {
-      pluginsManagementInSkillsSurfaceSeen = true;
-      pluginsManagementInSkillsPatched = true;
-    }
     if (
-      content.includes('`3413548395`') &&
-      pluginsManagementUnpatchedSurfaceRe.test(content)
+      content.includes(LEGACY_PLUGINS_MANAGEMENT_IN_SKILLS_PATCH_MARKER) ||
+      legacyPluginsPageSelectionRe.test(content) ||
+      invalidUnifiedPluginsPageMarkerRe.test(content)
     ) {
-      pluginsManagementInSkillsSurfaceSeen = true;
-      pluginsManagementInSkillsResiduals.push(entry);
+      legacyPluginsPagePatchResiduals.push(entry);
     }
     if (hasWorkspaceDependenciesSettingsSurface(content)) {
       workspaceDependenciesSettingsSurfaceSeen = true;
@@ -1572,25 +1607,6 @@ for (const entry of javaScriptEntries) {
     if (offlineNetworkModeUnpatchedSurfaceRe.test(content)) {
       offlineNetworkModeSurfaceSeen = true;
       offlineNetworkModeResiduals.push(entry);
-    }
-    for (const key of REQUIRED_PLUGIN_QUERY_SURFACES) {
-      if (content.includes(pluginQuerySurfaceMarker(key))) {
-        pluginQueryPatchedSurfaces.add(key);
-      }
-    }
-    for (const key of REQUIRED_PLUGIN_FALLBACK_SURFACES) {
-      const markerIndex = content.indexOf(pluginFallbackSurfaceMarker(key));
-      const catchIndex = content.lastIndexOf('.catch(e=>', markerIndex);
-      const fallbackSource = content.slice(catchIndex, markerIndex);
-      if (
-        markerIndex >= 0 &&
-        catchIndex >= 0 &&
-        REQUIRED_PLUGIN_CLOUD_UNAVAILABLE_ERRORS.every(errorName =>
-          fallbackSource.includes(errorName)
-        )
-      ) {
-        pluginFallbackPatchedSurfaces.add(key);
-      }
     }
     if (content.includes('hasModelSupportingUltraReasoningEffort')) {
       ultraReasoningEffortSurfaceSeen = true;
@@ -1615,23 +1631,6 @@ for (const entry of javaScriptEntries) {
       ) {
         rendererKnownStatsigGateResiduals.push(`${entry}:${gateId}`);
       }
-    }
-    if (
-      content.includes('queryFn:async()=>{let{featuredPluginIds:t,marketplaces:r}=await _m(`list-plugins`,{hostId:e,...s.length>0?{cwds:s}:{},marketplaceKinds:[`local`]});return{featuredPluginIds:t,plugins:await fii({hostId:e,plugins:pL(r),queryClient:n})}},retry:!1,staleTime:ym.ONE_MINUTE') ||
-      content.includes('return{queryKey:l,queryFn:async()=>{if(n!=null){let e=await _m(`send-cli-request-for-host`,{hostId:t,method:`plugin/installed`,params:{...a.length>0?{cwds:a}:{},installSuggestionPluginNames:n}}),r=Xri(e.marketplaces,c),i=pL(r,s.getQueryData(l)?.plugins);return{featuredPluginIds:xii,marketplaceLoadErrors:e.marketplaceLoadErrors,marketplaces:dii(r),plugins:await fii({hostId:t,plugins:i,queryClient:s})}}let r=await _m(`list-plugins`,i==null?{hostId:t,...a.length>0?{cwds:a}:{},forceRefetch:bii.has(t)||void 0}:{hostId:t,...a.length>0?{cwds:a}:{},marketplaceKinds:i,forceRefetch:bii.has(t)||void 0}),o=Xri(r.marketplaces,c),u=pL(o,s.getQueryData(l)?.plugins),d=e==null?u:cii({buildFlavor:e,plugins:u}),f=Rri(r.featuredPluginIds).filter(e=>!c.some(t=>e.endsWith(`@${t}`)));return{featuredPluginIds:e==null?f:sii({buildFlavor:e,featuredPluginIds:f}),marketplaceLoadErrors:r.marketplaceLoadErrors,marketplaces:dii(o),plugins:await fii({hostId:t,plugins:d,queryClient:s})}},staleTime:ym.SIX_HOURS,gcTime:1/0') ||
-      content.includes('return{queryKey:r,queryFn:async()=>fii({hostId:e,plugins:pL((await _m(`list-plugins`,{hostId:e,marketplaceKinds:[t],forceRefetch:bii.has(e)||void 0})).marketplaces,n.getQueryData(r)),queryClient:n}),staleTime:ym.SIX_HOURS}')
-    ) {
-      offlinePluginQueryResiduals.push(entry);
-    }
-    if (
-      content.includes('queryFn:()=>K_.safeGet(`/ps/plugins/home`),retry:!1,staleTime:ym.ONE_MINUTE') ||
-      content.includes('queryKey:[...Ct,`personal`,t,e],retry:!1,select:e=>e.plugins,staleTime:Be.ONE_MINUTE') ||
-      content.includes('return yt.safeGet(`/ps/plugins/list`,{parameters:{query:{scope:`USER`,...n}},signal:e});') ||
-      content.includes('return yt.safeGet(`/ps/plugins/workspace/created`,{parameters:{query:n},signal:e});') ||
-      content.includes('return yt.safeGet(`/ps/plugins/workspace/shared`,{parameters:{query:n},signal:e})}},queryKey:[...Ct,`personal`,t,e]') ||
-      content.includes('queryFn:({pageParam:e,signal:t})=>yt.safeGet(`/ps/plugins/list`,{parameters:{query:{scope:`WORKSPACE`,limit:wi,pageToken:e??void 0}},signal:t}),queryKey:[...Ct,`workspace`,e],retry:!1,select:e=>e.pages.flatMap(e=>e.plugins),staleTime:Be.ONE_MINUTE')
-    ) {
-      offlinePluginCloudResiduals.push(entry);
     }
   }
   bundledBrowserPluginsPatched ||= content.includes(BUNDLED_BROWSER_PLUGINS_PATCH_MARKER);
@@ -1805,17 +1804,11 @@ if (!sidebarActivityViewSurfaceSeen) {
 if (!sidebarActivityViewPatched) {
   throw new Error('Sidebar Activity priority surface is not statically enabled in app.asar.');
 }
-if (pluginsManagementInSkillsResiduals.length > 0) {
+if (legacyPluginsPagePatchResiduals.length > 0) {
   throw new Error(
-    'Skills plugin-management prefetch still uses its Statsig gate: ' +
-    pluginsManagementInSkillsResiduals.join(', ')
+    'Legacy plugin-page gate patches remain in app.asar: ' +
+    legacyPluginsPagePatchResiduals.join(', ')
   );
-}
-if (!pluginsManagementInSkillsSurfaceSeen) {
-  throw new Error('Skills plugin-management prefetch surface is missing from app.asar.');
-}
-if (!pluginsManagementInSkillsPatched) {
-  throw new Error('Skills plugin-management prefetch surface is not statically enabled.');
 }
 if (!workspaceDependenciesSettingsSurfaceSeen) {
   throw new Error('Workspace Dependencies settings surface is missing from app.asar.');
@@ -1841,34 +1834,10 @@ if (!offlineQueryNetworkModePatched) {
 if (!offlineMutationNetworkModePatched) {
   throw new Error('Renderer QueryClient does not run mutations while offline.');
 }
-if (offlinePluginQueryResiduals.length > 0) {
+if (legacyPluginRendererPatchResiduals.length > 0) {
   throw new Error(
-    'Offline plugin app-server queries still lack networkMode:`always`: ' +
-    offlinePluginQueryResiduals.join(', ')
-  );
-}
-const missingPluginQuerySurfaces = REQUIRED_PLUGIN_QUERY_SURFACES.filter(
-  key => !pluginQueryPatchedSurfaces.has(key)
-);
-if (missingPluginQuerySurfaces.length > 0) {
-  throw new Error(
-    'Offline plugin query network-mode patches are missing from: ' +
-    missingPluginQuerySurfaces.join(', ')
-  );
-}
-if (offlinePluginCloudResiduals.length > 0) {
-  throw new Error(
-    'Plugins cloud queries still fail hard instead of degrading to empty offline state: ' +
-    offlinePluginCloudResiduals.join(', ')
-  );
-}
-const missingPluginFallbackSurfaces = REQUIRED_PLUGIN_FALLBACK_SURFACES.filter(
-  key => !pluginFallbackPatchedSurfaces.has(key)
-);
-if (missingPluginFallbackSurfaces.length > 0) {
-  throw new Error(
-    'Offline plugin cloud fallback patches are missing from: ' +
-    missingPluginFallbackSurfaces.join(', ')
+    'Legacy renderer plugin-service patches must be removed from app.asar: ' +
+    legacyPluginRendererPatchResiduals.join(', ')
   );
 }
 if (ultraReasoningEffortResiduals.length > 0) {

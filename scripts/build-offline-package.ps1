@@ -160,6 +160,7 @@ function Find-Iscc {
     }
 
     $candidates = @(
+        (Join-Path $env:LOCALAPPDATA 'Programs/Inno Setup 6/ISCC.exe'),
         'C:/Program Files (x86)/Inno Setup 6/ISCC.exe',
         'C:/Program Files/Inno Setup 6/ISCC.exe'
     )
@@ -562,6 +563,63 @@ function Repair-EncodedNodeModuleEntries {
     return $repaired
 }
 
+function Shorten-SkyTslibDependencyPath {
+    param([Parameter(Mandatory = $true)][string]$CuaNodeRoot)
+
+    $skyDistRoot = Join-Path $CuaNodeRoot 'bin/node_modules/@oai/sky/dist'
+    $cacheRoot = Join-Path $skyDistRoot 'js-dependency-cache'
+    if (-not (Test-Path -LiteralPath $cacheRoot -PathType Container)) {
+        return 0
+    }
+
+    $cachedTslibFiles = @(
+        Get-ChildItem -LiteralPath $cacheRoot -Recurse -File -Filter 'tslib.es6.js'
+    )
+    if ($cachedTslibFiles.Count -ne 1) {
+        throw "Expected exactly one cached Sky tslib.es6.js, found $($cachedTslibFiles.Count)."
+    }
+
+    $shortTslibPath = Join-Path $skyDistRoot 'js-deps/tslib.es6.js'
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $shortTslibPath) | Out-Null
+    Copy-Item -LiteralPath $cachedTslibFiles[0].FullName -Destination $shortTslibPath -Force
+
+    $utf8WithoutBom = New-Object System.Text.UTF8Encoding($false)
+    $referenceCount = 0
+    foreach ($jsFile in Get-ChildItem -LiteralPath $skyDistRoot -Recurse -File -Filter '*.js') {
+        $source = Get-Content -LiteralPath $jsFile.FullName -Raw
+        $matches = @([regex]::Matches(
+            $source,
+            '[^"'']*js-dependency-cache[^"'']*tslib/tslib\.es6\.js'
+        ))
+        if ($matches.Count -eq 0) {
+            continue
+        }
+
+        $shortImport = Get-RelativePath -BasePath $jsFile.Directory.FullName -PathValue $shortTslibPath
+        if (-not $shortImport.StartsWith('.')) {
+            $shortImport = './' + $shortImport
+        }
+        foreach ($match in $matches) {
+            $source = $source.Replace($match.Value, $shortImport)
+            $referenceCount++
+        }
+        [System.IO.File]::WriteAllText($jsFile.FullName, $source, $utf8WithoutBom)
+    }
+
+    if ($referenceCount -eq 0) {
+        throw 'Sky tslib cache exists but no JavaScript imports reference it.'
+    }
+
+    $resolvedCacheRoot = [System.IO.Path]::GetFullPath($cacheRoot)
+    $resolvedSkyDistRoot = [System.IO.Path]::GetFullPath($skyDistRoot) + [System.IO.Path]::DirectorySeparatorChar
+    if (-not $resolvedCacheRoot.StartsWith($resolvedSkyDistRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "Refusing to remove Sky cache outside its dist directory: $resolvedCacheRoot"
+    }
+    Remove-Item -LiteralPath $resolvedCacheRoot -Recurse -Force
+
+    return $referenceCount
+}
+
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot = [System.IO.Path]::GetFullPath((Join-Path $scriptRoot '..'))
 $configFile = Resolve-AbsolutePath -BasePath $repoRoot -PathValue $ConfigPath
@@ -687,6 +745,10 @@ if (@($encodedScopeRepairs).Count -gt 0) {
 $encodedCuaNodeRepairs = Repair-EncodedNodeModuleEntries -RootPath (Join-Path $internalRoot 'app/resources/cua_node')
 if (@($encodedCuaNodeRepairs).Count -gt 0) {
     Write-BuildTrace "Repaired encoded scoped node_modules in cua_node ($(@($encodedCuaNodeRepairs).Count))."
+}
+$shortenedSkyTslibReferences = Shorten-SkyTslibDependencyPath -CuaNodeRoot (Join-Path $internalRoot 'app/resources/cua_node')
+if ($shortenedSkyTslibReferences -gt 0) {
+    Write-BuildTrace "Shortened Sky tslib dependency imports ($shortenedSkyTslibReferences)."
 }
 $encodedAsarUnpackedRepairs = Repair-EncodedNodeModuleEntries -RootPath (Join-Path $internalRoot 'app/resources/app.asar.unpacked')
 if (@($encodedAsarUnpackedRepairs).Count -gt 0) {
@@ -880,14 +942,16 @@ $assets = [System.Collections.Generic.List[string]]::new()
 
 Write-BuildTrace 'Building optional API model catalog release asset.'
 $modelCatalogBuilder = Join-Path $scriptRoot 'build-api-model-catalog.mjs'
+$bundledModelCatalog = Join-Path $internalRoot 'models-api.json'
 $modelCatalogAsset = Join-Path $artifactRoot 'models-api.json'
 $bundledCodexBinary = Join-Path $internalRoot 'app\resources\codex.exe'
 & node $modelCatalogBuilder `
     --codex-binary $bundledCodexBinary `
-    --output $modelCatalogAsset
+    --output $bundledModelCatalog
 if ($LASTEXITCODE -ne 0) {
     throw "API model catalog generation failed with exit code $LASTEXITCODE."
 }
+Copy-Item -LiteralPath $bundledModelCatalog -Destination $modelCatalogAsset -Force
 $assets.Add($modelCatalogAsset) | Out-Null
 
 Write-BuildTrace 'Creating archives.'
@@ -1181,6 +1245,7 @@ if ($config.packaging.setupExe -and -not $SkipInstaller) {
             $rendered = $rendered.Replace('__OUTPUT_BASENAME__', [string]('{0}-setup' -f $releaseBase))
             foreach ($requiredChineseMessage in @(
                 'zh.TaskSkills=安装默认离线技能（大部分技能需要联网，离线环境下无法使用）',
+                'zh.TaskCustomModels=自定义 model 目录：勾选后安装并写入 config.toml；重新安装时取消勾选或卸载会清除安装器管理的目录（保留 Provider、API Key 和其他配置）',
                 'zh.TaskChromeHost=注册 @chrome 本机桥接',
                 'zh.TaskCodexLinks=注册用于 CLI /app 的 codex:// 链接',
                 'zh.TaskAppShim=安装 CLI /app 的 PowerShell shim（会覆盖 Get-AppxPackage 命令，可能与已安装的商店版 Codex Desktop 冲突）',

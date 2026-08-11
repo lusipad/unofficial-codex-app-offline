@@ -5,6 +5,9 @@ param(
     [string]$SkillProfile = '',
     [switch]$InstallSkillSync,
     [switch]$SkipSkillSync,
+    [switch]$InstallCustomModels,
+    [switch]$RemoveCustomModels,
+    [switch]$CleanupOnly,
     [switch]$RegisterChromeHost,
     [switch]$RegisterCodexLinks,
     [switch]$InstallAppShim,
@@ -136,6 +139,26 @@ $script:SetupMessages = @{
     SkillsSkipped = @{
         en = 'Skill installation skipped. You can install skills later in Codex.'
         zh = '已跳过技能安装。之后可以在 Codex 里自行安装。'
+    }
+    StepCustomModels = @{
+        en = 'Optional custom model catalog'
+        zh = '可选自定义 model 目录'
+    }
+    CustomModelsPrompt = @{
+        en = 'Use the bundled custom model catalog?'
+        zh = '使用内置自定义 model 目录吗？'
+    }
+    CustomModelsInstalled = @{
+        en = 'Bundled custom model catalog installed.'
+        zh = '已安装内置自定义 model 目录。'
+    }
+    CustomModelsRemoved = @{
+        en = 'Installer-managed custom model catalog removed.'
+        zh = '已清除安装器管理的自定义 model 目录。'
+    }
+    CustomModelsUnchanged = @{
+        en = 'Custom model catalog left unchanged.'
+        zh = '自定义 model 目录保持不变。'
     }
     StepChromeHost = @{
         en = 'Optional Chrome native host'
@@ -474,6 +497,83 @@ function Uninstall-AppxDiscoveryShim {
     Write-Host (Get-SetupText 'AppShimRemoved') -ForegroundColor Green
 }
 
+function Write-Utf8NoBom {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][AllowEmptyString()][string]$Content
+    )
+
+    [System.IO.File]::WriteAllText($Path, $Content, (New-Object System.Text.UTF8Encoding($false)))
+}
+
+function Get-ManagedModelCatalogPath {
+    param([Parameter(Mandatory = $true)][string]$CodexHomePath)
+
+    return Join-Path $CodexHomePath 'models-api-offline.json'
+}
+
+function Remove-ManagedModelCatalog {
+    param([Parameter(Mandatory = $true)][string]$CodexHomePath)
+
+    $catalogPath = Get-ManagedModelCatalogPath -CodexHomePath $CodexHomePath
+    $configPath = Join-Path $CodexHomePath 'config.toml'
+    $configCatalogPath = $catalogPath.Replace('\', '/')
+
+    if (Test-Path -LiteralPath $configPath -PathType Leaf) {
+        $content = [System.IO.File]::ReadAllText($configPath)
+        $managedAssignmentPattern =
+            '(?mi)^[ \t]*model_catalog_json[ \t]*=[ \t]*"' +
+            [regex]::Escape($configCatalogPath) +
+            '"[ \t]*(?:#[^\r\n]*)?(?:\r?\n|$)'
+        $updated = [regex]::Replace($content, $managedAssignmentPattern, '')
+        if ($updated -ne $content) {
+            if ([string]::IsNullOrWhiteSpace($updated)) {
+                Remove-Item -LiteralPath $configPath -Force
+            }
+            else {
+                Write-Utf8NoBom -Path $configPath -Content $updated
+            }
+        }
+    }
+
+    if (Test-Path -LiteralPath $catalogPath -PathType Leaf) {
+        Remove-Item -LiteralPath $catalogPath -Force
+    }
+}
+
+function Install-ManagedModelCatalog {
+    param(
+        [Parameter(Mandatory = $true)][string]$PackageRoot,
+        [Parameter(Mandatory = $true)][string]$CodexHomePath
+    )
+
+    $sourcePath = Join-Path $PackageRoot '_internal\models-api.json'
+    if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) {
+        throw "Bundled custom model catalog was not found: $sourcePath"
+    }
+
+    New-Item -ItemType Directory -Path $CodexHomePath -Force | Out-Null
+    $catalogPath = Get-ManagedModelCatalogPath -CodexHomePath $CodexHomePath
+    Copy-Item -LiteralPath $sourcePath -Destination $catalogPath -Force
+
+    $configPath = Join-Path $CodexHomePath 'config.toml'
+    $content = if (Test-Path -LiteralPath $configPath -PathType Leaf) {
+        [System.IO.File]::ReadAllText($configPath)
+    }
+    else {
+        ''
+    }
+    $withoutCatalog = [regex]::Replace(
+        $content,
+        '(?m)^[ \t]*model_catalog_json[ \t]*=.*(?:\r?\n|$)',
+        ''
+    )
+    $newLine = if ($content.Contains("`r`n")) { "`r`n" } else { "`n" }
+    $configCatalogPath = $catalogPath.Replace('\', '/')
+    $updated = 'model_catalog_json = "' + $configCatalogPath + '"' + $newLine + $withoutCatalog
+    Write-Utf8NoBom -Path $configPath -Content $updated
+}
+
 function Repair-EncodedScopedNodeModules {
     param([Parameter(Mandatory = $true)][string]$RootPath)
 
@@ -545,6 +645,10 @@ if ($RepairThreads -or $RestoreThreads) {
     $repairScript = Join-Path $packageRoot '_internal\powershell-shim\CodexOfflineShim\repair-threads.js'
 }
 
+if ($InstallCustomModels -and $RemoveCustomModels) {
+    throw 'InstallCustomModels and RemoveCustomModels cannot be used together. / InstallCustomModels 与 RemoveCustomModels 不能同时使用。'
+}
+
 if (-not (Test-Path -LiteralPath $repairChromeHostScript -PathType Leaf)) {
     throw "Chrome host repair script was not found: $repairChromeHostScript"
 }
@@ -552,6 +656,15 @@ if (-not (Test-Path -LiteralPath $repairChromeHostScript -PathType Leaf)) {
 if ($RemoveAppShim) {
     $script:SetupLanguage = Resolve-SetupLanguage
     Uninstall-AppxDiscoveryShim
+    exit 0
+}
+
+if ($CleanupOnly) {
+    $script:SetupLanguage = Resolve-SetupLanguage
+    if ($RemoveCustomModels) {
+        Remove-ManagedModelCatalog -CodexHomePath $resolvedCodexHome
+        Write-Host (Get-SetupText 'CustomModelsRemoved') -ForegroundColor Green
+    }
     exit 0
 }
 
@@ -591,7 +704,30 @@ else {
     Write-Host (Get-SetupText 'SkillsSkipped') -ForegroundColor Yellow
 }
 
-Write-SetupStep -Number 2 -Title (Get-SetupText 'StepChromeHost')
+Write-SetupStep -Number 2 -Title (Get-SetupText 'StepCustomModels')
+if ($InstallCustomModels) {
+    Install-ManagedModelCatalog -PackageRoot $packageRoot -CodexHomePath $resolvedCodexHome
+    Write-Host (Get-SetupText 'CustomModelsInstalled') -ForegroundColor Green
+}
+elseif ($RemoveCustomModels) {
+    Remove-ManagedModelCatalog -CodexHomePath $resolvedCodexHome
+    Write-Host (Get-SetupText 'CustomModelsRemoved') -ForegroundColor Green
+}
+elseif (-not $NonInteractive) {
+    if (Read-SetupYesNo -Prompt (Get-SetupText 'CustomModelsPrompt') -DefaultYes $false) {
+        Install-ManagedModelCatalog -PackageRoot $packageRoot -CodexHomePath $resolvedCodexHome
+        Write-Host (Get-SetupText 'CustomModelsInstalled') -ForegroundColor Green
+    }
+    else {
+        Remove-ManagedModelCatalog -CodexHomePath $resolvedCodexHome
+        Write-Host (Get-SetupText 'CustomModelsRemoved') -ForegroundColor Green
+    }
+}
+else {
+    Write-Host (Get-SetupText 'CustomModelsUnchanged') -ForegroundColor Yellow
+}
+
+Write-SetupStep -Number 3 -Title (Get-SetupText 'StepChromeHost')
 if ($RegisterChromeHost -or (Read-SetupYesNo -Prompt (Get-SetupText 'ChromeHostPrompt') -DefaultYes $false)) {
     & $repairChromeHostScript -InstallRoot $packageRoot
 }
@@ -599,7 +735,7 @@ else {
     Write-Host (Get-SetupText 'ChromeHostSkipped') -ForegroundColor Yellow
 }
 
-Write-SetupStep -Number 3 -Title (Get-SetupText 'StepLinks')
+Write-SetupStep -Number 4 -Title (Get-SetupText 'StepLinks')
 if ($RegisterCodexLinks -or (Read-SetupYesNo -Prompt (Get-SetupText 'LinksPrompt') -DefaultYes $false)) {
     Register-CodexUrlProtocol -LauncherPath $dailyLauncher
     Write-Host (Get-SetupText 'LinksRegistered') -ForegroundColor Green
@@ -608,7 +744,7 @@ else {
     Write-Host (Get-SetupText 'LinksSkipped') -ForegroundColor Yellow
 }
 
-Write-SetupStep -Number 4 -Title (Get-SetupText 'StepAppShim')
+Write-SetupStep -Number 5 -Title (Get-SetupText 'StepAppShim')
 if ($InstallAppShim -or (Read-SetupYesNo -Prompt (Get-SetupText 'AppShimPrompt') -DefaultYes $false)) {
     Install-AppxDiscoveryShim -PackageRoot $packageRoot
     Write-Host (Get-SetupText 'AppShimInstalled') -ForegroundColor Green
@@ -642,7 +778,7 @@ if ($RepairThreads -or $RestoreThreads) {
     Write-Host (Get-SetupText $completeMessage) -ForegroundColor Green
 }
 
-Write-SetupStep -Number 5 -Title (Get-SetupText 'StepComputerUse')
+Write-SetupStep -Number 6 -Title (Get-SetupText 'StepComputerUse')
 if ($RepairComputerUse -or (Read-SetupYesNo -Prompt (Get-SetupText 'ComputerUsePrompt') -DefaultYes $false)) {
     $computerUseRepairCount = Repair-ComputerUsePluginLayout -PackageRoot $packageRoot -CodexHomePath $resolvedCodexHome
     if ($computerUseRepairCount -gt 0) {
@@ -663,7 +799,7 @@ else {
     (Get-SetupText 'AppLauncherMessage') -f $appLauncher
 }
 
-Write-SetupStep -Number 6 -Title (Get-SetupText 'StepChromeExtension')
+Write-SetupStep -Number 7 -Title (Get-SetupText 'StepChromeExtension')
 if (-not $SkipChromeGuide -and (Test-Path -LiteralPath $unpackedExtensionPath -PathType Container)) {
     Write-Host (Get-SetupText 'ChromeExtensionNeed')
     Write-Host ("{0}: {1}" -f (Get-SetupText 'ExtensionPath'), $unpackedExtensionPath) -ForegroundColor Green
@@ -684,7 +820,7 @@ else {
     Write-Host ((Get-SetupText 'ChromeExtensionMissing') -f $unpackedExtensionPath) -ForegroundColor Yellow
 }
 
-Write-SetupStep -Number 7 -Title (Get-SetupText 'StepFinish')
+Write-SetupStep -Number 8 -Title (Get-SetupText 'StepFinish')
 Write-Host (Get-SetupText 'SetupComplete') -ForegroundColor Green
 Write-Host $dailyLauncherMessage
 Write-Host (Get-SetupText 'AfterSetup')
