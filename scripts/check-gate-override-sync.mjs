@@ -14,11 +14,12 @@
  *      Injected true at runtime by init.cjs (session.webRequest redirect of
  *      ab.chatgpt.com/v1/initialize + ipcMain shared-object injection).
  *
- * Both mechanisms must cover the SAME set of numeric gate ids so that a gate
- * is unlocked regardless of which path the renderer reads it through. If a new
- * gate is added to one list but not the other, offline coverage silently gets
- * a hole. This script asserts the two numeric-id sets are equal and fails the
- * build (exit 1) on any asymmetric difference, naming the missing ids.
+ * Both mechanisms must cover the SAME set of numeric gate ids that are forced
+ * true, so a supported gate is unlocked regardless of which path the renderer
+ * reads it through. Explicit false runtime decisions (for example, selecting a
+ * newer UI branch) intentionally stay out of the static true list. This script
+ * asserts the two true-id sets are equal and fails the build (exit 1) on any
+ * asymmetric difference, naming the missing ids.
  *
  * Non-numeric keys in STATSIG_GATE_OVERRIDES (guardian_approval, fast_mode,
  * browserPane, …) are init.cjs-only capability flags, not Statsig gate ids, so

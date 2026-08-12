@@ -558,6 +558,22 @@ test("26.730 packaging repairs the encoded Statsig global module filenames", () 
   assert.ok(verifierScriptSource.includes("'%24_StatsigGlobal.*'"));
 });
 
+test("26.803 packaging shortens the Sky tslib dependency cache path", () => {
+  assert.ok(buildScriptSource.includes("function Shorten-SkyTslibDependencyPath"));
+  assert.ok(buildScriptSource.includes("'js-deps/tslib.es6.js'"));
+  assert.ok(buildScriptSource.includes("'js-dependency-cache'"));
+  assert.ok(
+    buildScriptSource.includes(
+      "Shorten-SkyTslibDependencyPath -CuaNodeRoot (Join-Path $internalRoot 'app/resources/cua_node')",
+    ),
+  );
+  assert.ok(
+    verifierScriptSource.includes(
+      "'_internal\\app\\resources\\cua_node\\bin\\node_modules\\@oai\\sky\\dist\\js-deps\\tslib.es6.js'",
+    ),
+  );
+});
+
 test("26.730 patcher does not carry pre-helper node_repl migrations", () => {
   assert.ok(!patchScriptSource.includes("NODE_REPL_DISABLE_SANDBOX_NEEDLE ="));
   assert.ok(

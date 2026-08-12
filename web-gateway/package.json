@@ -7,7 +7,7 @@
   "private": true,
   "scripts": {
     "web:dev": "node gateway/dist/server.js",
-    "build:gateway": "node -e \"require('node:fs').rmSync('gateway/dist',{recursive:true,force:true})\" && tsc -p gateway/tsconfig.json && node -e \"const fs=require('node:fs');const path=require('node:path');const src=path.join('gateway','src','ipc','codex','capabilityContractData.cjs');const dest=path.join('gateway','dist','ipc','codex','capabilityContractData.cjs');fs.mkdirSync(path.dirname(dest),{recursive:true});fs.copyFileSync(src,dest);\""
+    "build:gateway": "node -e \"require('node:fs').rmSync('gateway/dist',{recursive:true,force:true})\" && tsc -p gateway/tsconfig.json && node -e \"const fs=require('node:fs');const path=require('node:path');const dest=path.join('gateway','dist','ipc','codex');fs.mkdirSync(dest,{recursive:true});fs.copyFileSync(path.join('gateway','src','ipc','codex','capabilityContractData.cjs'),path.join(dest,'capabilityContractData.cjs'));fs.copyFileSync(path.join('..','scripts','desktop-patches','plugin-service-compat.cjs'),path.join(dest,'pluginServiceCompat.cjs'));\""
   },
   "dependencies": {
     "@electron/asar": "^4.1.2",

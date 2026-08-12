@@ -32,6 +32,8 @@ Name: "zh"; MessagesFile: "{#MyInstallerRoot}\ChineseSimplified.isl"
 [CustomMessages]
 en.TaskSkills=Install default offline skills (most skills require internet and will not work offline)
 zh.TaskSkills=安装默认离线技能（大部分技能需要联网，离线环境下无法使用）
+en.TaskCustomModels=Custom model catalog: check to install and update config.toml; uncheck on reinstall or uninstall to remove only the installer-managed catalog (providers, API keys, and other settings are preserved)
+zh.TaskCustomModels=自定义 model 目录：勾选后安装并写入 config.toml；重新安装时取消勾选或卸载会清除安装器管理的目录（保留 Provider、API Key 和其他配置）
 en.TaskChromeHost=Register @chrome native host
 zh.TaskChromeHost=注册 @chrome 本机桥接
 en.TaskCodexLinks=Register codex:// links for CLI /app
@@ -50,6 +52,7 @@ Source: "{#MySourceRoot}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdi
 
 [Tasks]
 Name: "skills"; Description: "{cm:TaskSkills}"; Flags: unchecked
+Name: "custommodels"; Description: "{cm:TaskCustomModels}"; Flags: unchecked
 Name: "chromehost"; Description: "{cm:TaskChromeHost}"; Flags: unchecked
 Name: "codexlinks"; Description: "{cm:TaskCodexLinks}"; Flags: unchecked
 Name: "appshim"; Description: "{cm:TaskAppShim}"; Flags: unchecked
@@ -92,12 +95,19 @@ Name: "{group}\Setup Codex"; Filename: "{app}\Setup Codex.cmd"; IconFilename: "{
 Filename: "{app}\Setup Codex.cmd"; Parameters: "{code:GetSetupCodexArgs} -NoLaunch"; Flags: skipifsilent shellexec
 Filename: "{app}\Codex.cmd"; Description: "{cm:LaunchCodex}"; Flags: nowait postinstall skipifsilent shellexec
 
+[UninstallRun]
+Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\_internal\setup-codex-offline.ps1"" -RemoveCustomModels -CleanupOnly -NonInteractive -Language {language}"; Flags: runhidden waituntilterminated; RunOnceId: "RemoveCustomModels"
+
 [Code]
 function GetSetupCodexArgs(Param: String): String;
 begin
   Result := '-NonInteractive -Language ' + ActiveLanguage;
   if WizardIsTaskSelected('skills') then
     Result := Result + ' -InstallSkillSync';
+  if WizardIsTaskSelected('custommodels') then
+    Result := Result + ' -InstallCustomModels'
+  else
+    Result := Result + ' -RemoveCustomModels';
   if WizardIsTaskSelected('chromehost') then
     Result := Result + ' -RegisterChromeHost';
   if WizardIsTaskSelected('codexlinks') then

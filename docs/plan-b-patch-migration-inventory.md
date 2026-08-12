@@ -3,10 +3,10 @@
 > 目标：把 `patch-app-asar.mjs` 的 renderer feature-gate 正则 needle 下沉到
 > `init.cjs` 运行时拦截，收缩桌面版补丁维护面。
 >
-> 本文是"先出清单、再批量改"的清单交付物。所有结论基于对
+> 本文是"先出清单、再批量改"的清单交付物。最初结论基于对
 > `scripts/patch-app-asar.mjs`、`scripts/desktop-patches/init.cjs`、
 > `web-gateway/gateway/src/ipc/codex/*`、`scripts/verify-offline-package.ps1`
-> 的静态审查（无法在此环境端到端构建/运行桌面版）。
+> 的静态审查；当前 `26.803.10989.0` 发布候选已经完成 Windows 端到端构建、包验证和桌面直接启动 smoke。
 
 ## 0. 一句话结论
 
@@ -144,7 +144,7 @@ statsig store 之外的第二处读取。桌面侧由 `patchDirectStatsigGateCal
   与 `patch-app-asar.mjs`（动 asar 前 fail-fast）。任一边加漏 gate → 构建 exit 1
   并点名缺失 id。
 - 验证覆盖：三文件 `node --check` 通过；死常量引用归零；一致性断言正/反用例均验证；
-  端到端 `build → verify → 启动 smoke` 仍需本地 Windows CI。
+  当前 `26.803.10989.0` 已完成本地 Windows `build → verify → 启动 smoke`。
 
 ### 无运行时环境下的验证策略
 
@@ -153,8 +153,8 @@ statsig store 之外的第二处读取。桌面侧由 `patchDirectStatsigGateCal
 3. 断言 §2A 的 USED 常量集合与 `DESKTOP_ASAR_KNOWN_GATE_IDS` 未被触碰。
 4. `capabilityContractData.cjs`（marker/gate 契约）与 `verify-offline-package.ps1`
    的 marker 集合保持自洽（`requiredPatchMarker` 要求 marker 仍在契约列表内）。
-5. 端到端启动验证仍需你本地 CI：`build-offline-package.ps1` → `verify-offline-package.ps1`
-   → `offline-direct-launch-smoke.mjs`。
+5. 发布候选仍按 `build-offline-package.ps1` → `verify-offline-package.ps1`
+   → `offline-direct-launch-smoke.mjs` 验证；`26.803.10989.0` 已通过该流程。
 
 ---
 _本清单由静态审查生成，行号基于审查时的工作副本，实施前以最新文件为准。_
