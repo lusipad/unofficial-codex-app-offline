@@ -20,6 +20,9 @@ test("capability contract exports required statsig defaults", () => {
     "3903742690",
     "3326157269",
     "2900529421",
+    "3278809559",
+    "1042620455",
+    "4114442250",
   ]) {
     assert.equal(contract.STATSIG_DEFAULT_FEATURE_OVERRIDES[key], true, key);
   }
@@ -160,6 +163,9 @@ test("source data contract covers direct exe asar patch surfaces", () => {
     "2900529421",
     "2711149772",
     "816842483",
+    "3278809559",
+    "1042620455",
+    "4114442250",
   ]) {
     assert.ok(contractData.DESKTOP_ASAR_KNOWN_GATE_IDS.includes(gateId), gateId);
   }
@@ -205,10 +211,11 @@ test("source data contract covers direct exe asar patch surfaces", () => {
   );
 });
 
-test("offline contract does not force cloud-only remote connection gates", () => {
-  for (const gateId of ["1042620455", "4114442250"]) {
-    assert.equal(contractData.STATSIG_DEFAULT_FEATURE_OVERRIDES[gateId], undefined, gateId);
-    assert.equal(contractData.DESKTOP_ASAR_KNOWN_GATE_IDS.includes(gateId), false, gateId);
+test("offline contract keeps import and remote connection settings available", () => {
+  for (const gateId of ["3278809559", "1042620455", "4114442250"]) {
+    assert.equal(contractData.STATSIG_DEFAULT_FEATURE_OVERRIDES[gateId], true, gateId);
+    assert.ok(contractData.DESKTOP_ASAR_KNOWN_GATE_IDS.includes(gateId), gateId);
+    assert.ok(contractData.REQUIRED_STATSIG_FEATURE_MARKERS.includes(gateId), gateId);
   }
 });
 

@@ -52,8 +52,10 @@ const requiredOfflineUiGates = {
   "2177625257": "browser history and profile import",
   "4039078146": "sidebar activity view",
   "717035860": "sidebar customization and destination discovery",
+  "3278809559": "current import settings page",
+  "1042620455": "remote connections",
+  "4114442250": "remote connections feature flag",
 };
-const cloudOnlyGateIds = ["1042620455", "4114442250"];
 
 test("offline builds force the supported product and navigation UI gates", () => {
   for (const [gateId, label] of Object.entries(requiredOfflineUiGates)) {
@@ -103,16 +105,9 @@ test("offline builds select the unified plugins page instead of the legacy store
   );
 });
 
-test("offline builds do not force cloud-only remote connection gates", () => {
-  for (const gateId of cloudOnlyGateIds) {
-    assert.equal(contract.STATSIG_DEFAULT_FEATURE_OVERRIDES[gateId], undefined, gateId);
-    assert.equal(contract.DESKTOP_ASAR_KNOWN_GATE_IDS.includes(gateId), false, gateId);
-    assert.doesNotMatch(
-      initSource,
-      new RegExp(`["']${gateId}["']\\s*:\\s*true`),
-      `${gateId}: desktop runtime must preserve the official cloud gate`,
-    );
-  }
+test("package verification tracks the current import settings gate chunk", () => {
+  assert.match(verifyScriptSource, /import-settings-gate-/);
+  assert.match(verifyScriptSource, /currentImportSettingsGateIds/);
 });
 
 test("runtime gate fallback patches custom sessions and asynchronous IPC results", () => {

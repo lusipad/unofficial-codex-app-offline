@@ -1,5 +1,24 @@
 # Changelog
 
+## 2026-08-13
+
+### 中文
+
+- 恢复最新版离线桌面设置中的“导入”和“连接”入口：共享能力契约跟进新的导入设置 gate，并重新启用本地桌面的远程连接 gate；配对、鉴权和网络错误仍沿用官方行为。
+- 离线包验证器现在会从当前 `import-settings-gate-*.js` 读取 gate ID，并在共享契约或桌面运行时未同步时阻止出包，避免上游 gate 漂移再次静默隐藏入口。
+
+### English
+
+- Restored the Import and Connections entries in the latest offline desktop settings. The shared capability contract now tracks the current import-settings gate and re-enables the local desktop remote-connections gates, while pairing, authentication, and network failures keep their upstream behavior.
+- Package verification now reads the gate ID from the current `import-settings-gate-*.js` chunk and blocks packaging when the shared contract or desktop runtime falls out of sync, preventing future upstream gate drift from silently hiding the entry.
+
+### Verification
+
+- Targeted offline UI and Gateway capability-contract tests
+- Gateway TypeScript build
+- Full script and Gateway regression suites
+- Current-bundle installer build and offline package verification
+
 ## 2026-08-12
 
 ### 中文

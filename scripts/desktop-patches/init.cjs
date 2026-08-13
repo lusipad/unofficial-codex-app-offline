@@ -200,6 +200,7 @@
     '2900529421': true,   // External agent config
     '2711149772': true,   // External agent config
     '816842483': true,    // External agent config
+    '3278809559': true,   // Import settings page (26.803.81509+)
     guardian_approval: true,
     fast_mode: true,
     browserPane: true,
@@ -234,6 +235,8 @@
     '2574306096': true,   // Chronicle
     '1444479692': true,   // Agent personality
     '717035860': true,    // Sidebar customization and destination discovery
+    '1042620455': true,   // Remote connections
+    '4114442250': true,   // Remote connections feature flag
     '839469903': true,    // Artifact Electron native
   };
 

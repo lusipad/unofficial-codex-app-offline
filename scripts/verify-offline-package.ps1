@@ -442,6 +442,11 @@ try {
         if ($initPatchContent -notmatch "'3413548395'\s*:\s*false") {
             throw "Packaged init.cjs does not select the unified plugins page: $relativePath"
         }
+        foreach ($gateId in @('3278809559', '1042620455', '4114442250')) {
+            if ($initPatchContent -notmatch "'$gateId'\s*:\s*true") {
+                throw "Packaged init.cjs does not enable settings gate '$gateId': $relativePath"
+            }
+        }
     }
 
     foreach ($relativePath in @('_internal\patches\plugin-service-compat.cjs', '_internal\app\patches\plugin-service-compat.cjs')) {
@@ -1281,6 +1286,8 @@ const DESKTOP_ASAR_PATCH_MARKERS = capabilityContract.DESKTOP_ASAR_PATCH_MARKERS
 const DESKTOP_ASAR_KNOWN_GATE_IDS = capabilityContract.DESKTOP_ASAR_KNOWN_GATE_IDS || [];
 const DESKTOP_BROWSER_USE_AVAILABILITY_MARKERS = capabilityContract.DESKTOP_BROWSER_USE_AVAILABILITY_MARKERS || [];
 const DESKTOP_BROWSER_USE_CAPABILITY_KEYS = capabilityContract.DESKTOP_BROWSER_USE_CAPABILITY_KEYS || [];
+const REQUIRED_STATSIG_FEATURE_MARKERS = capabilityContract.REQUIRED_STATSIG_FEATURE_MARKERS || [];
+const STATSIG_DEFAULT_FEATURE_OVERRIDES = capabilityContract.STATSIG_DEFAULT_FEATURE_OVERRIDES || {};
 function requiredPatchMarker(marker) {
   if (!DESKTOP_ASAR_PATCH_MARKERS.includes(marker)) {
     throw new Error(`Capability contract is missing required app.asar patch marker: ${marker}`);
@@ -1469,6 +1476,31 @@ const entryMap = new Map(
   rawEntries.map(entry => [normalize(entry), entry.replace(/^[\\/]+/, '')])
 );
 const entries = Array.from(entryMap.keys());
+
+const importSettingsGateEntries = entries.filter(entry =>
+  /(^|\/)webview\/assets\/import-settings-gate-[^/]+\.js$/.test(entry)
+);
+const currentImportSettingsGateIds = new Set();
+for (const entry of importSettingsGateEntries) {
+  const content = asar.extractFile(asarPath, entryMap.get(entry)).toString('utf8');
+  for (const match of content.matchAll(/`(\d+)`/g)) {
+    currentImportSettingsGateIds.add(match[1]);
+  }
+}
+if (importSettingsGateEntries.length > 0 && currentImportSettingsGateIds.size === 0) {
+  throw new Error('Import settings gate chunk exists but its gate id could not be resolved.');
+}
+for (const gateId of currentImportSettingsGateIds) {
+  if (STATSIG_DEFAULT_FEATURE_OVERRIDES[gateId] !== true) {
+    throw new Error(`Current import settings gate is not enabled by the capability contract: ${gateId}`);
+  }
+  if (!DESKTOP_ASAR_KNOWN_GATE_IDS.includes(gateId)) {
+    throw new Error(`Current import settings gate is missing from the ASAR gate list: ${gateId}`);
+  }
+  if (!REQUIRED_STATSIG_FEATURE_MARKERS.includes(gateId)) {
+    throw new Error(`Current import settings gate is not required during package verification: ${gateId}`);
+  }
+}
 
 if (!entryMap.has('package.json')) {
   throw new Error('package.json was not found inside app.asar.');
