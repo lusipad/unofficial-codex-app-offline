@@ -1071,8 +1071,10 @@ try {
             if (-not (Test-Path $computerUseShortTslibPath -PathType Leaf)) {
                 throw 'Bundled computer-use runtime is missing its MAX_PATH-safe tslib dependency.'
             }
-            if (Test-Path (Join-Path $computerUseSkyDistRoot 'js-dependency-cache') -PathType Container) {
-                throw 'Bundled computer-use runtime still contains the long Sky dependency cache path.'
+            foreach ($longCacheRelativePath in @('js-dependency-cache', 'node_modules\.pnpm')) {
+                if (Test-Path (Join-Path $computerUseSkyDistRoot $longCacheRelativePath) -PathType Container) {
+                    throw "Bundled computer-use runtime still contains the long Sky dependency cache path: $longCacheRelativePath"
+                }
             }
             $computerUseSkyJavaScript = @(
                 Get-ChildItem -LiteralPath $computerUseSkyDistRoot -Recurse -Filter '*.js' -File
@@ -1084,7 +1086,7 @@ try {
                 throw 'Bundled computer-use runtime does not import its MAX_PATH-safe tslib dependency.'
             }
             $longTslibImports = @(
-                $computerUseSkyJavaScript | Select-String -SimpleMatch 'js-dependency-cache'
+                $computerUseSkyJavaScript | Select-String -Pattern 'js-dependency-cache|node_modules/\.pnpm'
             )
             if ($longTslibImports.Count -gt 0) {
                 throw 'Bundled computer-use runtime still imports the long Sky dependency cache path.'
@@ -1394,11 +1396,11 @@ const LEGACY_PLUGIN_RENDERER_PATCH_MARKERS = [
 ];
 const sidebarActivityPatchedSurfaceRe = new RegExp(
   `([A-Za-z_$][\\w$]*)=!0${escapeRegExp(SIDEBAR_ACTIVITY_VIEW_PATCH_MARKER)},` +
-    `([A-Za-z_$][\\w$]*)=q\\([A-Za-z_$][\\w$]*\\);return \\1&&` +
+    `([A-Za-z_$][\\w$]*)=[A-Za-z_$][\\w$]*\\([A-Za-z_$][\\w$]*\\);return \\1&&` +
     '\\(\\2\\.status===`allowed`\\|\\|\\2\\.status===`loading`\\)'
 );
 const sidebarActivityUnpatchedSurfaceRe =
-  /([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*)\),([A-Za-z_$][\w$]*)=q\([A-Za-z_$][\w$]*\);return \1&&\(\4\.status===`allowed`\|\|\4\.status===`loading`\)\}[^]*?\3=`4039078146`/;
+  /([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*)\),([A-Za-z_$][\w$]*)=[A-Za-z_$][\w$]*\([A-Za-z_$][\w$]*\);return \1&&\(\4\.status===`allowed`\|\|\4\.status===`loading`\)\}[^]*?\3=`4039078146`/;
 const legacyPluginsPageSelectionRe = new RegExp(
   `([A-Za-z_$][\\w$]*)=!0${escapeRegExp(RENDERER_KNOWN_STATSIG_GATES_PATCH_MARKER)}` +
     '&&([A-Za-z_$][\\w$]*)===`plugins`&&\\(' +
@@ -1480,6 +1482,9 @@ const entries = Array.from(entryMap.keys());
 const importSettingsGateEntries = entries.filter(entry =>
   /(^|\/)webview\/assets\/import-settings-gate-[^/]+\.js$/.test(entry)
 );
+if (importSettingsGateEntries.length === 0) {
+  throw new Error('Current import settings gate chunk was not found in app.asar.');
+}
 const currentImportSettingsGateIds = new Set();
 for (const entry of importSettingsGateEntries) {
   const content = asar.extractFile(asarPath, entryMap.get(entry)).toString('utf8');
@@ -1487,7 +1492,7 @@ for (const entry of importSettingsGateEntries) {
     currentImportSettingsGateIds.add(match[1]);
   }
 }
-if (importSettingsGateEntries.length > 0 && currentImportSettingsGateIds.size === 0) {
+if (currentImportSettingsGateIds.size === 0) {
   throw new Error('Import settings gate chunk exists but its gate id could not be resolved.');
 }
 for (const gateId of currentImportSettingsGateIds) {
