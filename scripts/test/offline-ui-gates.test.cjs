@@ -52,8 +52,10 @@ const requiredOfflineUiGates = {
   "2177625257": "browser history and profile import",
   "4039078146": "sidebar activity view",
   "717035860": "sidebar customization and destination discovery",
+  "3278809559": "current import settings page",
+  "1042620455": "remote connections",
+  "4114442250": "remote connections feature flag",
 };
-const cloudOnlyGateIds = ["1042620455", "4114442250"];
 
 test("offline builds force the supported product and navigation UI gates", () => {
   for (const [gateId, label] of Object.entries(requiredOfflineUiGates)) {
@@ -103,16 +105,32 @@ test("offline builds select the unified plugins page instead of the legacy store
   );
 });
 
-test("offline builds do not force cloud-only remote connection gates", () => {
-  for (const gateId of cloudOnlyGateIds) {
-    assert.equal(contract.STATSIG_DEFAULT_FEATURE_OVERRIDES[gateId], undefined, gateId);
-    assert.equal(contract.DESKTOP_ASAR_KNOWN_GATE_IDS.includes(gateId), false, gateId);
-    assert.doesNotMatch(
-      initSource,
-      new RegExp(`["']${gateId}["']\\s*:\\s*true`),
-      `${gateId}: desktop runtime must preserve the official cloud gate`,
-    );
-  }
+test("package verification tracks the current import settings gate chunk", () => {
+  assert.match(verifyScriptSource, /import-settings-gate-/);
+  assert.match(verifyScriptSource, /currentImportSettingsGateIds/);
+});
+
+test("package verification fails closed when the current import settings gate chunk is missing", () => {
+  const importSettingsBlockStart = verifyScriptSource.indexOf(
+    "const importSettingsGateEntries = entries.filter(entry =>",
+  );
+  const importSettingsBlockEnd = verifyScriptSource.indexOf(
+    "\n\nif (!entryMap.has('package.json')) {",
+    importSettingsBlockStart,
+  );
+  assert.notEqual(importSettingsBlockStart, -1, "import settings gate verification block is missing");
+  assert.notEqual(importSettingsBlockEnd, -1, "import settings gate verification block terminator is missing");
+
+  const importSettingsBlock = verifyScriptSource.slice(
+    importSettingsBlockStart,
+    importSettingsBlockEnd,
+  );
+  assert.match(importSettingsBlock, /importSettingsGateEntries\.length/);
+  assert.match(
+    importSettingsBlock,
+    /importSettingsGateEntries\.length\s*===\s*0[\s\S]*throw new Error\(/,
+    "missing import settings gate chunk must stop package verification",
+  );
 });
 
 test("runtime gate fallback patches custom sessions and asynchronous IPC results", () => {
@@ -392,6 +410,20 @@ test("priority surface carries its dedicated static gate marker", () => {
   const currentResult = patchSidebarActivitySurface(currentFixture);
   assert.equal(currentResult.patched, true);
   assert.equal(currentResult.sidebarCorrect, true);
+
+  const latestFixture =
+    "function FUc(){let e=qh(LUc),t=J(Tv);return e&&(t.status===`allowed`||t.status===`loading`)}" +
+    "LUc=`4039078146`";
+  const latestResult = patchSidebarActivitySurface(latestFixture);
+  assert.equal(latestResult.patched, true);
+  assert.equal(latestResult.sidebarSurfaceSeen, true);
+  assert.equal(latestResult.sidebarCorrect, true);
+  assert.ok(latestResult.content.includes(`e=!0${sidebarMarker},t=J(Tv)`));
+
+  const latestSecondPass = patchSidebarActivitySurface(latestResult.content);
+  assert.equal(latestSecondPass.patched, false);
+  assert.equal(latestSecondPass.sidebarCorrect, true);
+
   assert.ok(contract.DESKTOP_ASAR_PATCH_MARKERS.includes(sidebarMarker), sidebarMarker);
   assert.ok(verifyScriptSource.includes(`requiredPatchMarker('${sidebarMarker}')`));
 });

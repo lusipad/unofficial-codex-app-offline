@@ -89,6 +89,10 @@ test("26.727 archive verifier accepts the current isError prop layout", () => {
     true,
   );
   assert.equal(
+    isVerified(`archivedChats:H,isError:_e${marker},onLoadNextPage:G`, marker),
+    true,
+  );
+  assert.equal(
     isVerified("archivedChats:foo,isError:t&&l,onLoadNextPage:d", marker),
     false,
   );
@@ -200,6 +204,101 @@ test("26.803 Chrome ambient network default accepts runtime-scoped env readers",
   assert.equal(result.ambientEnvVarMatch?.[1], "Jy");
   assert.equal(result.scopedEnvGuardMatch?.[1], "qn");
   assert.equal(result.scopedRawReaderMatch?.[3], "_s");
+});
+
+test("26.810 Chrome ambient network patch avoids minified parameter collisions", () => {
+  const patchSource = sourceSlice(
+    "    const requestMetaAmbientNetworkMatch =",
+    "\n    if (!ambientNetworkNeedle || !ambientNetworkReplacement)",
+  );
+  const patchAmbientNetwork = Function(
+    "content",
+    "escapeRegExp",
+    "ambientNetworkPatchMarker",
+    `"use strict";\n${patchSource}\nreturn { ambientNetworkNeedle, ambientNetworkReplacement };`,
+  );
+  const fixture =
+    'var fw="BROWSER_USE_DISABLE_AMBIENT_NETWORK";' +
+    'function $r(e,t){return Ts(e,t)==="1"}' +
+    'function zn(t){return $r(t,fw)}';
+
+  const result = patchAmbientNetwork(
+    fixture,
+    value => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
+    "/*codex-offline:browser-use-disable-ambient-network-default*/",
+  );
+  const patchedFixture = fixture.replace(
+    result.ambientNetworkNeedle,
+    result.ambientNetworkReplacement,
+  );
+
+  assert.doesNotThrow(() => Function(patchedFixture));
+  assert.match(patchedFixture, /function zn\(t\)\{let _codexOfflineAmbientNetworkValue=/);
+});
+
+test("26.810 Chrome ambient network patch repairs cached invalid output", () => {
+  const migrationSource = sourceSlice(
+    "  const staleScopedAmbientNetworkPatchRe =",
+    "\n  if (content.includes(ambientNetworkPatchMarker))",
+  );
+  const migrateAmbientNetwork = Function(
+    "content",
+    "ambientNetworkPatchMarker",
+    "log",
+    `"use strict";\nlet changed = false;\n${migrationSource}\nreturn { content, changed };`,
+  );
+  const fixture =
+    'var fw="BROWSER_USE_DISABLE_AMBIENT_NETWORK";' +
+    'function Ts(e,t){return process.env[t]}' +
+    'function zn(t){let t=Ts(t,fw);return t==="0"||t==="false"?!1:!0}' +
+    "/*codex-offline:browser-use-disable-ambient-network-default*/";
+
+  const result = migrateAmbientNetwork(
+    fixture,
+    "/*codex-offline:browser-use-disable-ambient-network-default*/",
+    () => {},
+  );
+
+  assert.equal(result.changed, true);
+  assert.doesNotThrow(() => Function(result.content));
+  assert.match(result.content, /function zn\(t\)\{let _codexOfflineAmbientNetworkValue=/);
+});
+
+test("P1 release guard rejects Sky tslib cache roots that contain junctions before recursive deletion", () => {
+  const functionStart = buildScriptSource.indexOf("function Shorten-SkyTslibDependencyPath {");
+  const functionEnd = buildScriptSource.indexOf("\n\n$scriptRoot =", functionStart);
+  assert.notEqual(functionStart, -1, "Shorten-SkyTslibDependencyPath is missing");
+  assert.notEqual(functionEnd, -1, "Shorten-SkyTslibDependencyPath terminator is missing");
+
+  const helperSource = buildScriptSource.slice(functionStart, functionEnd);
+  const removeIndex = helperSource.indexOf("Remove-Item -LiteralPath $resolvedCacheRoot -Recurse -Force");
+  assert.notEqual(removeIndex, -1, "Sky tslib cache removal is missing");
+
+  const reparseGuardIndex = helperSource.search(
+    /Get-Item -LiteralPath \$resolvedCacheRoot[\s\S]*?ReparsePoint[\s\S]*?throw/i,
+  );
+  assert.notEqual(
+    reparseGuardIndex,
+    -1,
+    "cache root itself must fail-closed when it is a reparse point",
+  );
+  assert.ok(
+    reparseGuardIndex < removeIndex,
+    "cache root reparse-point guard must run before recursive deletion",
+  );
+
+  const descendantGuardIndex = helperSource.search(
+    /Get-ChildItem -LiteralPath \$resolvedCacheRoot[\s\S]*?-Recurse[\s\S]*?ReparsePoint[\s\S]*?throw/i,
+  );
+  assert.notEqual(
+    descendantGuardIndex,
+    -1,
+    "cache descendants must fail-closed when a nested reparse point is present",
+  );
+  assert.ok(
+    descendantGuardIndex < removeIndex,
+    "descendant reparse-point guard must run before recursive deletion",
+  );
 });
 
 test("26.721 Computer Use accepts resource-based Windows runtime paths", () => {
@@ -402,6 +501,39 @@ test("26.727 dynamic tools keep node_repl at the top-level namespace boundary", 
   assert.match(patched, /:A\.concat\(\[\{type:`function`,name:`js`/);
 });
 
+test("26.810 dynamic tools keep node_repl at the top-level namespace boundary with guarded deferLoading", () => {
+  const regexSource = sourceSlice(
+    "  const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOLS_TOP_LEVEL_CURRENT_RE =",
+    "\n  const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_RE =",
+  );
+  const currentRegex = Function(
+    `"use strict";\n${regexSource}\nreturn COMPUTER_USE_NODE_REPL_DYNAMIC_TOOLS_TOP_LEVEL_CURRENT_RE;`,
+  )();
+  const replacementSource = sourceSlice(
+    "  function computerUseNodeReplDynamicToolsTopLevelCurrentReplacement(",
+    "\n  function patchComputerUseNodeReplDynamicTools(",
+  );
+  const replacement = Function(
+    "COMPUTER_USE_NODE_REPL_NAMESPACE_GROUP_SPEC",
+    "COMPUTER_USE_NODE_REPL_NAMESPACE_TOOL_SPEC",
+    "COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_PATCH_MARKER",
+    `"use strict";\n${replacementSource}\nreturn computerUseNodeReplDynamicToolsTopLevelCurrentReplacement;`,
+  )(
+    "{type:`namespace`,name:`node_repl`,description:`Node REPL tools for Computer Use.`,tools:[{type:`function`,name:`js`}]}",
+    "{type:`function`,name:`js`}",
+    "/*codex-offline:computer-use-node-repl-dynamic-tool*/",
+  );
+  const fixture =
+    "].map(e=>({type:`function`,...e,...E&&(!zzl.has(e.name)||o&&Azl.includes(e.name))?{deferLoading:!0}:{}}));" +
+    "return E?[{type:`namespace`,name:Rzl,description:`Tools provided by the Codex app.`,tools:I},...M]:I";
+
+  const patched = fixture.replace(currentRegex, replacement);
+  assert.notEqual(patched, fixture);
+  assert.ok(patched.includes("/*codex-offline:computer-use-node-repl-dynamic-tool*/"));
+  assert.match(patched, /\.\.\.M,\{type:`namespace`,name:`node_repl`/);
+  assert.match(patched, /:I\.concat\(\[\{type:`function`,name:`js`/);
+});
+
 test("26.727 archived settings keeps local errors separate from cloud task errors", () => {
   const patchSource = sourceSlice(
     "  function patchArchivedSettingsOfflineVisibility(content) {",
@@ -422,6 +554,31 @@ test("26.727 archived settings keeps local errors separate from cloud task error
     /isError:t&&l\/\*codex-offline:archived-settings-offline-local-visibility\*\//,
   );
   assert.ok(!result.content.includes("u==null&&g"));
+});
+
+test("26.810 archived settings ignores both cloud archive errors offline", () => {
+  const patchSource = sourceSlice(
+    "  function patchArchivedSettingsOfflineVisibility(content) {",
+    "\n  const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_LEGACY_RE =",
+  );
+  const patchArchivedSettingsOfflineVisibility = Function(
+    "ARCHIVED_SETTINGS_OFFLINE_LOCAL_VISIBILITY_PATCH_MARKER",
+    `"use strict";\n${patchSource}\nreturn patchArchivedSettingsOfflineVisibility;`,
+  )("/*codex-offline:archived-settings-offline-local-visibility*/");
+  const fixture =
+    "let H=V,U=D&&!k,pe=N&&ee&&!ne," +
+    "_e=H.length===0&&(c&&w||T==null&&M||N&&L==null&&ae),G;" +
+    "return jsx(dn,{archivedChats:H,projects:B,isError:_e,onLoadNextPage:G});";
+
+  const result = patchArchivedSettingsOfflineVisibility(fixture);
+  assert.equal(result.patched, true);
+  assert.match(result.content, /_e=H\.length===0&&c&&w,G/);
+  assert.match(
+    result.content,
+    /isError:_e\/\*codex-offline:archived-settings-offline-local-visibility\*\/,onLoadNextPage:G/,
+  );
+  assert.ok(!result.content.includes("T==null&&M"));
+  assert.ok(!result.content.includes("N&&L==null&&ae"));
 });
 
 test("26.727 Workspace Dependencies enables the current adjacent gate layout", () => {
@@ -472,6 +629,43 @@ test("26.727 verifier recognizes the current agent settings surface", () => {
     true,
   );
   assert.equal(hasWorkspaceDependenciesSettingsSurface("other surface"), false);
+});
+
+test("26.810 dynamic tool bridge accepts ownership guards before execution claim", () => {
+  const regexSource = sourceSlice(
+    "  const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_CURRENT_V4_RE =",
+    "\n  const COMPUTER_USE_NODE_REPL_RESULT_TEXT_CODE =",
+  );
+  const currentRegex = Function(
+    `"use strict";\n${regexSource}\nreturn COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_CURRENT_V4_RE;`,
+  )();
+  const fixture =
+    "async function Hfu({scope:e,serverRequest:t,hostId:n,queryClient:r}){" +
+    "let{id:i,params:a}=t,{threadId:o,tool:s}=a;if(!o){" +
+    "Bf.error(`Missing threadId for dynamic tool call request`,{safe:{},sensitive:{id:i,params:a}});return}" +
+    "let c=Ql(o),l=new K9r(e).getForHostId(n),u=l?.getConversation(c)," +
+    "d=Hv(u,a.turnId),f=d?.items.find(e=>e.type===`userMessage`);" +
+    "if(f?.clientId!=null&&f.clientId!==d?.params.clientUserMessageId)return;" +
+    "if(f?.clientId==null&&f?.content?.some(e=>e.type===`text`&&e.text.startsWith(`<realtime_delegation>`))){" +
+    "let t=e.get(HE);if(t.locator?.hostId!==n||t.locator.conversationId!==c)return}" +
+    "if(l?.getStreamRole?.(c)==null&&n===`local`&&_m.clientCoordination!=null)try{" +
+    "if(await _m.clientCoordination.findThreadOwner({hostId:n,conversationId:c})!=null)return}" +
+    "catch(e){qp.warning(`dynamic_tool_call_owner_discovery_failed`,{safe:{threadId:o,hostId:n},sensitive:{error:e}})}" +
+    "if(_m.dynamicToolCalls!=null&&!await _m.dynamicToolCalls.tryClaimExecution(" +
+    "{callId:a.callId,hostId:n,threadId:o,turnId:a.turnId}))return;" +
+    "let p,m=a.namespace===Rzl,h=a.namespace==null&&KBl.has(s)," +
+    "g=m||h?await dHc({argumentsValue:a.arguments}):null," +
+    "_=a.namespace===`plugin_management`||a.namespace===`openai_settings`?await XLc(a,{hostId:n}):null;" +
+    "if(_!=null)p=_;else if(!m&&!h)p=fC(`Unsupported dynamic tool namespace: ${a.namespace}`);" +
+    "else if(g!=null)p=g;else";
+  const match = currentRegex.exec(fixture);
+
+  assert.ok(match);
+  assert.equal(match.groups.hostId, "n");
+  assert.equal(match.groups.params, "a");
+  assert.equal(match.groups.result, "p");
+  assert.equal(match.groups.failureFn, "fC");
+  assert.ok(match.groups.prefix.includes("dynamic_tool_call_owner_discovery_failed"));
 });
 
 test("26.730 node_repl config keeps env_vars when adding the sandbox bypass", () => {
@@ -572,6 +766,14 @@ test("26.803 packaging shortens the Sky tslib dependency cache path", () => {
       "'_internal\\app\\resources\\cua_node\\bin\\node_modules\\@oai\\sky\\dist\\js-deps\\tslib.es6.js'",
     ),
   );
+});
+
+test("26.810 packaging shortens the Sky pnpm tslib dependency path", () => {
+  assert.ok(buildScriptSource.includes("'node_modules/.pnpm'"));
+  assert.ok(
+    buildScriptSource.includes("(?:js-dependency-cache|node_modules/\\.pnpm)"),
+  );
+  assert.ok(verifierScriptSource.includes("'node_modules\\.pnpm'"));
 });
 
 test("26.730 patcher does not carry pre-helper node_repl migrations", () => {

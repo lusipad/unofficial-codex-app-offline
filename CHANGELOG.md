@@ -1,5 +1,55 @@
 # Changelog
 
+## 2026-08-15
+
+### 中文
+
+- 修复 Codex `26.810.7004.0` 的 renderer 动态工具结构变化导致最新版离线包无法生成的问题。
+- Computer Use 的 `node_repl.js` 兼容补丁现在会保留新版 `deferLoading`、线程归属、实时委派和客户端协调守卫，仅补入顶层 namespace、无 namespace fallback 与调用桥；缺少必需 marker 时仍会阻止出包。
+- 归档设置兼容补丁现在识别新版带空列表守卫的 `isError` 别名，只保留本地归档查询错误，避免两个云端归档源在离线时隐藏已加载的本地会话。
+- Sidebar Activity priority surface 的权限状态读取器不再锁定单个压缩变量名，并继续由专用 marker 静态启用与验包。
+- Sky 0.6.11 的 tslib 路径缩短现在兼容 `dist/node_modules/.pnpm` 布局，重写 34 个导入并删除超过 Windows MAX_PATH 的依赖缓存路径。
+- Sky 缓存清理会在递归删除前拒绝根目录或子目录中的 NTFS reparse point，避免 `.pnpm` Junction 把删除范围带出 staging 目录。
+- Chrome `browser-client.mjs` 的环境读取补丁不再复用新版压缩函数参数名，并会修复旧构建缓存中已生成的 `function zn(t){let t=...}` 无效代码。
+- 离线包验证器在当前 import-settings gate chunk 缺失时改为直接失败，避免上游改名、合并或内联该 chunk 后静默放过入口回归。
+
+### English
+
+- Fixed the latest offline package build failing after Codex `26.810.7004.0` changed the renderer dynamic-tool structure.
+- The Computer Use `node_repl.js` compatibility patch now preserves the new `deferLoading`, thread-ownership, realtime-delegation, and client-coordination guards while adding only the top-level namespace, namespace-free fallback, and call bridge. Missing required markers still block packaging.
+- The archived-settings compatibility patch now recognizes the guarded `isError` alias, preserves only local archive-query failures, and prevents two offline cloud-source errors from hiding loaded local conversations.
+- The Sidebar Activity priority surface no longer pins its permission-status reader to one minified alias and remains statically enabled and verified through its dedicated marker.
+- Sky 0.6.11 tslib path shortening now supports the `dist/node_modules/.pnpm` layout, rewrites 34 imports, and removes the dependency-cache path that exceeds Windows MAX_PATH.
+- Sky cache cleanup now rejects NTFS reparse points in the cache root or descendants before recursive deletion, preventing a `.pnpm` junction from carrying deletion outside staging.
+- The Chrome `browser-client.mjs` ambient-network patch no longer reuses a minified function parameter and repairs invalid `function zn(t){let t=...}` output already present in cached exports.
+- Package verification now fails when the current import-settings gate chunk is missing, preventing an upstream rename, merge, or inline change from silently bypassing the settings-entry tripwire.
+
+### Verification
+
+- `node --test scripts/test/*.test.cjs web-gateway/gateway/test/*.test.cjs` (115/115 passed)
+- `npm --prefix web-gateway run build:gateway`
+- Full installer and portable package build for Codex `26.810.7004.0`
+- Offline package verification and 30-second direct-launch smoke test
+
+## 2026-08-13
+
+### 中文
+
+- 恢复最新版离线桌面设置中的“导入”和“连接”入口：共享能力契约跟进新的导入设置 gate，并重新启用本地桌面的远程连接 gate；配对、鉴权和网络错误仍沿用官方行为。
+- 离线包验证器现在会从当前 `import-settings-gate-*.js` 读取 gate ID，并在共享契约或桌面运行时未同步时阻止出包，避免上游 gate 漂移再次静默隐藏入口。
+
+### English
+
+- Restored the Import and Connections entries in the latest offline desktop settings. The shared capability contract now tracks the current import-settings gate and re-enables the local desktop remote-connections gates, while pairing, authentication, and network failures keep their upstream behavior.
+- Package verification now reads the gate ID from the current `import-settings-gate-*.js` chunk and blocks packaging when the shared contract or desktop runtime falls out of sync, preventing future upstream gate drift from silently hiding the entry.
+
+### Verification
+
+- Targeted offline UI and Gateway capability-contract tests
+- Gateway TypeScript build
+- Full script and Gateway regression suites
+- Current-bundle installer build and offline package verification
+
 ## 2026-08-12
 
 ### 中文

@@ -7,6 +7,32 @@
 > `scripts/patch-app-asar.mjs`、`scripts/desktop-patches/init.cjs`、
 > `web-gateway/gateway/src/ipc/codex/*`、`scripts/verify-offline-package.ps1`
 > 的静态审查；当前 `26.803.10989.0` 发布候选已经完成 Windows 端到端构建、包验证和桌面直接启动 smoke。
+>
+> 2026-08-13 兼容更新：当前 renderer 将独立的导入设置页切换到 gate
+> `3278809559`。该 ID 已进入共享能力契约和 `init.cjs`，包验证器会直接扫描
+> `import-settings-gate-*.js` 并校验实际 ID，后续上游换号时不再静默漏掉入口。
+> Remote Connections 的 `1042620455`/`4114442250` 也重新纳入共享契约；
+> 设置入口可见，但配对、鉴权和网络失败仍保持官方语义。
+>
+> 2026-08-15 兼容更新：Store `26.810.7004.0` 扩展了 renderer 动态工具的
+> `deferLoading` 条件，并在调用执行权声明前加入线程归属、实时委派和客户端协调守卫。
+> `node_repl.js` 补丁继续属于无法下沉到 Gateway 的 renderer 动态工具边界；当前实现
+> 原样保留这些上游守卫，只补入顶层 namespace、无 namespace fallback 和调用桥，
+> 最终 ASAR 验证器仍要求两个既有 marker。
+> 同版的归档设置面板还把 `isError` 改为带空列表守卫的三来源别名；兼容补丁
+> 保留该守卫和本地 `list-archived-threads` 错误，只移除离线必失败的两个云端
+> 归档源错误，并继续使用既有 marker 与验包规则。
+> Sidebar Activity 的权限状态读取器也从 `q(...)` 改为新的压缩别名；补丁与验包器
+> 现在绑定稳定的 gate ID、返回状态形态和专用 marker，而不再绑定该临时别名。
+> 同时，内置 Sky 0.6.11 将 tslib 从 `js-dependency-cache` 移到
+> `dist/node_modules/.pnpm`；构建器现在兼容两种布局，统一复制到 `dist/js-deps`、
+> 重写导入并移除长缓存路径，验包器同步拒绝两种残留。递归移除缓存前还会
+> 拒绝根目录或后代中的 NTFS reparse point，避免 `.pnpm` Junction 越过 staging
+> 边界。当前 import-settings gate chunk 若完全缺失，验包器也会 fail closed，
+> 不再把改名、合并或内联造成的 gate 漂移当作“无须检查”。
+> Chrome `browser-client.mjs` 的 scoped 环境读取器在该版把参数压缩为 `t`，旧补丁
+> 再插入 `let t` 后会生成语法无效的重复声明。当前补丁使用独立局部变量，并在再次
+> 处理旧 source cache 时定向迁移已生成的无效代码；系统 Node 与内置 Node 均参与语法验证。
 
 ## 0. 一句话结论
 
@@ -79,6 +105,7 @@
 - Background Subagents `1221508807`、Thread Overlay `1060282072`、Multi-Window `459748632`
 - Computer Use gate `1506311413`、Control `2171042036`、Dictation `1244621283`/`4100906017`
 - Thread Hover Cards `3032432888`、Chronicle `2574306096`、Personality `1444479692`
+- Import Settings 当前 gate `3278809559`（旧版 External Agent Config 仍兼容 `3326157269`/`2900529421`/`2711149772`/`816842483`）
 - Remote Connections `1042620455`/`4114442250`、Artifact Electron `839469903`
 - fast-mode 旧版选择器 REs（`FAST_MODE_GATE_RE`/`FAST_MODE_AVAILABILITY_RE`/`FAST_MODE_SERVICE_TIER_GET_RE`/`_OPTIONS_RE`/`_FAST_TIER_RE`，被 §2A 的 service-tier 方案取代）
 - context-usage 旧 REs（`CONTEXT_USAGE_STATUS_SECTION_FALSE_RE`/`_TRUE_RE`/`_PATCHED_RE`，marker 本体仍 USED，仅这几个 RE 死）
@@ -97,7 +124,7 @@
 | Plugins API-key nav | `PLUGINS_API_KEY_NAV_PATCH_MARKER` (行3621) | `if (hasPluginsApiKeyDisabledNavBranch && !pluginsApiKeyNavPatched)` (行1408) | 休眠：当前 bundle 无该分支，条件为假，构建通过 |
 | Plugins API-key route | `PLUGINS_API_KEY_ROUTE_PATCH_MARKER` (行3623) | 行1420 | 同上 |
 | Codex Mobile auth relogin | `CODEX_MOBILE_AUTH_RELOGIN_PATCH_MARKER` (行3770) | `if (codexMobileRemoteControlMfaEndpointSeen && !codexMobileAuthReloginPatched)` (行1468) | 同上 |
-| External agent config import | `EXTERNAL_AGENT_CONFIG_GATE_IDS`(行3606,唯一 LIVE)/`_MARKERS`(行3612) | 无硬断言（gate id 已在 init.cjs） | 孤儿，`GATE_IDS`→`MARKERS` 自引用后即断 |
+| External agent config import | 旧版 `EXTERNAL_AGENT_CONFIG_GATE_IDS`/`_MARKERS` helper | 当前 `import-settings-gate-*.js` 的实际 ID 必须存在于共享契约、ASAR gate 清单和 required markers | 旧 helper 仍是孤儿；当前入口由共享契约处理，并有出包 tripwire |
 
 **风险**：这些补丁的 apply 逻辑已经不在了。一旦 upstream 重新引入对应分支，verify
 条件变真、marker 未注入 → **构建会 fail，且脚本里已无对应 apply 代码可修**。也就是说
@@ -140,7 +167,7 @@ statsig store 之外的第二处读取。桌面侧由 `patchDirectStatsigGateCal
   `DESKTOP_ASAR_PATCH_MARKERS` 与 verify 条件断言中。
 - Stage 3 一致性断言已实施：新增 `scripts/check-gate-override-sync.mjs`，断言
   `DESKTOP_ASAR_KNOWN_GATE_IDS` 与 `init.cjs` `STATSIG_GATE_OVERRIDES` 的数字
-  gate id 集合相等（当前 36 = 36）。已挂进 `build-offline-package.ps1`（patch 前）
+  gate id 集合相等（当前 44 = 44）。已挂进 `build-offline-package.ps1`（patch 前）
   与 `patch-app-asar.mjs`（动 asar 前 fail-fast）。任一边加漏 gate → 构建 exit 1
   并点名缺失 id。
 - 验证覆盖：三文件 `node --check` 通过；死常量引用归零；一致性断言正/反用例均验证；

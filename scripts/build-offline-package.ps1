@@ -567,13 +567,22 @@ function Shorten-SkyTslibDependencyPath {
     param([Parameter(Mandatory = $true)][string]$CuaNodeRoot)
 
     $skyDistRoot = Join-Path $CuaNodeRoot 'bin/node_modules/@oai/sky/dist'
-    $cacheRoot = Join-Path $skyDistRoot 'js-dependency-cache'
-    if (-not (Test-Path -LiteralPath $cacheRoot -PathType Container)) {
+    $cacheRoots = @(
+        foreach ($relativeCacheRoot in @('js-dependency-cache', 'node_modules/.pnpm')) {
+            $candidate = Join-Path $skyDistRoot $relativeCacheRoot
+            if (Test-Path -LiteralPath $candidate -PathType Container) {
+                $candidate
+            }
+        }
+    )
+    if ($cacheRoots.Count -eq 0) {
         return 0
     }
 
     $cachedTslibFiles = @(
-        Get-ChildItem -LiteralPath $cacheRoot -Recurse -File -Filter 'tslib.es6.js'
+        foreach ($cacheRoot in $cacheRoots) {
+            Get-ChildItem -LiteralPath $cacheRoot -Recurse -File -Filter 'tslib.es6.js'
+        }
     )
     if ($cachedTslibFiles.Count -ne 1) {
         throw "Expected exactly one cached Sky tslib.es6.js, found $($cachedTslibFiles.Count)."
@@ -589,7 +598,7 @@ function Shorten-SkyTslibDependencyPath {
         $source = Get-Content -LiteralPath $jsFile.FullName -Raw
         $matches = @([regex]::Matches(
             $source,
-            '[^"'']*js-dependency-cache[^"'']*tslib/tslib\.es6\.js'
+            '[^"'']*(?:js-dependency-cache|node_modules/\.pnpm)[^"'']*tslib/tslib\.es6\.js'
         ))
         if ($matches.Count -eq 0) {
             continue
@@ -610,12 +619,24 @@ function Shorten-SkyTslibDependencyPath {
         throw 'Sky tslib cache exists but no JavaScript imports reference it.'
     }
 
-    $resolvedCacheRoot = [System.IO.Path]::GetFullPath($cacheRoot)
     $resolvedSkyDistRoot = [System.IO.Path]::GetFullPath($skyDistRoot) + [System.IO.Path]::DirectorySeparatorChar
-    if (-not $resolvedCacheRoot.StartsWith($resolvedSkyDistRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
-        throw "Refusing to remove Sky cache outside its dist directory: $resolvedCacheRoot"
+    foreach ($cacheRoot in $cacheRoots) {
+        $resolvedCacheRoot = [System.IO.Path]::GetFullPath($cacheRoot)
+        if (-not $resolvedCacheRoot.StartsWith($resolvedSkyDistRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+            throw "Refusing to remove Sky cache outside its dist directory: $resolvedCacheRoot"
+        }
+        $cacheRootItem = Get-Item -LiteralPath $resolvedCacheRoot -Force
+        if (($cacheRootItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw "Refusing to recursively remove Sky cache reparse point: $resolvedCacheRoot"
+        }
+        $nestedReparsePoint = Get-ChildItem -LiteralPath $resolvedCacheRoot -Force -Recurse |
+            Where-Object { ($_.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0 } |
+            Select-Object -First 1
+        if ($null -ne $nestedReparsePoint) {
+            throw "Refusing to recursively remove Sky cache containing reparse point: $($nestedReparsePoint.FullName)"
+        }
+        Remove-Item -LiteralPath $resolvedCacheRoot -Recurse -Force
     }
-    Remove-Item -LiteralPath $resolvedCacheRoot -Recurse -Force
 
     return $referenceCount
 }

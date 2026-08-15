@@ -33,6 +33,7 @@ const STATSIG_DEFAULT_FEATURE_OVERRIDES = Object.freeze({
   "2900529421": true,
   "2711149772": true,
   "816842483": true,
+  "3278809559": true,
   artifacts: true,
   // From DESKTOP_ASAR_KNOWN_GATE_IDS (previously only bypassed in ASAR)
   "3075919032": true,
@@ -58,6 +59,8 @@ const STATSIG_DEFAULT_FEATURE_OVERRIDES = Object.freeze({
   "4100906017": true,
   "1444479692": true,
   "717035860": true,
+  "1042620455": true,
+  "4114442250": true,
 });
 
 const DEFAULT_DESKTOP_FEATURE_STATE = Object.freeze({
@@ -125,6 +128,9 @@ const REQUIRED_STATSIG_FEATURE_MARKERS = Object.freeze([
   "3903742690",
   "3326157269",
   "2900529421",
+  "3278809559",
+  "1042620455",
+  "4114442250",
 ]);
 
 const REQUIRED_DESKTOP_FEATURE_MARKERS = Object.freeze([
@@ -193,11 +199,14 @@ const DESKTOP_ASAR_KNOWN_GATE_IDS = Object.freeze([
   "2900529421",
   "2711149772",
   "816842483",
+  "3278809559",
   "1244621283",
   "4100906017",
   "2574306096",
   "1444479692",
   "717035860",
+  "1042620455",
+  "4114442250",
   "839469903",
 ]);
 

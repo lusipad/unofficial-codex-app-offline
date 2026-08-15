@@ -818,11 +818,11 @@ function patchSidebarActivitySurface(content) {
   let patched = false;
   const sidebarPatchedSurfaceRe = new RegExp(
     `([A-Za-z_$][\\w$]*)=!0${escapeRegExp(SIDEBAR_ACTIVITY_VIEW_PATCH_MARKER)},` +
-      `([A-Za-z_$][\\w$]*)=q\\([A-Za-z_$][\\w$]*\\);return \\1&&` +
+      `([A-Za-z_$][\\w$]*)=[A-Za-z_$][\\w$]*\\([A-Za-z_$][\\w$]*\\);return \\1&&` +
       '\\(\\2\\.status===`allowed`\\|\\|\\2\\.status===`loading`\\)',
   );
   const sidebarUnpatchedSurfaceRe =
-    /([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*)\),([A-Za-z_$][\w$]*)=q\([A-Za-z_$][\w$]*\);return \1&&\(\4\.status===`allowed`\|\|\4\.status===`loading`\)\}[^]*?\3=`4039078146`/;
+    /([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*)\),([A-Za-z_$][\w$]*)=[A-Za-z_$][\w$]*\([A-Za-z_$][\w$]*\);return \1&&\(\4\.status===`allowed`\|\|\4\.status===`loading`\)\}[^]*?\3=`4039078146`/;
   const sidebarAlreadyCorrect = sidebarPatchedSurfaceRe.test(next);
   const sidebarSurfaceSeen =
     sidebarAlreadyCorrect ||
@@ -1534,6 +1534,17 @@ function patchChromeBrowserClient(filePath) {
 
   const ambientNetworkPatchMarker =
     '/*codex-offline:browser-use-disable-ambient-network-default*/';
+  const staleScopedAmbientNetworkPatchRe =
+    /function ([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*)\)\{let \2=([A-Za-z_$][\w$]*)\(\2,([A-Za-z_$][\w$]*)\);return \2==="0"\|\|\2==="false"\?!1:!0\}\/\*codex-offline:browser-use-disable-ambient-network-default\*\//;
+  if (staleScopedAmbientNetworkPatchRe.test(content)) {
+    content = content.replace(
+      staleScopedAmbientNetworkPatchRe,
+      (_match, functionName, parameterName, rawReader, ambientEnvVar) =>
+        `function ${functionName}(${parameterName}){let _codexOfflineAmbientNetworkValue=${rawReader}(${parameterName},${ambientEnvVar});return _codexOfflineAmbientNetworkValue==="0"||_codexOfflineAmbientNetworkValue==="false"?!1:!0}${ambientNetworkPatchMarker}`,
+    );
+    changed = true;
+    log('Repaired cached Chrome browser client ambient network patch.');
+  }
   if (content.includes(ambientNetworkPatchMarker)) {
     log('Chrome browser client ambient network default already patched.');
   } else {
@@ -1593,7 +1604,7 @@ function patchChromeBrowserClient(filePath) {
       if (scopedEnvGuardMatch && scopedRawReaderMatch && ambientEnvVar) {
         ambientNetworkNeedle = scopedEnvGuardMatch[0];
         ambientNetworkReplacement =
-          `function ${scopedEnvGuardMatch[1]}(${scopedEnvGuardMatch[2]}){let t=${scopedRawReaderMatch[3]}(${scopedEnvGuardMatch[2]},${ambientEnvVar});return t==="0"||t==="false"?!1:!0}${ambientNetworkPatchMarker}`;
+          `function ${scopedEnvGuardMatch[1]}(${scopedEnvGuardMatch[2]}){let _codexOfflineAmbientNetworkValue=${scopedRawReaderMatch[3]}(${scopedEnvGuardMatch[2]},${ambientEnvVar});return _codexOfflineAmbientNetworkValue==="0"||_codexOfflineAmbientNetworkValue==="false"?!1:!0}${ambientNetworkPatchMarker}`;
       } else if (envGuardMatch && rawReader && ambientEnvVar) {
         ambientNetworkNeedle = envGuardMatch[0];
         ambientNetworkReplacement =
@@ -2480,7 +2491,7 @@ try {
   const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOLS_TOP_LEVEL_RE =
     /\]\.map\((?<item>[A-Za-z_$][\w$]*)=>\(\{type:`function`,\.\.\.\k<item>,\.\.\.(?<eager>[A-Za-z_$][\w$]*)\.has\(\k<item>\.name\)\?\{\}:\{deferLoading:!0\}\}\)\);return (?<supportsNamespaces>[A-Za-z_$][\w$]*)\?\[\{type:`namespace`,name:(?<appNamespace>[A-Za-z_$][\w$]*),description:`Tools provided by the Codex app\.`,tools:(?<functionTools>[A-Za-z_$][\w$]*)\},\.\.\.(?<namespaceGroups>[A-Za-z_$][\w$]*)\]:\k<functionTools>/;
   const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOLS_TOP_LEVEL_CURRENT_RE =
-    /\]\.map\((?<item>[A-Za-z_$][\w$]*)=>\(\{type:`function`,\.\.\.\k<item>,\.\.\.(?<supportsNamespaces>[A-Za-z_$][\w$]*)&&!(?<eager>[A-Za-z_$][\w$]*)\.has\(\k<item>\.name\)\?\{deferLoading:!0\}:\{\}\}\)\);return \k<supportsNamespaces>\?\[\{type:`namespace`,name:(?<appNamespace>[A-Za-z_$][\w$]*),description:`Tools provided by the Codex app\.`,tools:(?<functionTools>[A-Za-z_$][\w$]*)\},\.\.\.(?<namespaceGroups>[A-Za-z_$][\w$]*)\]:(?<fallbackTools>[A-Za-z_$][\w$]*)/;
+    /\]\.map\((?<item>[A-Za-z_$][\w$]*)=>\(\{type:`function`,\.\.\.\k<item>,\.\.\.(?<deferLoadingGuard>(?<supportsNamespaces>[A-Za-z_$][\w$]*)&&[^?]+)\?\{deferLoading:!0\}:\{\}\}\)\);return \k<supportsNamespaces>\?\[\{type:`namespace`,name:(?<appNamespace>[A-Za-z_$][\w$]*),description:`Tools provided by the Codex app\.`,tools:(?<functionTools>[A-Za-z_$][\w$]*)\},\.\.\.(?<namespaceGroups>[A-Za-z_$][\w$]*)\]:(?<fallbackTools>[A-Za-z_$][\w$]*)/;
   const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_COMPAT_MISSING_RE =
     /(\(\{namespace:`node_repl`,name:`js`,description:`Execute JavaScript in the persistent Node REPL used by Computer Use\.`,inputSchema:\{[\s\S]{0,700}?required:\[`code`\]\}\}\),)(?!\(\{name:`js`,description:`Execute JavaScript in the persistent Node REPL used by Computer Use\. This forwards to node_repl\.js\.`)/;
   const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_RE =
@@ -2492,7 +2503,7 @@ try {
   const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_CURRENT_V3_RE =
     /(?<prefix>async function [A-Za-z_$][\w$]*\(\{scope:(?<scope>[A-Za-z_$][\w$]*),serverRequest:(?<serverRequest>[A-Za-z_$][\w$]*),hostId:(?<hostId>[A-Za-z_$][\w$]*),queryClient:(?<queryClient>[A-Za-z_$][\w$]*)\}\)\{let\{id:(?<requestId>[A-Za-z_$][\w$]*),params:(?<params>[A-Za-z_$][\w$]*)\}=\k<serverRequest>,\{threadId:(?<threadId>[A-Za-z_$][\w$]*),tool:(?<tool>[A-Za-z_$][\w$]*)\}=\k<params>;if\(!\k<threadId>\)\{(?<logger>[A-Za-z_$][\w$]*)\.error\(`Missing threadId for dynamic tool call request`,\{safe:\{\},sensitive:\{id:\k<requestId>,params:\k<params>\}\}\);return\}let (?<result>[A-Za-z_$][\w$]*),(?<namespaceOk>[A-Za-z_$][\w$]*)=\k<params>\.namespace===[^,;]+,(?<compatOk>[A-Za-z_$][\w$]*)=\k<params>\.namespace==null&&[^;]+;)(?<gate>if\([A-Za-z_$][\w$]*!=null\)\k<result>=[A-Za-z_$][\w$]*;else if\(!\k<namespaceOk>&&!\k<compatOk>\)\k<result>=(?<failureFn>[A-Za-z_$][\w$]*)\(`Unsupported dynamic tool namespace: \$\{\k<params>\.namespace\}`\);else)/;
   const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_CURRENT_V4_RE =
-    /(?<prefix>async function [A-Za-z_$][\w$]*\(\{scope:(?<scope>[A-Za-z_$][\w$]*),serverRequest:(?<serverRequest>[A-Za-z_$][\w$]*),hostId:(?<hostId>[A-Za-z_$][\w$]*),queryClient:(?<queryClient>[A-Za-z_$][\w$]*)\}\)\{let\{id:(?<requestId>[A-Za-z_$][\w$]*),params:(?<params>[A-Za-z_$][\w$]*)\}=\k<serverRequest>,\{threadId:(?<threadId>[A-Za-z_$][\w$]*),tool:(?<tool>[A-Za-z_$][\w$]*)\}=\k<params>;if\(!\k<threadId>\)\{(?<logger>[A-Za-z_$][\w$]*)\.error\(`Missing threadId for dynamic tool call request`,\{safe:\{\},sensitive:\{id:\k<requestId>,params:\k<params>\}\}\);return\}if\([A-Za-z_$][\w$]*\.dynamicToolCalls!=null&&!await [A-Za-z_$][\w$]*\.dynamicToolCalls\.tryClaimExecution\(\{callId:\k<params>\.callId,hostId:\k<hostId>,threadId:\k<threadId>,turnId:\k<params>\.turnId\}\)\)return;let (?<result>[A-Za-z_$][\w$]*),(?<namespaceOk>[A-Za-z_$][\w$]*)=\k<params>\.namespace===[^,;]+,(?<compatOk>[A-Za-z_$][\w$]*)=\k<params>\.namespace==null&&[^,;]+,(?<dynamicResult>[A-Za-z_$][\w$]*)=[^,;]+\?await [^;]+:null,(?<pluginResult>[A-Za-z_$][\w$]*)=\k<params>\.namespace===`plugin_management`\?await [^;]+:null;)(?<gate>if\(\k<pluginResult>!=null\)\k<result>=\k<pluginResult>;else if\(!\k<namespaceOk>&&!\k<compatOk>\)\k<result>=(?<failureFn>[A-Za-z_$][\w$]*)\(`Unsupported dynamic tool namespace: \$\{\k<params>\.namespace\}`\);else if\(\k<dynamicResult>!=null\)\k<result>=\k<dynamicResult>;else)/;
+    /(?<prefix>async function [A-Za-z_$][\w$]*\(\{scope:(?<scope>[A-Za-z_$][\w$]*),serverRequest:(?<serverRequest>[A-Za-z_$][\w$]*),hostId:(?<hostId>[A-Za-z_$][\w$]*),queryClient:(?<queryClient>[A-Za-z_$][\w$]*)\}\)\{let\{id:(?<requestId>[A-Za-z_$][\w$]*),params:(?<params>[A-Za-z_$][\w$]*)\}=\k<serverRequest>,\{threadId:(?<threadId>[A-Za-z_$][\w$]*),tool:(?<tool>[A-Za-z_$][\w$]*)\}=\k<params>;if\(!\k<threadId>\)\{(?<logger>[A-Za-z_$][\w$]*)\.error\(`Missing threadId for dynamic tool call request`,\{safe:\{\},sensitive:\{id:\k<requestId>,params:\k<params>\}\}\);return\}(?<preClaimGuards>[\s\S]{0,900}?)if\([A-Za-z_$][\w$]*\.dynamicToolCalls!=null&&!await [A-Za-z_$][\w$]*\.dynamicToolCalls\.tryClaimExecution\(\{callId:\k<params>\.callId,hostId:\k<hostId>,threadId:\k<threadId>,turnId:\k<params>\.turnId\}\)\)return;let (?<result>[A-Za-z_$][\w$]*),(?<namespaceOk>[A-Za-z_$][\w$]*)=\k<params>\.namespace===[^,;]+,(?<compatOk>[A-Za-z_$][\w$]*)=\k<params>\.namespace==null&&[^,;]+,(?<dynamicResult>[A-Za-z_$][\w$]*)=[^,;]+\?await [^;]+:null,(?<pluginResult>[A-Za-z_$][\w$]*)=(?:\k<params>\.namespace===`plugin_management`(?:\|\|\k<params>\.namespace===`openai_settings\`)?)\?await [^;]+:null;)(?<gate>if\(\k<pluginResult>!=null\)\k<result>=\k<pluginResult>;else if\(!\k<namespaceOk>&&!\k<compatOk>\)\k<result>=(?<failureFn>[A-Za-z_$][\w$]*)\(`Unsupported dynamic tool namespace: \$\{\k<params>\.namespace\}`\);else if\(\k<dynamicResult>!=null\)\k<result>=\k<dynamicResult>;else)/;
   const COMPUTER_USE_NODE_REPL_RESULT_TEXT_CODE =
     'let _codexOfflineNodeReplStringify=e=>{try{return JSON.stringify(e)}catch{return String(e)}};' +
     'let _codexOfflineNodeReplContentText=e=>Array.isArray(e)?e.map(e=>(e?.type===`text`||e?.type===`inputText`)?String(e.text??``):e?.text!=null?String(e.text):_codexOfflineNodeReplStringify(e)).join(`\\n`):``;' +
@@ -2600,7 +2611,7 @@ try {
   function computerUseNodeReplDynamicToolsTopLevelCurrentReplacement(...args) {
     const {
       item,
-      eager,
+      deferLoadingGuard,
       supportsNamespaces,
       appNamespace,
       functionTools,
@@ -2609,7 +2620,7 @@ try {
     } = args.at(-1);
     return (
       `].map(${item}=>({type:\`function\`,...${item},` +
-      `...${supportsNamespaces}&&!${eager}.has(${item}.name)?{deferLoading:!0}:{}}));` +
+      `...${deferLoadingGuard}?{deferLoading:!0}:{}}));` +
       `return ${supportsNamespaces}?[{type:\`namespace\`,name:${appNamespace},` +
       `description:\`Tools provided by the Codex app.\`,tools:${functionTools}},` +
       `...${namespaceGroups},${COMPUTER_USE_NODE_REPL_NAMESPACE_GROUP_SPEC}]` +
@@ -2907,11 +2918,10 @@ try {
     return { content: next, alreadyCorrect: false, patched: next !== content };
   }
   // The archived settings panel (Settings → Data controls → Archived) combines
-  // the LOCAL archived-thread query error with a CLOUD tasks query error into a
-  // single isError prop: `<isErr>=<localErr>||<cloudData>==null&&<cloudErr>`. The
-  // cloud query hits /wham/tasks/list, so while OFFLINE it always fails, forcing
-  // the whole panel into its error state and hiding the perfectly good local
-  // archived conversations. Drop the cloud term so local archived chats still
+  // the LOCAL archived-thread query error with CLOUD archive-source errors into
+  // one isError prop. Those network queries fail while OFFLINE, forcing the whole
+  // panel into its error state and hiding the perfectly good local archived
+  // conversations. Drop the cloud terms so local archived chats still
   // render offline; a genuine local query failure (localErr) still shows the
   // error state. Root cause of issue #55's "archived disappears when offline".
   function patchArchivedSettingsOfflineVisibility(content) {
@@ -2930,6 +2940,29 @@ try {
       .match(/isError:([A-Za-z_$][\w$]*),onLoadNextPage:/);
     if (isErrorPropMatch) {
       const isErrorVar = isErrorPropMatch[1];
+      const currentAliasedErrorRe = new RegExp(
+        '(^|[^\\w$])(' +
+          isErrorVar +
+          ')=([A-Za-z_$][\\w$]*)\\.length===0&&\\((' +
+          '[A-Za-z_$][\\w$]*)&&([A-Za-z_$][\\w$]*)\\|\\|' +
+          '[A-Za-z_$][\\w$]*==null&&[A-Za-z_$][\\w$]*\\|\\|' +
+          '[A-Za-z_$][\\w$]*&&[A-Za-z_$][\\w$]*==null&&[A-Za-z_$][\\w$]*\\)(?=[,;)])',
+      );
+      if (currentAliasedErrorRe.test(content)) {
+        const next = content
+          .replace(
+            currentAliasedErrorRe,
+            (_match, prefix, errorVar, itemsVar, localAvailableVar, localErrorVar) =>
+              `${prefix}${errorVar}=${itemsVar}.length===0&&${localAvailableVar}&&${localErrorVar}`,
+          )
+          .replace(
+            `isError:${isErrorVar},onLoadNextPage:`,
+            `isError:${isErrorVar}${ARCHIVED_SETTINGS_OFFLINE_LOCAL_VISIBILITY_PATCH_MARKER},onLoadNextPage:`,
+          );
+        if (next !== content) {
+          return { content: next, alreadyCorrect: false, patched: true };
+        }
+      }
       const combinedErrorRe = new RegExp(
         '(^|[^\\w$])(' + isErrorVar + ')=([A-Za-z_$][\\w$]*)\\|\\|' +
           '[A-Za-z_$][\\w$]*==null&&[A-Za-z_$][\\w$]*(?=[,;)])',
