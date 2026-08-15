@@ -52,7 +52,7 @@ support Codex 26.616 bundle structure changes
 - **Layer 1**：`session.webRequest` 拦截 `ab.chatgpt.com/v1/initialize`，重定向为一个 `data:` URI，塞进伪造的 statsig 响应；
 - **Layer 0 / 2 / 3**：包装 `webContents.send` / `ipcMain.handle` / `ipcMain.on`，在 shared-object 快照流里注入 gate override。
 
-而它注入的 gate 列表，**已经包含了 `patch-app-asar.mjs` 里那些正则补丁所针对的同一批 gate ID**——36 个权威渲染层 gate ID（`DESKTOP_ASAR_KNOWN_GATE_IDS`）在 `init.cjs` 里逐个 `: true`：
+而它注入的 gate 列表，**已经包含了 `patch-app-asar.mjs` 里那些正则补丁所针对的同一批 gate ID**——44 个权威渲染层 gate ID（`DESKTOP_ASAR_KNOWN_GATE_IDS`）在 `init.cjs` 里逐个 `: true`：
 
 ```
 '3075919032': true,   // Automations
@@ -64,7 +64,7 @@ support Codex 26.616 bundle structure changes
 '1221508807': true,   // Background subagents
 '459748632':  true,   // Multi-window
 '2574306096': true,   // Chronicle
-... （共 36 个）
+... （共 44 个）
 ```
 
 也就是说，Patch 4、5、10–35 这批渲染层 gate needle，和 `init.cjs` 的运行时注入**在解决同一个问题**。仓库其实已经在往这个方向走——提交 `536b9c8 Refactor: replace renderer ASAR regex patches with IPC-level gate injection` 就是这次迁移的起点，`patch-app-asar.mjs` 头部的"加固原则"也白纸黑字写着：**优先在稳定接口边界（`process._linkedBinding`、`init.cjs` IPC 拦截）拦截，而不是字符串替换编译后的 token**。

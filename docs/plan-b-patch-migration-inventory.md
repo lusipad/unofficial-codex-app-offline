@@ -167,7 +167,7 @@ statsig store 之外的第二处读取。桌面侧由 `patchDirectStatsigGateCal
   `DESKTOP_ASAR_PATCH_MARKERS` 与 verify 条件断言中。
 - Stage 3 一致性断言已实施：新增 `scripts/check-gate-override-sync.mjs`，断言
   `DESKTOP_ASAR_KNOWN_GATE_IDS` 与 `init.cjs` `STATSIG_GATE_OVERRIDES` 的数字
-  gate id 集合相等（当前 36 = 36）。已挂进 `build-offline-package.ps1`（patch 前）
+  gate id 集合相等（当前 44 = 44）。已挂进 `build-offline-package.ps1`（patch 前）
   与 `patch-app-asar.mjs`（动 asar 前 fail-fast）。任一边加漏 gate → 构建 exit 1
   并点名缺失 id。
 - 验证覆盖：三文件 `node --check` 通过；死常量引用归零；一致性断言正/反用例均验证；
