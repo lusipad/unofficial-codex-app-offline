@@ -13,6 +13,26 @@
 > `import-settings-gate-*.js` 并校验实际 ID，后续上游换号时不再静默漏掉入口。
 > Remote Connections 的 `1042620455`/`4114442250` 也重新纳入共享契约；
 > 设置入口可见，但配对、鉴权和网络失败仍保持官方语义。
+>
+> 2026-08-15 兼容更新：Store `26.810.7004.0` 扩展了 renderer 动态工具的
+> `deferLoading` 条件，并在调用执行权声明前加入线程归属、实时委派和客户端协调守卫。
+> `node_repl.js` 补丁继续属于无法下沉到 Gateway 的 renderer 动态工具边界；当前实现
+> 原样保留这些上游守卫，只补入顶层 namespace、无 namespace fallback 和调用桥，
+> 最终 ASAR 验证器仍要求两个既有 marker。
+> 同版的归档设置面板还把 `isError` 改为带空列表守卫的三来源别名；兼容补丁
+> 保留该守卫和本地 `list-archived-threads` 错误，只移除离线必失败的两个云端
+> 归档源错误，并继续使用既有 marker 与验包规则。
+> Sidebar Activity 的权限状态读取器也从 `q(...)` 改为新的压缩别名；补丁与验包器
+> 现在绑定稳定的 gate ID、返回状态形态和专用 marker，而不再绑定该临时别名。
+> 同时，内置 Sky 0.6.11 将 tslib 从 `js-dependency-cache` 移到
+> `dist/node_modules/.pnpm`；构建器现在兼容两种布局，统一复制到 `dist/js-deps`、
+> 重写导入并移除长缓存路径，验包器同步拒绝两种残留。递归移除缓存前还会
+> 拒绝根目录或后代中的 NTFS reparse point，避免 `.pnpm` Junction 越过 staging
+> 边界。当前 import-settings gate chunk 若完全缺失，验包器也会 fail closed，
+> 不再把改名、合并或内联造成的 gate 漂移当作“无须检查”。
+> Chrome `browser-client.mjs` 的 scoped 环境读取器在该版把参数压缩为 `t`，旧补丁
+> 再插入 `let t` 后会生成语法无效的重复声明。当前补丁使用独立局部变量，并在再次
+> 处理旧 source cache 时定向迁移已生成的无效代码；系统 Node 与内置 Node 均参与语法验证。
 
 ## 0. 一句话结论
 
