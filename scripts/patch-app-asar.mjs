@@ -480,11 +480,15 @@ function patchBundledBrowserPlugins(filePaths, options) {
     options.syncExternalBrowserDescriptorRe.lastIndex = 0;
     const fileSeen =
       options.chromeDescriptorRe.test(originalContent) ||
+      options.chromeDescriptorCurrentRe.test(originalContent) ||
       options.browserUseDescriptorRe.test(originalContent) ||
+      options.browserUseDescriptorCurrentRe.test(originalContent) ||
       options.syncExternalBrowserDescriptorRe.test(originalContent) ||
       options.inAppBrowserDescriptorRe.test(originalContent) ||
       options.chromeDescriptorPatchedRe.test(originalContent) ||
+      options.chromeDescriptorCurrentPatchedRe.test(originalContent) ||
       options.browserUseDescriptorPatchedRe.test(originalContent) ||
+      options.browserUseDescriptorCurrentPatchedRe.test(originalContent) ||
       options.syncExternalBrowserDescriptorPatchedRe.test(originalContent) ||
       options.inAppBrowserDescriptorPatchedRe.test(originalContent);
     seen ||= fileSeen;
@@ -502,10 +506,26 @@ function patchBundledBrowserPlugins(filePaths, options) {
       );
     }
 
+    if (options.chromeDescriptorCurrentRe.test(content)) {
+      content = content.replace(
+        options.chromeDescriptorCurrentRe,
+        (_match, prefix, descriptorHead) =>
+          `${prefix}installWhenMissing:!0,${descriptorHead}${options.patchMarker}!0}`,
+      );
+    }
+
     if (options.browserUseDescriptorRe.test(content)) {
       content = content.replace(
         options.browserUseDescriptorRe,
         `{autoInstallOptOutKey:$2.$3($2.$4),installWhenMissing:!0,name:$2.$4,isAvailable:({features:$5})=>${options.patchMarker}!0$7`,
+      );
+    }
+
+    if (options.browserUseDescriptorCurrentRe.test(content)) {
+      content = content.replace(
+        options.browserUseDescriptorCurrentRe,
+        (_match, prefix, descriptorHead, availabilityHead, _features, suffix) =>
+          `${prefix}${descriptorHead}installWhenMissing:!0,${availabilityHead}${options.patchMarker}!0${suffix}`,
       );
     }
 
@@ -1121,13 +1141,26 @@ function patchChromePluginScripts(rootAppDir) {
     return;
   }
 
-  patchChromeBrowserClient(path.join(chromePluginRoot, 'scripts', 'browser-client.mjs'));
+  const chromeBrowserClientPath = path.join(
+    chromePluginRoot,
+    'scripts',
+    'browser-client.mjs',
+  );
+  const chromeBrowserServicePath = path.join(
+    chromePluginRoot,
+    'scripts',
+    'browser-service.mjs',
+  );
+  const chromeBrowserPatchPath = fs.existsSync(chromeBrowserServicePath)
+    ? chromeBrowserServicePath
+    : chromeBrowserClientPath;
+  patchChromeBrowserClient(chromeBrowserPatchPath);
   patchChromeNativeHostCheck(path.join(chromePluginRoot, 'scripts', 'check-native-host-manifest.js'));
   patchChromeSkillInstructions(chromePluginRoot);
 
   return crypto
     .createHash('sha256')
-    .update(fs.readFileSync(path.join(chromePluginRoot, 'scripts', 'browser-client.mjs')))
+    .update(fs.readFileSync(chromeBrowserClientPath))
     .digest('hex');
 }
 
@@ -1729,11 +1762,15 @@ function patchChromeSkillInstructions(chromePluginRoot) {
 function patchTrustedBrowserClientHashes(filePaths, chromeBrowserClientHash) {
   const patchedFiles = [];
   let alreadyCorrect = false;
+  let hasBrowserServicePath = false;
+  let hasTrustedCodePath = false;
   const trustedHashesRe =
     /([A-Za-z_$][\w$]*)=\[((?:`[a-f0-9]{64}`)(?:,`[a-f0-9]{64}`)*)\]/g;
 
   for (const filePath of filePaths) {
     let content = fs.readFileSync(filePath, 'utf8');
+    hasBrowserServicePath ||= content.includes('browserServicePath');
+    hasTrustedCodePath ||= content.includes('NODE_REPL_TRUSTED_CODE_PATHS');
     const matches = Array.from(content.matchAll(trustedHashesRe)).filter(match => {
       const trustedUseRe = new RegExp(
         `trustedBrowserClientSha256s:[A-Za-z_$][\\w$]*=${escapeRegExp(match[1])}\\b`,
@@ -1763,7 +1800,11 @@ function patchTrustedBrowserClientHashes(filePaths, chromeBrowserClientHash) {
     }
   }
 
-  return { patchedFiles, alreadyCorrect };
+  return {
+    patchedFiles,
+    alreadyCorrect,
+    usesBrowserServiceTrustPath: hasBrowserServicePath && hasTrustedCodePath,
+  };
 }
 
 function isMissingUnpackedFileError(error) {
@@ -2296,6 +2337,8 @@ try {
     /function ([A-Za-z_$][\w$]*)\(\{codexHome:([A-Za-z_$][\w$]*),env:([A-Za-z_$][\w$]*)=process\.env,marketplaceName:([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\.or\(([A-Za-z_$][\w$]*)\.M\.resolve\(\)\),marketplaces:([A-Za-z_$][\w$]*),pathExists:([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\.existsSync\}\)\{for\(let ([A-Za-z_$][\w$]*) of ([A-Za-z_$][\w$]*)\(\{marketplaceName:\4,marketplaces:\7\}\)\)\{let ([A-Za-z_$][\w$]*)=\10\.plugins\.find\(([A-Za-z_$][\w$]*)=>\13\.name===`computer-use`&&\13\.installed&&\13\.enabled&&\13\.source\.type===`local`\);if\(\12\?\.source\.type===`local`\)return ([A-Za-z_$][\w$]*)\(\{env:\3,installedPluginRoot:\5\.([A-Za-z_$][\w$]*)\(\{codexHome:\2,localVersion:\12\.localVersion,marketplaceName:\10\.name,pluginName:\12\.name\}\),pathExists:\8\}\)\}return \14\(\{env:\3,pathExists:\8\}\)\}/;
   const COMPUTER_USE_PLUGIN_ROOT_FALLBACK_CURRENT_RE_V2 =
     /function ([A-Za-z_$][\w$]*)\(\{codexHome:([A-Za-z_$][\w$]*),env:([A-Za-z_$][\w$]*)=process\.env,marketplaceName:([A-Za-z_$][\w$]*)=([^,{}]+?\([^{}]*?\.resolve\(\)\)),marketplaces:([A-Za-z_$][\w$]*),pathExists:([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\.existsSync\}\)\{for\(let ([A-Za-z_$][\w$]*) of ([A-Za-z_$][\w$]*)\(\{marketplaceName:\4,marketplaces:\6\}\)\)\{let ([A-Za-z_$][\w$]*)=\9\.plugins\.find\(([A-Za-z_$][\w$]*)=>\12\.name===`computer-use`&&\12\.installed&&\12\.enabled&&\12\.source\.type===`local`\);if\(\11\?\.source\.type===`local`\)return ([A-Za-z_$][\w$]*)\(\{env:\3,installedPluginRoot:([A-Za-z_$][\w$]*)\.([A-Za-z_$][\w$]*)\(\{codexHome:\2,localVersion:\11\.localVersion,marketplaceName:\9\.name,pluginName:\11\.name\}\),pathExists:\7\}\)\}return \13\(\{env:\3,pathExists:\7\}\)\}/;
+  const COMPUTER_USE_PLUGIN_ROOT_FALLBACK_CURRENT_RE_V3 =
+    /function (?<functionName>[A-Za-z_$][\w$]*)\(\{codexHome:(?<codexHome>[A-Za-z_$][\w$]*),env:(?<env>[A-Za-z_$][\w$]*)=process\.env,marketplaceName:(?<marketplaceName>[A-Za-z_$][\w$]*)=(?<marketplaceNameDefault>[^,]+),marketplaces:(?<marketplaces>[A-Za-z_$][\w$]*),pathExists:(?<pathExists>[A-Za-z_$][\w$]*)=(?<fsNamespace>[A-Za-z_$][\w$]*)\.existsSync\}\)\{for\(let (?<marketplace>[A-Za-z_$][\w$]*) of (?<listMarketplaces>[A-Za-z_$][\w$]*)\(\{marketplaceName:\k<marketplaceName>,marketplaces:\k<marketplaces>\}\)\)if\(\k<marketplace>\.plugins\.find\((?<pluginEntry>[A-Za-z_$][\w$]*)=>\k<pluginEntry>\.name===`computer-use`&&\k<pluginEntry>\.installed&&\k<pluginEntry>\.enabled&&\k<pluginEntry>\.source\.type===`local`\)\?\.source\.type===`local`\)return (?<computerUsePaths>[A-Za-z_$][\w$]*)\(\{codexHome:\k<codexHome>,env:\k<env>,pathExists:\k<pathExists>\}\);return \k<computerUsePaths>\(\{env:\k<env>,pathExists:\k<pathExists>\}\)\}/;
   const COMPUTER_USE_RESOURCE_RUNTIME_PATHS_CURRENT_RE =
     /function ([A-Za-z_$][\w$]*)\(\{codexHome:([A-Za-z_$][\w$]*),env:([A-Za-z_$][\w$]*)=process\.env,marketplaceName:([A-Za-z_$][\w$]*)=([^,{}]+),marketplaces:([A-Za-z_$][\w$]*),pathExists:([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\.existsSync\}\)\{for\(let ([A-Za-z_$][\w$]*) of ([A-Za-z_$][\w$]*)\(\{marketplaceName:\4,marketplaces:\6\}\)\)if\(\9\.plugins\.find\(([A-Za-z_$][\w$]*)=>\11\.name===`computer-use`&&\11\.installed&&\11\.enabled&&\11\.source\.type===`local`\)\?\.source\.type===`local`\)return ([A-Za-z_$][\w$]*)\(\{codexHome:\2,env:\3,pathExists:\7\}\);return \12\(\{env:\3,pathExists:\7\}\)\}/;
   const COMPUTER_USE_FORWARD_THREAD_START_DIAGNOSTICS_NEEDLE =
@@ -2502,6 +2545,8 @@ try {
     /(?<prefix>async function [A-Za-z_$][\w$]*\(\{scope:(?<scope>[A-Za-z_$][\w$]*),serverRequest:(?<serverRequest>[A-Za-z_$][\w$]*),hostId:(?<hostId>[A-Za-z_$][\w$]*),queryClient:(?<queryClient>[A-Za-z_$][\w$]*)\}\)\{(?:let [^;{}]+;)?let\{id:(?<requestId>[A-Za-z_$][\w$]*),params:(?<params>[A-Za-z_$][\w$]*)\}=\k<serverRequest>,\{threadId:(?<threadId>[A-Za-z_$][\w$]*),tool:(?<tool>[A-Za-z_$][\w$]*)\}=\k<params>;if\(!\k<threadId>\)\{(?<logger>[A-Za-z_$][\w$]*)\.error\(`Missing threadId for dynamic tool call request`,\{safe:\{\},sensitive:\{id:\k<requestId>,params:\k<params>\}\}\);return\}let (?<result>[A-Za-z_$][\w$]*),(?<namespaceOk>[A-Za-z_$][\w$]*)=\k<params>\.namespace===[^,;]+,(?<compatOk>[A-Za-z_$][\w$]*)=\k<params>\.namespace==null&&[^;]+;)(?<gate>if\(!\k<namespaceOk>&&!\k<compatOk>\)\k<result>=(?<failureFn>[A-Za-z_$][\w$]*)\(`Unsupported dynamic tool namespace: \$\{\k<params>\.namespace\}`\);else)/;
   const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_CURRENT_V3_RE =
     /(?<prefix>async function [A-Za-z_$][\w$]*\(\{scope:(?<scope>[A-Za-z_$][\w$]*),serverRequest:(?<serverRequest>[A-Za-z_$][\w$]*),hostId:(?<hostId>[A-Za-z_$][\w$]*),queryClient:(?<queryClient>[A-Za-z_$][\w$]*)\}\)\{let\{id:(?<requestId>[A-Za-z_$][\w$]*),params:(?<params>[A-Za-z_$][\w$]*)\}=\k<serverRequest>,\{threadId:(?<threadId>[A-Za-z_$][\w$]*),tool:(?<tool>[A-Za-z_$][\w$]*)\}=\k<params>;if\(!\k<threadId>\)\{(?<logger>[A-Za-z_$][\w$]*)\.error\(`Missing threadId for dynamic tool call request`,\{safe:\{\},sensitive:\{id:\k<requestId>,params:\k<params>\}\}\);return\}let (?<result>[A-Za-z_$][\w$]*),(?<namespaceOk>[A-Za-z_$][\w$]*)=\k<params>\.namespace===[^,;]+,(?<compatOk>[A-Za-z_$][\w$]*)=\k<params>\.namespace==null&&[^;]+;)(?<gate>if\([A-Za-z_$][\w$]*!=null\)\k<result>=[A-Za-z_$][\w$]*;else if\(!\k<namespaceOk>&&!\k<compatOk>\)\k<result>=(?<failureFn>[A-Za-z_$][\w$]*)\(`Unsupported dynamic tool namespace: \$\{\k<params>\.namespace\}`\);else)/;
+  const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_CURRENT_V5_RE =
+    /(?<prefix>async function [A-Za-z_$][\w$]*\(\{scope:(?<scope>[A-Za-z_$][\w$]*),serverRequest:(?<serverRequest>[A-Za-z_$][\w$]*),hostId:(?<hostId>[A-Za-z_$][\w$]*),queryClient:(?<queryClient>[A-Za-z_$][\w$]*),signal:(?<signal>[A-Za-z_$][\w$]*)\}\)\{let\{id:(?<requestId>[A-Za-z_$][\w$]*),params:(?<params>[A-Za-z_$][\w$]*)\}=\k<serverRequest>,\{threadId:(?<threadId>[A-Za-z_$][\w$]*),tool:(?<tool>[A-Za-z_$][\w$]*)\}=\k<params>;if\(!\k<threadId>\)(?:\{[\s\S]{0,260}?return\}|return[\s\S]{0,260}?;)[\s\S]{0,2000}?if\(\k<signal>\?\.aborted\|\|[A-Za-z_$][\w$]*\.dynamicToolCalls!=null&&!await [A-Za-z_$][\w$]*\.dynamicToolCalls\.tryClaimExecution\(\{callId:\k<params>\.callId,hostId:\k<hostId>,threadId:\k<threadId>,turnId:\k<params>\.turnId\}\)\|\|\k<signal>\?\.aborted\)return!1;)/;
   const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_CURRENT_V4_RE =
     /(?<prefix>async function [A-Za-z_$][\w$]*\(\{scope:(?<scope>[A-Za-z_$][\w$]*),serverRequest:(?<serverRequest>[A-Za-z_$][\w$]*),hostId:(?<hostId>[A-Za-z_$][\w$]*),queryClient:(?<queryClient>[A-Za-z_$][\w$]*)\}\)\{let\{id:(?<requestId>[A-Za-z_$][\w$]*),params:(?<params>[A-Za-z_$][\w$]*)\}=\k<serverRequest>,\{threadId:(?<threadId>[A-Za-z_$][\w$]*),tool:(?<tool>[A-Za-z_$][\w$]*)\}=\k<params>;if\(!\k<threadId>\)\{(?<logger>[A-Za-z_$][\w$]*)\.error\(`Missing threadId for dynamic tool call request`,\{safe:\{\},sensitive:\{id:\k<requestId>,params:\k<params>\}\}\);return\}(?<preClaimGuards>[\s\S]{0,900}?)if\([A-Za-z_$][\w$]*\.dynamicToolCalls!=null&&!await [A-Za-z_$][\w$]*\.dynamicToolCalls\.tryClaimExecution\(\{callId:\k<params>\.callId,hostId:\k<hostId>,threadId:\k<threadId>,turnId:\k<params>\.turnId\}\)\)return;let (?<result>[A-Za-z_$][\w$]*),(?<namespaceOk>[A-Za-z_$][\w$]*)=\k<params>\.namespace===[^,;]+,(?<compatOk>[A-Za-z_$][\w$]*)=\k<params>\.namespace==null&&[^,;]+,(?<dynamicResult>[A-Za-z_$][\w$]*)=[^,;]+\?await [^;]+:null,(?<pluginResult>[A-Za-z_$][\w$]*)=(?:\k<params>\.namespace===`plugin_management`(?:\|\|\k<params>\.namespace===`openai_settings\`)?)\?await [^;]+:null;)(?<gate>if\(\k<pluginResult>!=null\)\k<result>=\k<pluginResult>;else if\(!\k<namespaceOk>&&!\k<compatOk>\)\k<result>=(?<failureFn>[A-Za-z_$][\w$]*)\(`Unsupported dynamic tool namespace: \$\{\k<params>\.namespace\}`\);else if\(\k<dynamicResult>!=null\)\k<result>=\k<dynamicResult>;else)/;
   const COMPUTER_USE_NODE_REPL_RESULT_TEXT_CODE =
@@ -2519,6 +2564,7 @@ try {
       /listModels:[A-Za-z_$][\w$]*=>\s*([A-Za-z_$][\w$]*)\(`list-models-for-host`,\{[\s\S]{0,260}?hostId:/,
       /await\s+([A-Za-z_$][\w$]*)\(`handle-dynamic-tools-for-thread-start-response-for-host`,\{hostId:/,
       /await\s+([A-Za-z_$][\w$]*)\(`apply-thread-title-update-for-host`,\{hostId:/,
+      /(?:^|[^\w$])([A-Za-z_$][\w$]*)\([A-Za-z_$][\w$]*,[A-Za-z_$][\w$]*\)\.sendRequest\(`thread\/start`,/,
     ];
     for (const pattern of patterns) {
       const match = pattern.exec(content);
@@ -2577,6 +2623,31 @@ try {
       'String(_codexOfflineNodeReplError?.message??_codexOfflineNodeReplError))}' +
       COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_PATCH_MARKER +
       `}else ${groups.gate}`
+    );
+  }
+  function computerUseNodeReplDynamicToolCallCurrentV5Replacement(...args) {
+    const groups = args.at(-1);
+    const source = args.at(-2);
+    const appServerRequestFn = typeof source === 'string'
+      ? findAppServerRequestBusName(source)
+      : null;
+    if (!appServerRequestFn) {
+      throw new Error(
+        'Could not locate app-server request bus for Computer Use node_repl.js bridge.',
+      );
+    }
+    return (
+      groups.prefix +
+      `if(${groups.params}.namespace===\`node_repl\`&&${groups.tool}===\`js\`){` +
+      'let _codexOfflineNodeReplResult,_codexOfflineNodeReplResponse;try{' +
+      `_codexOfflineNodeReplResult=await ${appServerRequestFn}(${groups.scope},${groups.hostId}).sendRequest(` +
+      '`mcpServer/tool/call`,{threadId:' + groups.threadId +
+      ',server:`node_repl`,tool:`js`,arguments:' + groups.params + '.arguments});' +
+      COMPUTER_USE_NODE_REPL_RESULT_TEXT_CODE +
+      '_codexOfflineNodeReplResponse={contentItems:[{type:`inputText`,text:_codexOfflineNodeReplText}],success:_codexOfflineNodeReplResult?.isError!==!0}' +
+      '}catch(_codexOfflineNodeReplError){_codexOfflineNodeReplResponse={contentItems:[{type:`inputText`,text:String(_codexOfflineNodeReplError?.message??_codexOfflineNodeReplError)}],success:!1}}' +
+      COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_PATCH_MARKER +
+      `return qzn({dispatchMessageFromView:(e,t)=>Up.dispatchMessage(e,t),hostId:${groups.hostId},method:${groups.serverRequest}.method,response:{id:zl(${groups.requestId}),result:_codexOfflineNodeReplResponse}}),!0}`
     );
   }
   const COMPUTER_USE_NODE_REPL_NAMESPACE_TOOL_SPEC =
@@ -2665,9 +2736,15 @@ try {
     }
 
     let next = content.replace(
-      COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_CURRENT_V2_RE,
-      computerUseNodeReplDynamicToolCallCurrentV2Replacement,
+      COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_CURRENT_V5_RE,
+      computerUseNodeReplDynamicToolCallCurrentV5Replacement,
     );
+    if (next === content) {
+      next = content.replace(
+        COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_CURRENT_V2_RE,
+        computerUseNodeReplDynamicToolCallCurrentV2Replacement,
+      );
+    }
     if (next === content) {
       next = content.replace(
         COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_CURRENT_V3_RE,
@@ -3016,12 +3093,20 @@ try {
     contractPatchMarker('/*codex-offline:bundled-browser-plugins-no-force-reload*/');
   const CHROME_DESCRIPTOR_RE =
     /(\{forceReload:!0,)(?:installWhenMissing:!0,)?(name:lt,isAvailable:\(\{buildFlavor:([A-Za-z_$][\w$]*),features:([A-Za-z_$][\w$]*)\}\)=>)(\4\.externalBrowserUseAllowed&&Yn\(\3\))(\})/;
+  const CHROME_DESCRIPTOR_CURRENT_RE =
+    /(\{\.\.\.[A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*\.chrome,)(syncInstallStateWithChromeExtension:!0,isAvailable:\(\{buildFlavor:([A-Za-z_$][\w$]*),features:([A-Za-z_$][\w$]*)\}\)=>)(\4\.externalBrowserUseAllowed&&[A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*\(\3\))(\})/;
   const CHROME_DESCRIPTOR_PATCHED_RE =
     /\{installWhenMissing:!0,name:lt,isAvailable:\(\{buildFlavor:[A-Za-z_$][\w$]*,features:[A-Za-z_$][\w$]*\}\)=>\/\*codex-offline:bundled-browser-plugins-no-force-reload\*\/!0\}/;
+  const CHROME_DESCRIPTOR_CURRENT_PATCHED_RE =
+    /\{\.\.\.[A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*\.chrome,installWhenMissing:!0,syncInstallStateWithChromeExtension:!0,isAvailable:\(\{buildFlavor:[A-Za-z_$][\w$]*,features:[A-Za-z_$][\w$]*\}\)=>\/\*codex-offline:bundled-browser-plugins-no-force-reload\*\/!0\}/;
   const BROWSER_USE_DESCRIPTOR_RE =
     /(\{autoInstallOptOutKey:([A-Za-z_$][\w$]*)\.([A-Za-z_$][\w$]*)\(\2\.([A-Za-z_$][\w$]*)\),(?:forceReload:!0,)?installWhenMissing:!0,name:\2\.\4,isAvailable:\(\{features:([A-Za-z_$][\w$]*)\}\)=>)(\5\.inAppBrowserUseAllowed(?:\|\|\5\.externalBrowserUseAllowed)?)(,migrate:([A-Za-z_$][\w$]*)\})/;
   const BROWSER_USE_DESCRIPTOR_PATCHED_RE =
     /\{autoInstallOptOutKey:[A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*\([A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*\),installWhenMissing:!0,name:[A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*,isAvailable:\(\{features:[A-Za-z_$][\w$]*\}\)=>\/\*codex-offline:bundled-browser-plugins-no-force-reload\*\/!0,migrate:[A-Za-z_$][\w$]*\}/;
+  const BROWSER_USE_DESCRIPTOR_CURRENT_RE =
+    /(\{\.\.\.[A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*\.browser,)(autoInstallOptOutKey:[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\),)(isAvailable:\(\{features:([A-Za-z_$][\w$]*)\}\)=>)(?:\4\.inAppBrowserUseAllowed(?:\|\|\4\.externalBrowserUseAllowed)?)(,migrate:[A-Za-z_$][\w$]*\})/;
+  const BROWSER_USE_DESCRIPTOR_CURRENT_PATCHED_RE =
+    /\{\.\.\.[A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*\.browser,autoInstallOptOutKey:[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\),installWhenMissing:!0,isAvailable:\(\{features:[A-Za-z_$][\w$]*\}\)=>\/\*codex-offline:bundled-browser-plugins-no-force-reload\*\/!0,migrate:[A-Za-z_$][\w$]*\}/;
   const SYNC_EXTERNAL_BROWSER_DESCRIPTOR_RE =
     /\{(?:forceReload:!0,)?name:([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)?),syncInstallStateWithChromeExtension:!0,isAvailable:\(\{(buildFlavor:[A-Za-z_$][\w$]*(?:,env:[A-Za-z_$][\w$]*)?,features:([A-Za-z_$][\w$]*))\}\)=>(?:(?:[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\([A-Za-z_$][\w$]*(?:,[A-Za-z_$][\w$]*)?\)&&\3\.externalBrowserUseAllowed)|(?:\3\.externalBrowserUseAllowed&&[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\([A-Za-z_$][\w$]*\)))(\})/g;
   const SYNC_EXTERNAL_BROWSER_DESCRIPTOR_PATCHED_RE =
@@ -3060,6 +3145,8 @@ try {
     );
   } else if (trustedBrowserClientHashesPatch.alreadyCorrect) {
     log('Chrome browser-client trusted hash already patched.');
+  } else if (trustedBrowserClientHashesPatch.usesBrowserServiceTrustPath) {
+    log('Chrome browser-service trusted path is used; browser-client hash patch is not required.');
   } else {
     throw new Error(
       'Could not locate Browser Use trusted browser-client hash list to trust ' +
@@ -3673,7 +3760,10 @@ try {
 
   for (const filePath of mainBundleFiles) {
     let content = fs.readFileSync(filePath, 'utf8');
-    if (content.includes(COMPUTER_USE_PLUGIN_ROOT_FALLBACK_PATCH_MARKER)) {
+    if (
+      content.includes(COMPUTER_USE_PLUGIN_ROOT_FALLBACK_PATCH_MARKER) ||
+      content.includes(COMPUTER_USE_RESOURCE_RUNTIME_PATHS_PATCH_MARKER)
+    ) {
       computerUsePluginRootFallbackAlreadyCorrect = true;
       computerUsePluginRootFallbackPatchedFiles.push(path.relative(tmpDir, filePath));
       continue;
@@ -3749,6 +3839,11 @@ try {
           `if(f!=null&&${pathExistsVar}(f))return ${computerUsePathsFunction}({env:${envVar},installedPluginRoot:f,pathExists:${pathExistsVar}})}` +
           COMPUTER_USE_PLUGIN_ROOT_FALLBACK_PATCH_MARKER +
           `return ${computerUsePathsFunction}({env:${envVar},pathExists:${pathExistsVar}})}`,
+      );
+    } else if (COMPUTER_USE_PLUGIN_ROOT_FALLBACK_CURRENT_RE_V3.test(content)) {
+      content = content.replace(
+        COMPUTER_USE_PLUGIN_ROOT_FALLBACK_CURRENT_RE_V3,
+        `$&${COMPUTER_USE_RESOURCE_RUNTIME_PATHS_PATCH_MARKER}`,
       );
     } else if (
       COMPUTER_USE_RESOURCE_RUNTIME_PATHS_CURRENT_RE.test(content) &&
@@ -4037,6 +4132,10 @@ try {
   }
 
   const bundledBrowserPluginsPatch = patchBundledBrowserPlugins(mainBundleFiles, {
+    chromeDescriptorCurrentPatchedRe: CHROME_DESCRIPTOR_CURRENT_PATCHED_RE,
+    chromeDescriptorCurrentRe: CHROME_DESCRIPTOR_CURRENT_RE,
+    browserUseDescriptorCurrentPatchedRe: BROWSER_USE_DESCRIPTOR_CURRENT_PATCHED_RE,
+    browserUseDescriptorCurrentRe: BROWSER_USE_DESCRIPTOR_CURRENT_RE,
     browserUseDescriptorPatchedRe: BROWSER_USE_DESCRIPTOR_PATCHED_RE,
     browserUseDescriptorRe: BROWSER_USE_DESCRIPTOR_RE,
     chromeDescriptorPatchedRe: CHROME_DESCRIPTOR_PATCHED_RE,

@@ -148,6 +148,220 @@ test("26.803 Chrome native pipe patch accepts additional node:os imports", () =>
   assert.equal(result.pipePrefixMatch?.[1], "ys");
 });
 
+test("26.814 Chrome patches browser service but hashes browser client", () => {
+  const patchSource = sourceSlice(
+    "function patchChromePluginScripts",
+    "function patchChromeBrowserClient",
+  );
+  const patchChromePluginScripts = Function(
+    "path",
+    "fs",
+    "crypto",
+    "failRequiredPatch",
+    "patchChromeBrowserClient",
+    "patchChromeNativeHostCheck",
+    "patchChromeSkillInstructions",
+    `${patchSource}\nreturn patchChromePluginScripts;`,
+  )(
+    path,
+    fs,
+    require("node:crypto"),
+    () => {},
+    filePath => filePath,
+    () => {},
+    () => {},
+  );
+  const tempRoot = fs.mkdtempSync(path.join(require("node:os").tmpdir(), "codex-offline-chrome-layout-"));
+  const scriptsRoot = path.join(
+    tempRoot,
+    "resources",
+    "plugins",
+    "openai-bundled",
+    "plugins",
+    "chrome",
+    "scripts",
+  );
+  fs.mkdirSync(scriptsRoot, { recursive: true });
+  const clientPath = path.join(scriptsRoot, "browser-client.mjs");
+  const servicePath = path.join(scriptsRoot, "browser-service.mjs");
+  fs.writeFileSync(clientPath, "client", "utf8");
+  fs.writeFileSync(servicePath, "service", "utf8");
+
+  try {
+    const patchedPath = patchChromePluginScripts(tempRoot);
+    assert.equal(patchedPath, require("node:crypto").createHash("sha256").update("client").digest("hex"));
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("26.814 package verification checks browser service markers when present", () => {
+  assert.match(
+    verifierScriptSource,
+    /\$chromeBrowserServicePath = Join-Path \$chromePluginRoot 'scripts\\browser-service\.mjs'/,
+  );
+  assert.match(
+    verifierScriptSource,
+    /\$chromeBrowserRuntimePath = if \(Test-Path \$chromeBrowserServicePath -PathType Leaf\)/,
+  );
+  assert.match(
+    verifierSourceSlice(
+      "    $chromeBrowserRuntimePath = if",
+      "    $chromeNativeHostCheckPath =",
+    ),
+    /\$chromeBrowserRuntimeContent\.Contains\('\/\*codex-offline:browser-use-native-pipe-fallback\*\/'\)/,
+  );
+});
+
+test("26.814 Computer Use path resolver accepts the canonical bundled runtime", () => {
+  const regexSource = sourceSlice(
+    "  const COMPUTER_USE_PLUGIN_ROOT_FALLBACK_CURRENT_RE_V3 =",
+    "  const COMPUTER_USE_RESOURCE_RUNTIME_PATHS_CURRENT_RE =",
+  );
+  const currentResolverRe = Function(
+    `"use strict";\n${regexSource}\nreturn COMPUTER_USE_PLUGIN_ROOT_FALLBACK_CURRENT_RE_V3;`,
+  )();
+  const fixture =
+    "function ete({codexHome:e,env:t=process.env,marketplaceName:r=n.js(a.a.resolve())," +
+    "marketplaces:i,pathExists:o=_.existsSync}){for(let n of Br({marketplaceName:r,marketplaces:i}))" +
+    "if(n.plugins.find(e=>e.name===`computer-use`&&e.installed&&e.enabled&&e.source.type===`local`)" +
+    "?.source.type===`local`)return Xr({codexHome:e,env:t,pathExists:o});" +
+    "return Xr({env:t,pathExists:o})}";
+
+  assert.match(fixture, currentResolverRe);
+});
+
+test("26.814 package verification accepts the canonical Computer Use runtime marker", () => {
+  const verifierRegexSource = verifierSourceSlice(
+    "const COMPUTER_USE_CANONICAL_RUNTIME_PATHS_PATCHED_RE =",
+    "const COMPUTER_USE_INPUT_MENTION_PATCH_MARKER =",
+  );
+  const currentResolverRe = Function(
+    `"use strict";\n${verifierRegexSource}\nreturn COMPUTER_USE_CANONICAL_RUNTIME_PATHS_PATCHED_RE;`,
+  )();
+  const fixture =
+    "function ete({codexHome:e,env:t=process.env,marketplaceName:r=n.js(a.a.resolve())," +
+    "marketplaces:i,pathExists:o=_.existsSync}){for(let n of Br({marketplaceName:r,marketplaces:i}))" +
+    "if(n.plugins.find(e=>e.name===`computer-use`&&e.installed&&e.enabled&&e.source.type===`local`)" +
+    "?.source.type===`local`)return Xr({codexHome:e,env:t,pathExists:o});" +
+    "return Xr({env:t,pathExists:o})}/*codex-offline:computer-use-resource-runtime-paths*/";
+
+  assert.match(fixture, currentResolverRe);
+});
+
+test("26.814 browser descriptors patch shared plugin descriptor spreads", () => {
+  const patchSource = sourceSlice(
+    "function patchBundledBrowserPlugins",
+    "function patchBundledRuntimeMarketplaceFilter",
+  );
+  const regexSource = sourceSlice(
+    "  const CHROME_DESCRIPTOR_CURRENT_RE =",
+    "  const CHROME_DESCRIPTOR_PATCHED_RE =",
+  );
+  const browserUseRegexSource = sourceSlice(
+    "  const BROWSER_USE_DESCRIPTOR_CURRENT_RE =",
+    "  const BROWSER_USE_DESCRIPTOR_CURRENT_PATCHED_RE =",
+  );
+  const patchBundledBrowserPlugins = Function(
+    "fs",
+    "chromeDescriptorCurrentRe",
+    "patchMarker",
+    `"use strict";\n${patchSource}\nreturn patchBundledBrowserPlugins;`,
+  )(fs, Function(`"use strict";\n${regexSource}\nreturn CHROME_DESCRIPTOR_CURRENT_RE;`)(),
+    "/*codex-offline:bundled-browser-plugins-no-force-reload*/");
+  const tempRoot = fs.mkdtempSync(
+    path.join(require("node:os").tmpdir(), "codex-offline-browser-descriptor-"),
+  );
+  const filePath = path.join(tempRoot, "main.js");
+  const fixture =
+    "{...n.Ds.chrome,syncInstallStateWithChromeExtension:!0," +
+    "isAvailable:({buildFlavor:e,features:t})=>t.externalBrowserUseAllowed&&s.l(e)}\n" +
+    "{...n.Ds.browser,autoInstallOptOutKey:n.As(n.Ds.browser.name)," +
+    "isAvailable:({features:e})=>e.inAppBrowserUseAllowed||e.externalBrowserUseAllowed,migrate:Ms}";
+  fs.writeFileSync(filePath, fixture, "utf8");
+
+  try {
+    const result = patchBundledBrowserPlugins([filePath], {
+      browserUseDescriptorPatchedRe: /never/,
+      browserUseDescriptorRe: /never/,
+      browserUseDescriptorCurrentPatchedRe: /never/,
+      browserUseDescriptorCurrentRe: Function(
+        `"use strict";\n${browserUseRegexSource}\nreturn BROWSER_USE_DESCRIPTOR_CURRENT_RE;`,
+      )(),
+      chromeDescriptorCurrentPatchedRe: /never/,
+      chromeDescriptorCurrentRe: Function(
+        `"use strict";\n${regexSource}\nreturn CHROME_DESCRIPTOR_CURRENT_RE;`,
+      )(),
+      chromeDescriptorPatchedRe: /never/,
+      chromeDescriptorRe: /never/,
+      inAppBrowserDescriptorPatchedRe: /never/,
+      inAppBrowserDescriptorRe: /never/,
+      patchMarker: "/*codex-offline:bundled-browser-plugins-no-force-reload*/",
+      syncExternalBrowserDescriptorPatchedRe: /never/,
+      syncExternalBrowserDescriptorRe: /never/g,
+    });
+    assert.deepEqual(result.patchedFiles, [filePath]);
+    const patchedSource = fs.readFileSync(filePath, "utf8");
+    assert.ok(patchedSource.includes(
+      "...n.Ds.chrome,installWhenMissing:!0,syncInstallStateWithChromeExtension:!0," +
+      "isAvailable:({buildFlavor:e,features:t})=>/*codex-offline:bundled-browser-plugins-no-force-reload*/!0",
+    ));
+    assert.ok(patchedSource.includes(
+      "...n.Ds.browser,autoInstallOptOutKey:n.As(n.Ds.browser.name)," +
+      "installWhenMissing:!0,isAvailable:({features:e})=>" +
+      "/*codex-offline:bundled-browser-plugins-no-force-reload*/!0,migrate:Ms",
+    ));
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("26.814 dynamic tool handler bridges node_repl through the app server", () => {
+  const patchSource = sourceSlice(
+    "  const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_RE =",
+    "  const ARCHIVED_THREADS_LIST_ALL_DIRECT_RE =",
+  );
+  const patchComputerUseNodeReplDynamicToolCall = Function(
+    "COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_PATCH_MARKER",
+    `"use strict";\n${patchSource}\nreturn patchComputerUseNodeReplDynamicToolCall;`,
+  )("/*codex-offline:computer-use-node-repl-dynamic-tool-call*/");
+  const fixture =
+    "async function HZo({scope:e,serverRequest:t,hostId:n,queryClient:r,signal:i}){" +
+    "let{id:a,params:o}=t,{threadId:s,tool:c}=o;if(!s)return zp.error(`Missing threadId`),!1;" +
+    "if(i?.aborted||rX.dynamicToolCalls!=null&&!await rX.dynamicToolCalls.tryClaimExecution(" +
+    "{callId:o.callId,hostId:n,threadId:s,turnId:o.turnId})||i?.aborted)return!1;" +
+    "let m,h=o.namespace===KKo,g=o.namespace==null&&(eQo.has(c)||!1),_=" +
+    "h||g?await IKo({}):null,v=o.namespace===`plugin_management`?await NBr({}):null;" +
+    "if(v!=null)m=v;else if(!h&&!g)m=lv(`Unsupported dynamic tool namespace: ${o.namespace}`);" +
+    "else if(_!=null)m=_;else switch(c){}" +
+    "function seed(){return Ig(e,t).sendRequest(`thread/start`,{})}";
+  const patched = patchComputerUseNodeReplDynamicToolCall(fixture);
+
+  assert.notEqual(patched.content, fixture);
+  assert.match(patched.content, /mcpServer\/tool\/call/);
+  assert.match(patched.content, /threadId:s/);
+  assert.match(patched.content, /codex-offline:computer-use-node-repl-dynamic-tool-call/);
+  assert.equal(patched.patched, true);
+});
+
+test("26.814 package verification accepts the app-server sendRequest bridge", () => {
+  const verifierBridgeSource = verifierSourceSlice(
+    "function findAppServerRequestBusName",
+    "const PLUGINS_API_KEY_NAV_PATCH_MARKER =",
+  );
+  const verifierBridge = Function(
+    `"use strict";\n${verifierBridgeSource}\nreturn { findAppServerRequestBusName, hasComputerUseNodeReplDynamicToolCallBridge };`,
+  )();
+  const fixture =
+    "function Ig(e,t){return e.get(t)}" +
+    "Ig(e,t).sendRequest(`thread/start`,{threadId:n});" +
+    "Ig(e,n).sendRequest(`mcpServer/tool/call`,{threadId:s,server:`node_repl`," +
+    "tool:`js`,arguments:o.arguments})";
+
+  assert.equal(verifierBridge.findAppServerRequestBusName(fixture), "Ig");
+  assert.equal(verifierBridge.hasComputerUseNodeReplDynamicToolCallBridge(fixture), true);
+});
+
 test("26.803 Chrome pipe filter accepts platform-aware listing functions", () => {
   const matchSource = sourceSlice(
     "    const legacyPipeListMatch =",

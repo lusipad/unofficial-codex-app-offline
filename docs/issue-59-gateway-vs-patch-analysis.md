@@ -121,6 +121,12 @@ Patch 4、5、6、7、10、11、12、13、14、15、16、17、18、19、20、21�
 | Patch 40 | `bundled-runtime-plugins` | 离线 runtime 插件写入 materialized marketplace | 打包期数据注入，保留 |
 | Patch 41 | `node-repl-*` / `feature-*-preserve-*` | Computer Use 的 node_repl 配置合成 + feature 合并保 mcp 配置 | 配置合并逻辑，保留 |
 
+### 26.814 bundle 兼容性记录（2026-08-19）
+
+- Chrome 的 facade `browser-client.mjs` 与实际实现 `browser-service.mjs` 分离后，native-pipe 等服务补丁落在 service，trusted hash 仍针对 client；新版本的 trusted path 还可能跨 main bundle chunk，匹配必须聚合判断。
+- Main bundle 将 Chrome 描述符改为 `...Ds.chrome` 共享对象展开，补丁只为该形态补入 `installWhenMissing` 和离线可用性 marker；Computer Use 新的 canonical runtime path 作为已满足的上游形态记录，保留未知形态失败。
+- Renderer 动态工具处理函数增加了 signal、ownership 和 coordination 守卫；`node_repl/js` bridge 在这些守卫之后通过 app-server `mcpServer/tool/call` 返回，不能覆盖整段函数。
+
 ---
 
 ## 5. 三条改造路径

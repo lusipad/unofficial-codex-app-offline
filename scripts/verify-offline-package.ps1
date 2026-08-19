@@ -1117,7 +1117,15 @@ try {
         throw 'Bundled Chrome plugin is missing scripts\browser-client.mjs.'
     }
     Assert-NodeSyntax -Path $chromeBrowserClientPath -Context 'Bundled Chrome browser client'
-    $chromeBrowserClientContent = Get-Content -Path $chromeBrowserClientPath -Raw
+    $chromeBrowserServicePath = Join-Path $chromePluginRoot 'scripts\browser-service.mjs'
+    $chromeBrowserRuntimePath = if (Test-Path $chromeBrowserServicePath -PathType Leaf) {
+        Assert-NodeSyntax -Path $chromeBrowserServicePath -Context 'Bundled Chrome browser service'
+        $chromeBrowserServicePath
+    }
+    else {
+        $chromeBrowserClientPath
+    }
+    $chromeBrowserRuntimeContent = Get-Content -Path $chromeBrowserRuntimePath -Raw
     foreach ($removedTimeoutNeedle in @(
         '/*codex-offline:browser-use-discovery-timeout*/',
         '/*codex-offline:browser-use-profile-metadata-timeout*/',
@@ -1128,27 +1136,27 @@ try {
         'x-codex-browser-use-request-timeout-ms',
         'x-codex-native-pipe-connect-timeout-ms'
     )) {
-        if ($chromeBrowserClientContent.Contains($removedTimeoutNeedle)) {
-            throw "Bundled Chrome browser client still contains removed timeout patch marker: $removedTimeoutNeedle"
+        if ($chromeBrowserRuntimeContent.Contains($removedTimeoutNeedle)) {
+            throw "Bundled Chrome browser runtime still contains removed timeout patch marker: $removedTimeoutNeedle"
         }
     }
-    if (-not $chromeBrowserClientContent.Contains('/*codex-offline:browser-use-native-pipe-fallback*/')) {
-        throw 'Bundled Chrome browser client is missing the Windows native pipe fallback patch.'
+    if (-not $chromeBrowserRuntimeContent.Contains('/*codex-offline:browser-use-native-pipe-fallback*/')) {
+        throw 'Bundled Chrome browser runtime is missing the Windows native pipe fallback patch.'
     }
-    if (-not $chromeBrowserClientContent.Contains('/*codex-offline:browser-use-native-pipe-direct*/')) {
-        throw 'Bundled Chrome browser client is missing the Windows native pipe direct path patch.'
+    if (-not $chromeBrowserRuntimeContent.Contains('/*codex-offline:browser-use-native-pipe-direct*/')) {
+        throw 'Bundled Chrome browser runtime is missing the Windows native pipe direct path patch.'
     }
-    if (-not $chromeBrowserClientContent.Contains('/*codex-offline:browser-use-discovery-diagnostics*/')) {
-        throw 'Bundled Chrome browser client is missing the discovery diagnostics patch.'
+    if (-not $chromeBrowserRuntimeContent.Contains('/*codex-offline:browser-use-discovery-diagnostics*/')) {
+        throw 'Bundled Chrome browser runtime is missing the discovery diagnostics patch.'
     }
-    if (-not $chromeBrowserClientContent.Contains('/*codex-offline:browser-use-chrome-pipe-filter*/')) {
-        throw 'Bundled Chrome browser client is missing the Windows Chrome pipe filter patch.'
+    if (-not $chromeBrowserRuntimeContent.Contains('/*codex-offline:browser-use-chrome-pipe-filter*/')) {
+        throw 'Bundled Chrome browser runtime is missing the Windows Chrome pipe filter patch.'
     }
-    if (-not $chromeBrowserClientContent.Contains('/*codex-offline:browser-use-direct-setup*/')) {
-        throw 'Bundled Chrome browser client is missing the direct Windows pipe setup patch.'
+    if (-not $chromeBrowserRuntimeContent.Contains('/*codex-offline:browser-use-direct-setup*/')) {
+        throw 'Bundled Chrome browser runtime is missing the direct Windows pipe setup patch.'
     }
-    if (-not $chromeBrowserClientContent.Contains('/*codex-offline:browser-use-disable-ambient-network-default*/')) {
-        throw 'Bundled Chrome browser client is missing the offline ambient network default patch.'
+    if (-not $chromeBrowserRuntimeContent.Contains('/*codex-offline:browser-use-disable-ambient-network-default*/')) {
+        throw 'Bundled Chrome browser runtime is missing the offline ambient network default patch.'
     }
     $chromeNativeHostCheckPath = Join-Path $chromePluginRoot 'scripts\check-native-host-manifest.js'
     if (-not (Test-Path $chromeNativeHostCheckPath -PathType Leaf)) {
@@ -1336,6 +1344,8 @@ const CODEX_MOBILE_AUTH_RELOGIN_MARKER = requiredPatchMarker('/*codex-offline:co
 const LEGACY_ELECTRON_NAMESPACE_PATCH_MARKER =
   '/*codex-offline:electron-namespace-no-auto-updater*/';
 const BUNDLED_BROWSER_PLUGINS_PATCH_MARKER = requiredPatchMarker('/*codex-offline:bundled-browser-plugins-no-force-reload*/');
+const BROWSER_USE_DESCRIPTOR_CURRENT_PATCHED_RE =
+  /\{\.\.\.[A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*\.browser,autoInstallOptOutKey:[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\),installWhenMissing:!0,isAvailable:\(\{features:[A-Za-z_$][\w$]*\}\)=>\/\*codex-offline:bundled-browser-plugins-no-force-reload\*\/!0,migrate:[A-Za-z_$][\w$]*\}/;
 const BUNDLED_RUNTIME_PLUGINS_PATCH_MARKER = requiredPatchMarker('/*codex-offline:bundled-runtime-plugins*/');
 const WINDOWS_BROWSER_USE_CAPABILITY_PATCH_MARKER = requiredPatchMarker('/*codex-offline:windows-browser-use-capability*/');
 const APP_SERVER_SANDBOX_OVERRIDE = '`-c`,`windows.sandbox=\'unelevated\'`,`app-server`,`--analytics-default-enabled`';
@@ -1350,6 +1360,8 @@ const COMPUTER_USE_PLUGIN_ROOT_FALLBACK_PATCH_MARKER =
   requiredPatchMarker('/*codex-offline:computer-use-plugin-root-fallback*/');
 const COMPUTER_USE_RESOURCE_RUNTIME_PATHS_PATCH_MARKER =
   requiredPatchMarker('/*codex-offline:computer-use-resource-runtime-paths*/');
+const COMPUTER_USE_CANONICAL_RUNTIME_PATHS_PATCHED_RE =
+  /function [A-Za-z_$][\w$]*\(\{codexHome:[^}]+,env:[^}]+\}\)\{[^]*?source\.type===`local`\)\?\.source\.type===`local`\)return [A-Za-z_$][\w$]*\(\{codexHome:[^}]+pathExists:[A-Za-z_$][\w$]*\}\);return [A-Za-z_$][\w$]*\(\{env:[^}]+pathExists:[A-Za-z_$][\w$]*\}\)\}\/\*codex-offline:computer-use-resource-runtime-paths\*\//;
 const COMPUTER_USE_INPUT_MENTION_PATCH_MARKER =
   requiredPatchMarker('/*codex-offline:computer-use-input-mention*/');
 const COMPUTER_USE_INPUT_MENTION_V2_PATCH_MARKER =
@@ -1435,6 +1447,7 @@ function findAppServerRequestBusName(content) {
     /listModels:[A-Za-z_$][\w$]*=>\s*([A-Za-z_$][\w$]*)\(`list-models-for-host`,\{[\s\S]{0,260}?hostId:/,
     /await\s+([A-Za-z_$][\w$]*)\(`handle-dynamic-tools-for-thread-start-response-for-host`,\{hostId:/,
     /await\s+([A-Za-z_$][\w$]*)\(`apply-thread-title-update-for-host`,\{hostId:/,
+    /(?:^|[^\w$])([A-Za-z_$][\w$]*)\([A-Za-z_$][\w$]*,[A-Za-z_$][\w$]*\)\.sendRequest\(`thread\/start`,/,
   ];
   for (const pattern of patterns) {
     const match = pattern.exec(content);
@@ -1457,7 +1470,17 @@ function hasComputerUseNodeReplDynamicToolCallBridge(content) {
       `Computer Use node_repl.js bridge uses ${wrongRequestFn} instead of app-server request bus ${requestFn}.`
     );
   }
-  return matches.some(match => match[1] === requestFn);
+  const currentBridgeCallRe =
+    /([A-Za-z_$][\w$]*)\([A-Za-z_$][\w$]*,[A-Za-z_$][\w$]*\)\.sendRequest\(`mcpServer\/tool\/call`,\{threadId:[A-Za-z_$][\w$]*,server:`node_repl`,tool:`js`,arguments:[A-Za-z_$][\w$]*\.arguments\}\)/g;
+  const currentMatches = [...content.matchAll(currentBridgeCallRe)];
+  const wrongCurrentRequestFn = currentMatches.find(match => match[1] !== requestFn)?.[1];
+  if (wrongCurrentRequestFn) {
+    throw new Error(
+      `Computer Use node_repl.js bridge uses ${wrongCurrentRequestFn} instead of app-server request bus ${requestFn}.`
+    );
+  }
+  return matches.some(match => match[1] === requestFn) ||
+    currentMatches.some(match => match[1] === requestFn);
 }
 const PLUGINS_API_KEY_NAV_PATCH_MARKER = requiredPatchMarker('/*codex-offline:plugins-api-key-nav*/');
 const PLUGINS_API_KEY_ROUTE_PATCH_MARKER = requiredPatchMarker('/*codex-offline:plugins-api-key-route*/');
@@ -1694,8 +1717,13 @@ for (const entry of javaScriptEntries) {
     ) ||
     (
       content.includes(COMPUTER_USE_RESOURCE_RUNTIME_PATHS_PATCH_MARKER) &&
-      /nodeModuleDirs:[A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*\([A-Za-z_$][\w$]*\)/.test(content) &&
-      content.includes('serviceAppPath:l.platform===`darwin`?o.serviceAppPath:null')
+      (
+        (
+          /nodeModuleDirs:[A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*\([A-Za-z_$][\w$]*\)/.test(content) &&
+          content.includes('serviceAppPath:l.platform===`darwin`?o.serviceAppPath:null')
+        ) ||
+        COMPUTER_USE_CANONICAL_RUNTIME_PATHS_PATCHED_RE.test(content)
+      )
     );
   computerUseInputMentionPatched ||=
     content.includes(COMPUTER_USE_INPUT_MENTION_PATCH_MARKER) &&
@@ -1790,7 +1818,8 @@ for (const entry of javaScriptEntries) {
     legacyElectronNamespacePatchResiduals.push(entry);
   }
   browserUseDescriptorPatched ||=
-    /\{autoInstallOptOutKey:[A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*\([A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*\),installWhenMissing:!0,name:[A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*,isAvailable:\(\{features:[A-Za-z_$][\w$]*\}\)=>\/\*codex-offline:bundled-browser-plugins-no-force-reload\*\/!0,migrate:[A-Za-z_$][\w$]*\}/.test(content);
+    /\{autoInstallOptOutKey:[A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*\([A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*\),installWhenMissing:!0,name:[A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*,isAvailable:\(\{features:[A-Za-z_$][\w$]*\}\)=>\/\*codex-offline:bundled-browser-plugins-no-force-reload\*\/!0,migrate:[A-Za-z_$][\w$]*\}/.test(content) ||
+    BROWSER_USE_DESCRIPTOR_CURRENT_PATCHED_RE.test(content);
   bundledBrowserPluginDescriptorSeen ||= browserUseDescriptorPatched || bundledBrowserPluginsPatched;
   if (bundledBrowserPluginForceReloadRe.test(content)) {
     bundledBrowserPluginDescriptorSeen = true;

@@ -61,13 +61,22 @@ test("trusted browser-client hashes support standalone and chained declarations"
       `var integrityHashes=[\`${oldHash}\`,\`${existingHash}\`];`,
       "utf8",
     );
+    const browserServiceFile = path.join(tempRoot, "browser-service.js");
+    fs.writeFileSync(
+      browserServiceFile,
+      "function configure({browserClientPath:x,browserServicePath:y}){return `${x}:${y}`}",
+      "utf8",
+    );
+    const trustedPathFile = path.join(tempRoot, "trusted-path.js");
+    fs.writeFileSync(trustedPathFile, "const key = `NODE_REPL_TRUSTED_CODE_PATHS`;", "utf8");
 
     const firstPass = patchTrustedBrowserClientHashes(
-      [oldFile, newFile, unrelatedFile],
+      [oldFile, newFile, unrelatedFile, browserServiceFile, trustedPathFile],
       replacementHash,
     );
     assert.deepEqual(new Set(firstPass.patchedFiles), new Set([oldFile, newFile]));
     assert.equal(firstPass.alreadyCorrect, false);
+    assert.equal(firstPass.usesBrowserServiceTrustPath, true);
     assert.match(fs.readFileSync(oldFile, "utf8"), new RegExp(`var bt=\\[[^\\]]*${replacementHash}`));
     assert.match(fs.readFileSync(newFile, "utf8"), new RegExp(`,Ot=\\[[^\\]]*${replacementHash}`));
     assert.equal(fs.readFileSync(unrelatedFile, "utf8").includes(replacementHash), false);
@@ -75,6 +84,7 @@ test("trusted browser-client hashes support standalone and chained declarations"
     const secondPass = patchTrustedBrowserClientHashes([oldFile, newFile], replacementHash);
     assert.deepEqual(secondPass.patchedFiles, []);
     assert.equal(secondPass.alreadyCorrect, true);
+    assert.equal(secondPass.usesBrowserServiceTrustPath, false);
   }
   finally {
     fs.rmSync(tempRoot, { recursive: true, force: true });

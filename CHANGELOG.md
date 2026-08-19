@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-08-19
+
+### 中文
+
+- 修复 Codex `26.814.x` 最新 Store bundle 导致离线包构建失败的问题：Chrome 的 `browser-service.mjs` 新入口、跨 chunk 的 trusted-path 信任形态、Computer Use 规范 runtime 路径、共享 Chrome 插件描述符和 renderer `node_repl` 动态工具调用现在都有窄兼容匹配；未识别的后续漂移仍会阻止出包。
+
+### English
+
+- Fixed offline package builds against the latest Codex `26.814.x` Store bundle: the new Chrome `browser-service.mjs` entry, cross-chunk trusted-path shape, canonical Computer Use runtime path, shared Chrome plugin descriptors, and renderer `node_repl` dynamic-tool handler now have narrow compatibility matches; unrecognized future drift still blocks packaging.
+
 ## 2026-08-15
 
 ### 中文
