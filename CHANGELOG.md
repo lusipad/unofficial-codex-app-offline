@@ -5,10 +5,14 @@
 ### 中文
 
 - 修复 Codex `26.818.x` renderer 在动态工具处理器中新增执行元数据后导致离线包构建失败的问题；兼容补丁现在保留中止与执行声明守卫，并继续在未识别上游形态时阻止出包。
+- 更新 DeepSeek 官方 Codex 模型目录指纹，纳入新增的 `deepseek-v4-flash-vision-exp` 条目，同时继续校验既有模型能力字段。
+- 对 `deepseek-v4-flash-vision-exp` 增加独立图像输入能力校验，避免把视觉模型误当作纯文本模型发布。
 
 ### English
 
 - Fixed offline package builds failing after Codex `26.818.x` added execution metadata to the renderer dynamic-tool handler; the compatibility patch preserves abort and execution-claim guards while still failing closed on unknown upstream shapes.
+- Updated the pinned hash for DeepSeek's official Codex model catalog to include the new `deepseek-v4-flash-vision-exp` entry while keeping capability checks for the existing models.
+- Added a dedicated image-input capability check for `deepseek-v4-flash-vision-exp` so the vision model cannot be published as a text-only entry.
 
 ## 2026-08-19
 

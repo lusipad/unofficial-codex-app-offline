@@ -14,7 +14,7 @@ const OPENAI_CATALOG_URL =
 const DEEPSEEK_SETUP_URL =
   "https://cdn.deepseek.com/api-docs/codex-deepseek-setup-en.ps1";
 const DEEPSEEK_CATALOG_SHA256 =
-  "2f4295501fc41902cb78cfc4b9101ca09c6d89644c83adaadf7a23590b6735c5";
+  "b78e9ba4df6be1457d7c610989fed9b4b3ff19e634d947708b443e360ec9ae11";
 
 const GPT_56_SLUGS = ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"];
 const GPT_56_UPSTREAM_MULTI_AGENT_VERSIONS = Object.freeze({
@@ -22,7 +22,11 @@ const GPT_56_UPSTREAM_MULTI_AGENT_VERSIONS = Object.freeze({
   "gpt-5.6-terra": "v2",
   "gpt-5.6-luna": "v1",
 });
-const DEEPSEEK_SLUGS = ["deepseek-v4-flash", "deepseek-v4-pro"];
+const DEEPSEEK_SLUGS = [
+  "deepseek-v4-flash",
+  "deepseek-v4-pro",
+  "deepseek-v4-flash-vision-exp",
+];
 const GPT_56_CUSTOM_PROVIDER_PATCH = Object.freeze({
   tool_mode: null,
   multi_agent_version: null,
@@ -196,6 +200,17 @@ export function mergeModelCatalogs(openAiCatalog, deepSeekCatalog) {
       model.use_responses_lite !== false
     ) {
       throw new Error(`${slug} capability fields changed upstream; review before publishing`);
+    }
+    if (slug === "deepseek-v4-flash-vision-exp") {
+      if (
+        !Array.isArray(model.input_modalities) ||
+        !model.input_modalities.includes("image") ||
+        model.supports_image_detail_original !== true
+      ) {
+        throw new Error(
+          `${slug} image capability fields changed upstream; review before publishing`,
+        );
+      }
     }
   }
 

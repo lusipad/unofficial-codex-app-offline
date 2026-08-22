@@ -22,7 +22,7 @@ function openAiModel(slug, multiAgentVersion = "v2") {
 }
 
 function deepSeekModel(slug) {
-  return {
+  const model = {
     slug,
     display_name: slug,
     supports_search_tool: true,
@@ -31,6 +31,11 @@ function deepSeekModel(slug) {
     multi_agent_version: "v2",
     use_responses_lite: false,
   };
+  if (slug === "deepseek-v4-flash-vision-exp") {
+    model.input_modalities = ["text", "image"];
+    model.supports_image_detail_original = true;
+  }
+  return model;
 }
 
 function fixtures() {
@@ -47,6 +52,7 @@ function fixtures() {
       models: [
         deepSeekModel("deepseek-v4-flash"),
         deepSeekModel("deepseek-v4-pro"),
+        deepSeekModel("deepseek-v4-flash-vision-exp"),
       ],
     },
   };
@@ -80,6 +86,7 @@ test("merges DeepSeek entries and applies only the GPT-5.6 provider workaround",
       "gpt-5.6-luna",
       "deepseek-v4-flash",
       "deepseek-v4-pro",
+      "deepseek-v4-flash-vision-exp",
     ],
   );
   assert.deepEqual(merged.models[0], openAi.models[0]);
