@@ -344,6 +344,26 @@ test("26.814 dynamic tool handler bridges node_repl through the app server", () 
   assert.equal(patched.patched, true);
 });
 
+test("26.818 dynamic tool handler tolerates execution metadata before abort guard", () => {
+  const regexSource = sourceSlice(
+    "  const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_CURRENT_V6_RE =",
+    "  const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_CURRENT_V4_RE =",
+  );
+  const currentRegex = Function(
+    `"use strict";\n${regexSource}\nreturn COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_CURRENT_V6_RE;`,
+  )();
+  const fixture =
+    "async function o6o({scope:e,serverRequest:t,hostId:n,queryClient:r,signal:i}){" +
+    "let{id:a,params:o}=t,{threadId:s,tool:c}=o,l={callId:o.callId,isRemoteHost:n!==Yg,tool:c,turnId:o.turnId};" +
+    "if(!s)return Mp.error(`Missing threadId`),!1;" +
+    "if(i?.aborted||jY.dynamicToolCalls!=null&&!await jY.dynamicToolCalls.tryClaimExecution(" +
+    "{callId:o.callId,hostId:n,threadId:s,turnId:o.turnId})||i?.aborted)return!1;";
+  const match = currentRegex.exec(fixture);
+  assert.ok(match);
+  assert.equal(match.groups.hostId, "n");
+  assert.equal(match.groups.params, "o");
+});
+
 test("26.814 package verification accepts the app-server sendRequest bridge", () => {
   const verifierBridgeSource = verifierSourceSlice(
     "function findAppServerRequestBusName",

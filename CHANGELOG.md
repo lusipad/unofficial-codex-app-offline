@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-08-22
+
+### 中文
+
+- 修复 Codex `26.818.x` renderer 在动态工具处理器中新增执行元数据后导致离线包构建失败的问题；兼容补丁现在保留中止与执行声明守卫，并继续在未识别上游形态时阻止出包。
+
+### English
+
+- Fixed offline package builds failing after Codex `26.818.x` added execution metadata to the renderer dynamic-tool handler; the compatibility patch preserves abort and execution-claim guards while still failing closed on unknown upstream shapes.
+
 ## 2026-08-19
 
 ### 中文

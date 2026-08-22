@@ -2547,6 +2547,8 @@ try {
     /(?<prefix>async function [A-Za-z_$][\w$]*\(\{scope:(?<scope>[A-Za-z_$][\w$]*),serverRequest:(?<serverRequest>[A-Za-z_$][\w$]*),hostId:(?<hostId>[A-Za-z_$][\w$]*),queryClient:(?<queryClient>[A-Za-z_$][\w$]*)\}\)\{let\{id:(?<requestId>[A-Za-z_$][\w$]*),params:(?<params>[A-Za-z_$][\w$]*)\}=\k<serverRequest>,\{threadId:(?<threadId>[A-Za-z_$][\w$]*),tool:(?<tool>[A-Za-z_$][\w$]*)\}=\k<params>;if\(!\k<threadId>\)\{(?<logger>[A-Za-z_$][\w$]*)\.error\(`Missing threadId for dynamic tool call request`,\{safe:\{\},sensitive:\{id:\k<requestId>,params:\k<params>\}\}\);return\}let (?<result>[A-Za-z_$][\w$]*),(?<namespaceOk>[A-Za-z_$][\w$]*)=\k<params>\.namespace===[^,;]+,(?<compatOk>[A-Za-z_$][\w$]*)=\k<params>\.namespace==null&&[^;]+;)(?<gate>if\([A-Za-z_$][\w$]*!=null\)\k<result>=[A-Za-z_$][\w$]*;else if\(!\k<namespaceOk>&&!\k<compatOk>\)\k<result>=(?<failureFn>[A-Za-z_$][\w$]*)\(`Unsupported dynamic tool namespace: \$\{\k<params>\.namespace\}`\);else)/;
   const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_CURRENT_V5_RE =
     /(?<prefix>async function [A-Za-z_$][\w$]*\(\{scope:(?<scope>[A-Za-z_$][\w$]*),serverRequest:(?<serverRequest>[A-Za-z_$][\w$]*),hostId:(?<hostId>[A-Za-z_$][\w$]*),queryClient:(?<queryClient>[A-Za-z_$][\w$]*),signal:(?<signal>[A-Za-z_$][\w$]*)\}\)\{let\{id:(?<requestId>[A-Za-z_$][\w$]*),params:(?<params>[A-Za-z_$][\w$]*)\}=\k<serverRequest>,\{threadId:(?<threadId>[A-Za-z_$][\w$]*),tool:(?<tool>[A-Za-z_$][\w$]*)\}=\k<params>;if\(!\k<threadId>\)(?:\{[\s\S]{0,260}?return\}|return[\s\S]{0,260}?;)[\s\S]{0,2000}?if\(\k<signal>\?\.aborted\|\|[A-Za-z_$][\w$]*\.dynamicToolCalls!=null&&!await [A-Za-z_$][\w$]*\.dynamicToolCalls\.tryClaimExecution\(\{callId:\k<params>\.callId,hostId:\k<hostId>,threadId:\k<threadId>,turnId:\k<params>\.turnId\}\)\|\|\k<signal>\?\.aborted\)return!1;)/;
+  const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_CURRENT_V6_RE =
+    /(?<prefix>async function [A-Za-z_$][\w$]*\(\{scope:(?<scope>[A-Za-z_$][\w$]*),serverRequest:(?<serverRequest>[A-Za-z_$][\w$]*),hostId:(?<hostId>[A-Za-z_$][\w$]*),queryClient:(?<queryClient>[A-Za-z_$][\w$]*),signal:(?<signal>[A-Za-z_$][\w$]*)\}\)\{let\{id:(?<requestId>[A-Za-z_$][\w$]*),params:(?<params>[A-Za-z_$][\w$]*)\}=\k<serverRequest>,\{threadId:(?<threadId>[A-Za-z_$][\w$]*),tool:(?<tool>[A-Za-z_$][\w$]*)\}=\k<params>[\s\S]{0,4000}?if\(\k<signal>\?\.aborted\|\|[A-Za-z_$][\w$]*\.dynamicToolCalls!=null&&!await [A-Za-z_$][\w$]*\.dynamicToolCalls\.tryClaimExecution\(\{callId:\k<params>\.callId,hostId:\k<hostId>,threadId:\k<threadId>,turnId:\k<params>\.turnId\}\)\|\|\k<signal>\?\.aborted\)return!1;)/;
   const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_CURRENT_V4_RE =
     /(?<prefix>async function [A-Za-z_$][\w$]*\(\{scope:(?<scope>[A-Za-z_$][\w$]*),serverRequest:(?<serverRequest>[A-Za-z_$][\w$]*),hostId:(?<hostId>[A-Za-z_$][\w$]*),queryClient:(?<queryClient>[A-Za-z_$][\w$]*)\}\)\{let\{id:(?<requestId>[A-Za-z_$][\w$]*),params:(?<params>[A-Za-z_$][\w$]*)\}=\k<serverRequest>,\{threadId:(?<threadId>[A-Za-z_$][\w$]*),tool:(?<tool>[A-Za-z_$][\w$]*)\}=\k<params>;if\(!\k<threadId>\)\{(?<logger>[A-Za-z_$][\w$]*)\.error\(`Missing threadId for dynamic tool call request`,\{safe:\{\},sensitive:\{id:\k<requestId>,params:\k<params>\}\}\);return\}(?<preClaimGuards>[\s\S]{0,900}?)if\([A-Za-z_$][\w$]*\.dynamicToolCalls!=null&&!await [A-Za-z_$][\w$]*\.dynamicToolCalls\.tryClaimExecution\(\{callId:\k<params>\.callId,hostId:\k<hostId>,threadId:\k<threadId>,turnId:\k<params>\.turnId\}\)\)return;let (?<result>[A-Za-z_$][\w$]*),(?<namespaceOk>[A-Za-z_$][\w$]*)=\k<params>\.namespace===[^,;]+,(?<compatOk>[A-Za-z_$][\w$]*)=\k<params>\.namespace==null&&[^,;]+,(?<dynamicResult>[A-Za-z_$][\w$]*)=[^,;]+\?await [^;]+:null,(?<pluginResult>[A-Za-z_$][\w$]*)=(?:\k<params>\.namespace===`plugin_management`(?:\|\|\k<params>\.namespace===`openai_settings\`)?)\?await [^;]+:null;)(?<gate>if\(\k<pluginResult>!=null\)\k<result>=\k<pluginResult>;else if\(!\k<namespaceOk>&&!\k<compatOk>\)\k<result>=(?<failureFn>[A-Za-z_$][\w$]*)\(`Unsupported dynamic tool namespace: \$\{\k<params>\.namespace\}`\);else if\(\k<dynamicResult>!=null\)\k<result>=\k<dynamicResult>;else)/;
   const COMPUTER_USE_NODE_REPL_RESULT_TEXT_CODE =
@@ -2736,9 +2738,15 @@ try {
     }
 
     let next = content.replace(
-      COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_CURRENT_V5_RE,
+      COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_CURRENT_V6_RE,
       computerUseNodeReplDynamicToolCallCurrentV5Replacement,
     );
+    if (next === content) {
+      next = content.replace(
+        COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_CURRENT_V5_RE,
+        computerUseNodeReplDynamicToolCallCurrentV5Replacement,
+      );
+    }
     if (next === content) {
       next = content.replace(
         COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_CURRENT_V2_RE,
