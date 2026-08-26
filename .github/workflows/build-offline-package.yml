@@ -14,7 +14,7 @@ on:
         default: false
         type: boolean
   schedule:
-    - cron: '15 3 * * *'
+    - cron: '0 19 * * *'
   push:
     branches:
       - main

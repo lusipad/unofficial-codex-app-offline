@@ -414,6 +414,32 @@ function refreshMainEntryPatch(filePath) {
   return changed;
 }
 
+function patchWorktreeHeadRefResolver(content, patchMarker) {
+  if (content.includes(patchMarker)) {
+    return { content, alreadyCorrect: true, patched: false, count: 0 };
+  }
+
+  const resolverRe =
+    /async function (?<resolver>[A-Za-z_$][\w$]*)\((?<repository>[A-Za-z_$][\w$]*),(?<branch>[A-Za-z_$][\w$]*),(?<signal>[A-Za-z_$][\w$]*)\)\{(?=let (?<normalized>[A-Za-z_$][\w$]*)=[A-Za-z_$][\w$]*\(\k<branch>\),(?<upstream>[A-Za-z_$][\w$]*)=await [A-Za-z_$][\w$]*\(\k<repository>,\k<branch>,\k<signal>\);if\(\k<upstream>!=null\)\{let [A-Za-z_$][\w$]*=`refs\/remotes\/\$\{\k<upstream>\}`)/g;
+  let count = 0;
+  const next = content.replace(resolverRe, (...args) => {
+    const match = args[0];
+    const groups = args.at(-1);
+    count += 1;
+    return (
+      `${match}if(${groups.branch}===\`HEAD\`)return{ref:\`HEAD\`}` +
+      `${patchMarker};`
+    );
+  });
+
+  return {
+    content: next,
+    alreadyCorrect: false,
+    patched: count > 0,
+    count,
+  };
+}
+
 function listJavaScriptFiles(dirPath) {
   if (!fs.existsSync(dirPath)) return [];
 
@@ -2534,7 +2560,7 @@ try {
   const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOLS_TOP_LEVEL_RE =
     /\]\.map\((?<item>[A-Za-z_$][\w$]*)=>\(\{type:`function`,\.\.\.\k<item>,\.\.\.(?<eager>[A-Za-z_$][\w$]*)\.has\(\k<item>\.name\)\?\{\}:\{deferLoading:!0\}\}\)\);return (?<supportsNamespaces>[A-Za-z_$][\w$]*)\?\[\{type:`namespace`,name:(?<appNamespace>[A-Za-z_$][\w$]*),description:`Tools provided by the Codex app\.`,tools:(?<functionTools>[A-Za-z_$][\w$]*)\},\.\.\.(?<namespaceGroups>[A-Za-z_$][\w$]*)\]:\k<functionTools>/;
   const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOLS_TOP_LEVEL_CURRENT_RE =
-    /\]\.map\((?<item>[A-Za-z_$][\w$]*)=>\(\{type:`function`,\.\.\.\k<item>,\.\.\.(?<deferLoadingGuard>(?<supportsNamespaces>[A-Za-z_$][\w$]*)&&[^?]+)\?\{deferLoading:!0\}:\{\}\}\)\);return \k<supportsNamespaces>\?\[\{type:`namespace`,name:(?<appNamespace>[A-Za-z_$][\w$]*),description:`Tools provided by the Codex app\.`,tools:(?<functionTools>[A-Za-z_$][\w$]*)\},\.\.\.(?<namespaceGroups>[A-Za-z_$][\w$]*)\]:(?<fallbackTools>[A-Za-z_$][\w$]*)/;
+    /\]\.map\((?<item>[A-Za-z_$][\w$]*)=>\(\{type:`function`,\.\.\.\k<item>,\.\.\.(?<deferLoadingGuard>(?<supportsNamespaces>[A-Za-z_$][\w$]*)&&[^?]+)\?\{deferLoading:!0\}:\{\}\}\)\);return \k<supportsNamespaces>\?\[\{type:`namespace`,name:(?<appNamespace>[A-Za-z_$][\w$]*),description:(?<appDescription>`Tools provided by the Codex app\.`|[A-Za-z_$][\w$]*),tools:(?<functionTools>[A-Za-z_$][\w$]*)\},\.\.\.(?<namespaceGroups>[A-Za-z_$][\w$]*)\]:(?<fallbackTools>[A-Za-z_$][\w$]*)/;
   const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_COMPAT_MISSING_RE =
     /(\(\{namespace:`node_repl`,name:`js`,description:`Execute JavaScript in the persistent Node REPL used by Computer Use\.`,inputSchema:\{[\s\S]{0,700}?required:\[`code`\]\}\}\),)(?!\(\{name:`js`,description:`Execute JavaScript in the persistent Node REPL used by Computer Use\. This forwards to node_repl\.js\.`)/;
   const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_RE =
@@ -2548,7 +2574,7 @@ try {
   const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_CURRENT_V5_RE =
     /(?<prefix>async function [A-Za-z_$][\w$]*\(\{scope:(?<scope>[A-Za-z_$][\w$]*),serverRequest:(?<serverRequest>[A-Za-z_$][\w$]*),hostId:(?<hostId>[A-Za-z_$][\w$]*),queryClient:(?<queryClient>[A-Za-z_$][\w$]*),signal:(?<signal>[A-Za-z_$][\w$]*)\}\)\{let\{id:(?<requestId>[A-Za-z_$][\w$]*),params:(?<params>[A-Za-z_$][\w$]*)\}=\k<serverRequest>,\{threadId:(?<threadId>[A-Za-z_$][\w$]*),tool:(?<tool>[A-Za-z_$][\w$]*)\}=\k<params>;if\(!\k<threadId>\)(?:\{[\s\S]{0,260}?return\}|return[\s\S]{0,260}?;)[\s\S]{0,2000}?if\(\k<signal>\?\.aborted\|\|[A-Za-z_$][\w$]*\.dynamicToolCalls!=null&&!await [A-Za-z_$][\w$]*\.dynamicToolCalls\.tryClaimExecution\(\{callId:\k<params>\.callId,hostId:\k<hostId>,threadId:\k<threadId>,turnId:\k<params>\.turnId\}\)\|\|\k<signal>\?\.aborted\)return!1;)/;
   const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_CURRENT_V6_RE =
-    /(?<prefix>async function [A-Za-z_$][\w$]*\(\{scope:(?<scope>[A-Za-z_$][\w$]*),serverRequest:(?<serverRequest>[A-Za-z_$][\w$]*),hostId:(?<hostId>[A-Za-z_$][\w$]*),queryClient:(?<queryClient>[A-Za-z_$][\w$]*),signal:(?<signal>[A-Za-z_$][\w$]*)\}\)\{let\{id:(?<requestId>[A-Za-z_$][\w$]*),params:(?<params>[A-Za-z_$][\w$]*)\}=\k<serverRequest>,\{threadId:(?<threadId>[A-Za-z_$][\w$]*),tool:(?<tool>[A-Za-z_$][\w$]*)\}=\k<params>[\s\S]{0,4000}?if\(\k<signal>\?\.aborted\|\|[A-Za-z_$][\w$]*\.dynamicToolCalls!=null&&!await [A-Za-z_$][\w$]*\.dynamicToolCalls\.tryClaimExecution\(\{callId:\k<params>\.callId,hostId:\k<hostId>,threadId:\k<threadId>,turnId:\k<params>\.turnId\}\)\|\|\k<signal>\?\.aborted\)return!1;)/;
+    /(?<prefix>async function [A-Za-z_$][\w$]*\(\{scope:(?<scope>[A-Za-z_$][\w$]*),serverRequest:(?<serverRequest>[A-Za-z_$][\w$]*),hostId:(?<hostId>[A-Za-z_$][\w$]*),queryClient:(?<queryClient>[A-Za-z_$][\w$]*),signal:(?<signal>[A-Za-z_$][\w$]*)(?:,transport:[A-Za-z_$][\w$]*)?\}\)\{let\{id:(?<requestId>[A-Za-z_$][\w$]*),params:(?<params>[A-Za-z_$][\w$]*)\}=\k<serverRequest>,\{threadId:(?<threadId>[A-Za-z_$][\w$]*),tool:(?<tool>[A-Za-z_$][\w$]*)\}=\k<params>[\s\S]{0,4000}?if\(\k<signal>\?\.aborted\|\|[A-Za-z_$][\w$]*\.dynamicToolCalls!=null&&!await [A-Za-z_$][\w$]*\.dynamicToolCalls\.tryClaimExecution\(\{callId:\k<params>\.callId,hostId:\k<hostId>,threadId:\k<threadId>,turnId:\k<params>\.turnId\}\)\|\|\k<signal>\?\.aborted\)return!1;)/;
   const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_CURRENT_V4_RE =
     /(?<prefix>async function [A-Za-z_$][\w$]*\(\{scope:(?<scope>[A-Za-z_$][\w$]*),serverRequest:(?<serverRequest>[A-Za-z_$][\w$]*),hostId:(?<hostId>[A-Za-z_$][\w$]*),queryClient:(?<queryClient>[A-Za-z_$][\w$]*)\}\)\{let\{id:(?<requestId>[A-Za-z_$][\w$]*),params:(?<params>[A-Za-z_$][\w$]*)\}=\k<serverRequest>,\{threadId:(?<threadId>[A-Za-z_$][\w$]*),tool:(?<tool>[A-Za-z_$][\w$]*)\}=\k<params>;if\(!\k<threadId>\)\{(?<logger>[A-Za-z_$][\w$]*)\.error\(`Missing threadId for dynamic tool call request`,\{safe:\{\},sensitive:\{id:\k<requestId>,params:\k<params>\}\}\);return\}(?<preClaimGuards>[\s\S]{0,900}?)if\([A-Za-z_$][\w$]*\.dynamicToolCalls!=null&&!await [A-Za-z_$][\w$]*\.dynamicToolCalls\.tryClaimExecution\(\{callId:\k<params>\.callId,hostId:\k<hostId>,threadId:\k<threadId>,turnId:\k<params>\.turnId\}\)\)return;let (?<result>[A-Za-z_$][\w$]*),(?<namespaceOk>[A-Za-z_$][\w$]*)=\k<params>\.namespace===[^,;]+,(?<compatOk>[A-Za-z_$][\w$]*)=\k<params>\.namespace==null&&[^,;]+,(?<dynamicResult>[A-Za-z_$][\w$]*)=[^,;]+\?await [^;]+:null,(?<pluginResult>[A-Za-z_$][\w$]*)=(?:\k<params>\.namespace===`plugin_management`(?:\|\|\k<params>\.namespace===`openai_settings\`)?)\?await [^;]+:null;)(?<gate>if\(\k<pluginResult>!=null\)\k<result>=\k<pluginResult>;else if\(!\k<namespaceOk>&&!\k<compatOk>\)\k<result>=(?<failureFn>[A-Za-z_$][\w$]*)\(`Unsupported dynamic tool namespace: \$\{\k<params>\.namespace\}`\);else if\(\k<dynamicResult>!=null\)\k<result>=\k<dynamicResult>;else)/;
   const COMPUTER_USE_NODE_REPL_RESULT_TEXT_CODE =
@@ -2687,6 +2713,7 @@ try {
       deferLoadingGuard,
       supportsNamespaces,
       appNamespace,
+      appDescription,
       functionTools,
       namespaceGroups,
       fallbackTools,
@@ -2695,7 +2722,7 @@ try {
       `].map(${item}=>({type:\`function\`,...${item},` +
       `...${deferLoadingGuard}?{deferLoading:!0}:{}}));` +
       `return ${supportsNamespaces}?[{type:\`namespace\`,name:${appNamespace},` +
-      `description:\`Tools provided by the Codex app.\`,tools:${functionTools}},` +
+      `description:${appDescription},tools:${functionTools}},` +
       `...${namespaceGroups},${COMPUTER_USE_NODE_REPL_NAMESPACE_GROUP_SPEC}]` +
       `:${fallbackTools}.concat([${COMPUTER_USE_NODE_REPL_NAMESPACE_TOOL_SPEC}])` +
       COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_PATCH_MARKER
@@ -3139,6 +3166,38 @@ try {
     mainEntry,
     ...listJavaScriptFiles(mainBuildDir),
   ]));
+  const WORKTREE_HEAD_REF_PATCH_MARKER =
+    contractPatchMarker('/*codex-offline:worktree-head-ref*/');
+  const worktreeHeadRefPatchedFiles = [];
+  let worktreeHeadRefAlreadyCorrect = false;
+
+  for (const filePath of mainBundleFiles) {
+    const content = fs.readFileSync(filePath, 'utf8');
+    const result = patchWorktreeHeadRefResolver(
+      content,
+      WORKTREE_HEAD_REF_PATCH_MARKER,
+    );
+    if (result.patched) {
+      fs.writeFileSync(filePath, result.content, 'utf8');
+      worktreeHeadRefPatchedFiles.push(path.relative(tmpDir, filePath));
+    } else if (result.alreadyCorrect) {
+      worktreeHeadRefAlreadyCorrect = true;
+    }
+  }
+
+  if (worktreeHeadRefPatchedFiles.length > 0) {
+    log(
+      'Permanent worktree HEAD resolution patched in ' +
+      `${worktreeHeadRefPatchedFiles.join(', ')}.`,
+    );
+  } else if (worktreeHeadRefAlreadyCorrect) {
+    log('Permanent worktree HEAD resolution already patched.');
+  } else {
+    failRequiredPatch(
+      'Could not locate the Git starting-ref resolver used by permanent worktrees.',
+    );
+  }
+
   const settingsPatchedFiles = [];
   const settingsRoutePatchedFiles = [];
   const settingsRouteAlreadyCorrectFiles = [];

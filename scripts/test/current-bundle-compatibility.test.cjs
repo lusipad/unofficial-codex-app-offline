@@ -353,7 +353,7 @@ test("26.818 dynamic tool handler tolerates execution metadata before abort guar
     `"use strict";\n${regexSource}\nreturn COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_CURRENT_V6_RE;`,
   )();
   const fixture =
-    "async function o6o({scope:e,serverRequest:t,hostId:n,queryClient:r,signal:i}){" +
+    "async function o6o({scope:e,serverRequest:t,hostId:n,queryClient:r,signal:i,transport:q}){" +
     "let{id:a,params:o}=t,{threadId:s,tool:c}=o,l={callId:o.callId,isRemoteHost:n!==Yg,tool:c,turnId:o.turnId};" +
     "if(!s)return Mp.error(`Missing threadId`),!1;" +
     "if(i?.aborted||jY.dynamicToolCalls!=null&&!await jY.dynamicToolCalls.tryClaimExecution(" +
@@ -766,6 +766,81 @@ test("26.810 dynamic tools keep node_repl at the top-level namespace boundary wi
   assert.ok(patched.includes("/*codex-offline:computer-use-node-repl-dynamic-tool*/"));
   assert.match(patched, /\.\.\.M,\{type:`namespace`,name:`node_repl`/);
   assert.match(patched, /:I\.concat\(\[\{type:`function`,name:`js`/);
+});
+
+test("26.820 dynamic tools accept a shared description binding", () => {
+  const regexSource = sourceSlice(
+    "  const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOLS_TOP_LEVEL_CURRENT_RE =",
+    "\n  const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_RE =",
+  );
+  const currentRegex = Function(
+    `"use strict";\n${regexSource}\nreturn COMPUTER_USE_NODE_REPL_DYNAMIC_TOOLS_TOP_LEVEL_CURRENT_RE;`,
+  )();
+  const replacementSource = sourceSlice(
+    "  function computerUseNodeReplDynamicToolsTopLevelCurrentReplacement(",
+    "\n  function patchComputerUseNodeReplDynamicTools(",
+  );
+  const replacement = Function(
+    "COMPUTER_USE_NODE_REPL_NAMESPACE_GROUP_SPEC",
+    "COMPUTER_USE_NODE_REPL_NAMESPACE_TOOL_SPEC",
+    "COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_PATCH_MARKER",
+    `"use strict";\n${replacementSource}\nreturn computerUseNodeReplDynamicToolsTopLevelCurrentReplacement;`,
+  )(
+    "{type:`namespace`,name:`node_repl`,description:`Node REPL tools for Computer Use.`,tools:[{type:`function`,name:`js`}]}",
+    "{type:`function`,name:`js`}",
+    "/*codex-offline:computer-use-node-repl-dynamic-tool*/",
+  );
+  const fixture =
+    "].map(e=>({type:`function`,...e,...O&&(!Urs.has(e.name)||o&&Ves.includes(e.name))?{deferLoading:!0}:{}}));" +
+    "return O?[{type:`namespace`,name:Hrs,description:uwe,tools:B},...I]:B";
+
+  const patched = fixture.replace(currentRegex, replacement);
+  assert.notEqual(patched, fixture);
+  assert.ok(patched.includes("/*codex-offline:computer-use-node-repl-dynamic-tool*/"));
+  assert.match(patched, /description:uwe,tools:B/);
+  assert.match(patched, /\.\.\.I,\{type:`namespace`,name:`node_repl`/);
+  assert.match(patched, /:B\.concat\(\[\{type:`function`,name:`js`/);
+});
+
+test("26.820 permanent worktrees keep literal HEAD out of refs/heads", () => {
+  const patchSource = sourceSlice(
+    "function patchWorktreeHeadRefResolver(content, patchMarker) {",
+    "\n\nfunction listJavaScriptFiles",
+  );
+  const patchWorktreeHeadRefResolver = Function(
+    `"use strict";\n${patchSource}\nreturn patchWorktreeHeadRefResolver;`,
+  )();
+  const marker = "/*codex-offline:worktree-head-ref*/";
+  const fixture =
+    "async function a4(e,t,n){let r=_le(t),i=await r4(e,t,n);" +
+    "if(i!=null){let a=`refs/remotes/${i}`,o=await n4(e,`${a}^{commit}`,n)==null?i4(i):a;" +
+    "return(await $2(e,r??t,o,n))?.state===`right-ahead`?{ref:o}:{ref:r??t}}";
+
+  const patched = patchWorktreeHeadRefResolver(fixture, marker);
+  assert.equal(patched.patched, true);
+  assert.equal(patched.count, 1);
+  assert.match(
+    patched.content,
+    /async function a4\(e,t,n\)\{if\(t===`HEAD`\)return\{ref:`HEAD`\}\/\*codex-offline:worktree-head-ref\*\/;/,
+  );
+  assert.ok(!patched.content.includes("refs/heads/HEAD"));
+
+  const secondPass = patchWorktreeHeadRefResolver(patched.content, marker);
+  assert.equal(secondPass.alreadyCorrect, true);
+  assert.equal(secondPass.patched, false);
+  assert.equal(secondPass.content, patched.content);
+
+  const contract = require(path.join(
+    repoRoot,
+    "web-gateway",
+    "gateway",
+    "src",
+    "ipc",
+    "codex",
+    "capabilityContractData.cjs",
+  ));
+  assert.ok(contract.DESKTOP_ASAR_PATCH_MARKERS.includes(marker));
+  assert.ok(verifierScriptSource.includes(`requiredPatchMarker('${marker}')`));
 });
 
 test("26.727 archived settings keeps local errors separate from cloud task errors", () => {

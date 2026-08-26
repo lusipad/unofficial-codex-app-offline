@@ -1,5 +1,27 @@
 # Changelog
 
+## 2026-08-27
+
+### 中文
+
+- 修复 Codex `26.820.7780.0` 创建永久 Worktree 时将字面量 `HEAD` 错误解析为 `refs/heads/HEAD`、导致创建失败的问题。
+- 每日离线包构建时间由北京时间 11:00 调整为 03:00。
+
+### English
+
+- Fixed permanent Worktree creation in Codex `26.820.7780.0` failing because the literal `HEAD` starting ref was incorrectly resolved as `refs/heads/HEAD`.
+- Moved the daily offline package build from 11:00 to 03:00 Beijing time.
+
+## 2026-08-26
+
+### 中文
+
+- 修复 Codex `26.820.7780.0` renderer 将动态工具 namespace 描述提取为共享变量后导致离线包构建失败的问题；兼容匹配保留原有守卫并继续对未知结构失败关闭。
+
+### English
+
+- Fixed offline package builds failing against Codex `26.820.7780.0`, whose renderer extracted the dynamic-tool namespace description into a shared binding; the narrow compatibility match preserves existing guards and still fails closed on unknown shapes.
+
 ## 2026-08-22
 
 ### 中文

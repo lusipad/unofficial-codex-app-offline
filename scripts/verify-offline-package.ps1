@@ -1396,6 +1396,8 @@ const UNIFIED_PLUGINS_PAGE_PATCH_MARKER =
   requiredPatchMarker('/*codex-offline:unified-plugins-page*/');
 const WORKSPACE_DEPENDENCIES_SETTINGS_PATCH_MARKER =
   requiredPatchMarker('/*codex-offline:workspace-dependencies-settings*/');
+const WORKTREE_HEAD_REF_PATCH_MARKER =
+  requiredPatchMarker('/*codex-offline:worktree-head-ref*/');
 const MODEL_DISPLAY_NAME_FALLBACK_PATCH_MARKER =
   requiredPatchMarker('/*codex-offline:model-id-display-name-fallback*/');
 const OFFLINE_QUERY_NETWORK_MODE_PATCH_MARKER =
@@ -1598,6 +1600,7 @@ let sidebarActivityViewSurfaceSeen = false;
 let sidebarActivityViewPatched = false;
 let workspaceDependenciesSettingsSurfaceSeen = false;
 let workspaceDependenciesSettingsPatched = false;
+let worktreeHeadRefPatched = false;
 let modelDisplayNameFallbackPatched = false;
 let offlineNetworkModeSurfaceSeen = false;
 let offlineQueryNetworkModePatched = false;
@@ -1695,6 +1698,9 @@ for (const entry of javaScriptEntries) {
   }
   bundledBrowserPluginsPatched ||= content.includes(BUNDLED_BROWSER_PLUGINS_PATCH_MARKER);
   bundledRuntimePluginsPatched ||= content.includes(BUNDLED_RUNTIME_PLUGINS_PATCH_MARKER);
+  worktreeHeadRefPatched ||=
+    content.includes(WORKTREE_HEAD_REF_PATCH_MARKER) &&
+    /if\([A-Za-z_$][\w$]*===`HEAD`\)return\{ref:`HEAD`\}\/\*codex-offline:worktree-head-ref\*\//.test(content);
   windowsBrowserUseCapabilityPatched ||= content.includes(WINDOWS_BROWSER_USE_CAPABILITY_PATCH_MARKER);
   appServerSandboxOverridePatched ||= content.includes(APP_SERVER_SANDBOX_OVERRIDE);
   nodeReplFeatureConfigPatched ||= content.includes(NODE_REPL_FEATURE_ENABLED_PATCH_MARKER);
@@ -1881,6 +1887,9 @@ if (!workspaceDependenciesSettingsSurfaceSeen) {
 }
 if (!workspaceDependenciesSettingsPatched) {
   throw new Error('Workspace Dependencies imported gate patch marker is missing from app.asar.');
+}
+if (!worktreeHeadRefPatched) {
+  throw new Error('Permanent worktree HEAD resolution patch marker is missing from app.asar.');
 }
 if (!modelDisplayNameFallbackPatched) {
   throw new Error('Renderer formatted model-ID fallback marker is missing from app.asar.');

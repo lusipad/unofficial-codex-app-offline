@@ -243,6 +243,7 @@ const DESKTOP_ASAR_PATCH_MARKERS = Object.freeze([
   "/*codex-offline:sidebar-activity-view*/",
   "/*codex-offline:unified-plugins-page*/",
   "/*codex-offline:workspace-dependencies-settings*/",
+  "/*codex-offline:worktree-head-ref*/",
   "/*codex-offline:model-id-display-name-fallback*/",
   "/*codex-offline:offline-query-network-mode*/",
   "/*codex-offline:offline-mutation-network-mode*/",
