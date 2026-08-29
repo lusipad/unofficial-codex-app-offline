@@ -342,6 +342,31 @@ if (-not (Test-Path $directLaunchSmokeScriptPath)) {
 }
 
 try {
+    # Keep enough budget for a normal user extraction directory on Windows.
+    # This checks the archive's own relative names before extraction so a
+    # future deep dependency path cannot reintroduce Explorer failures.
+    $portableZipEntryMaxLength = 200
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $portableZipArchive = [System.IO.Compression.ZipFile]::OpenRead($portableZipPath)
+    try {
+        $longestPortableZipEntry = $null
+        foreach ($entry in $portableZipArchive.Entries) {
+            $entryLength = ([string]$entry.FullName).Length
+            if ($null -eq $longestPortableZipEntry -or $entryLength -gt $longestPortableZipEntry.Length) {
+                $longestPortableZipEntry = [pscustomobject]@{
+                    Length = $entryLength
+                    RelativePath = [string]$entry.FullName
+                }
+            }
+        }
+    }
+    finally {
+        $portableZipArchive.Dispose()
+    }
+    if ($null -ne $longestPortableZipEntry -and $longestPortableZipEntry.Length -gt $portableZipEntryMaxLength) {
+        throw "Portable zip entry exceeds the extraction path budget ($($longestPortableZipEntry.Length) > $portableZipEntryMaxLength): $($longestPortableZipEntry.RelativePath)"
+    }
+
     Expand-Archive -Path $portableZipPath -DestinationPath $tempRoot -Force
 
     $portableRoot = $tempRoot

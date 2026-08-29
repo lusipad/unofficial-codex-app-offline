@@ -22,6 +22,8 @@
 
 从 [Releases](../../releases) 下载 `*-portable.zip`，解压后：
 
+portable ZIP 使用包根相对路径归档，以减少 Windows 解压时的路径长度；解压目录仍可自行命名。
+
 1. 首次运行双击 **`Setup Codex.cmd`**，按提示完成引导
 2. 日常使用桌面版：双击 **`Codex.cmd`**（无需 Node.js）
 3. 使用浏览器版：先装 [Node.js 18+](https://nodejs.org)，双击 **`Codex Web.cmd`**，浏览器打开 `http://127.0.0.1:3737`

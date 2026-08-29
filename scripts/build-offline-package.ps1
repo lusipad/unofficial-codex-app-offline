@@ -1104,10 +1104,11 @@ Copy-Item -LiteralPath $bundledModelCatalog -Destination $modelCatalogAsset -For
 $assets.Add($modelCatalogAsset) | Out-Null
 
 Write-BuildTrace 'Creating archives.'
-# Hide implementation details AFTER creating portable zip so Compress-Archive includes hidden items.
+# Keep portable entries relative to the package root. The custom writer also
+# includes hidden files, which Compress-Archive skips when given a wildcard.
 if ($config.packaging.portableZip) {
     $portableZip = Join-Path $artifactRoot ('{0}-portable.zip' -f $releaseBase)
-    Compress-Archive -Path $packageRoot -DestinationPath $portableZip -Force
+    New-ZipWithUnixExecutable -SourceRoot $packageRoot -DestinationPath $portableZip
     $assets.Add($portableZip) | Out-Null
 }
 

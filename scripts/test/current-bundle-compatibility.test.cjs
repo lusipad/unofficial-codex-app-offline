@@ -1238,6 +1238,19 @@ test("26.810 packaging shortens the Sky pnpm tslib dependency path", () => {
   assert.ok(verifierScriptSource.includes("'node_modules\\.pnpm'"));
 });
 
+test("portable ZIP keeps entries relative to the package root", () => {
+  assert.match(
+    buildScriptSource,
+    /New-ZipWithUnixExecutable -SourceRoot \$packageRoot -DestinationPath \$portableZip/,
+  );
+  assert.doesNotMatch(buildScriptSource, /Compress-Archive -Path \$packageRoot/);
+  assert.match(verifierScriptSource, /\$portableZipEntryMaxLength = 200/);
+  assert.match(
+    verifierScriptSource,
+    /Portable zip entry exceeds the extraction path budget/,
+  );
+});
+
 test("26.730 patcher does not carry pre-helper node_repl migrations", () => {
   assert.ok(!patchScriptSource.includes("NODE_REPL_DISABLE_SANDBOX_NEEDLE ="));
   assert.ok(

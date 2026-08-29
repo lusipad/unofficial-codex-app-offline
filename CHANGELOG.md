@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-08-30
+
+### 中文
+
+- 修复 portable ZIP 解压时的路径过深问题：归档条目现在相对于包根写入，保留隐藏文件并移除不必要的版本目录前缀；包验证器新增 200 字符的 ZIP 条目路径预算检查。
+
+### English
+
+- Fixed portable ZIP extraction failures caused by deep paths: archive entries are now written relative to the package root, hidden files remain included, and the unnecessary version-directory prefix is removed. The package verifier now enforces a 200-character ZIP entry path budget.
+
 ## 2026-08-28
 
 ### 中文
