@@ -249,11 +249,130 @@ function Add-WebGatewayRuntime {
     }
 }
 
+function Resolve-AppSourceTarget {
+    param(
+        [Parameter(Mandatory = $true)]$Config,
+        [Parameter(Mandatory = $true)][string]$ScriptRoot
+    )
+
+    $mode = [string]$Config.appSource.mode
+    switch ($mode) {
+        'rg_adguard' {
+            $resolverJson = node (Join-Path $ScriptRoot 'resolve-store-bundle-url.mjs') --package-family-name $Config.appSource.packageFamilyName --ring $Config.appSource.ring
+            if ($LASTEXITCODE -ne 0) {
+                throw 'The rg-adguard resolver failed.'
+            }
+
+            $resolved = $resolverJson | ConvertFrom-Json
+            $resolvedFamily = [string](Get-OptionalProperty -Object $resolved -Name 'packageFamilyName')
+            $resolvedVersion = [string](Get-OptionalProperty -Object $resolved -Name 'version')
+            $selected = Get-OptionalProperty -Object $resolved -Name 'selected'
+            $selectedFileName = [string](Get-OptionalProperty -Object $selected -Name 'fileName')
+            $selectedSha1 = [string](Get-OptionalProperty -Object $selected -Name 'sha1')
+            if (-not [string]::Equals($resolvedFamily, [string]$Config.appSource.packageFamilyName, [System.StringComparison]::OrdinalIgnoreCase) -or
+                [string]::IsNullOrWhiteSpace($resolvedVersion) -or
+                [string]::IsNullOrWhiteSpace($selectedFileName) -or
+                [string]::IsNullOrWhiteSpace($selectedSha1)) {
+                throw 'The rg-adguard resolver returned an incomplete or unexpected app source target.'
+            }
+
+            return $resolved
+        }
+        'installed_store' {
+            $package = Get-AppxPackage -Name $Config.packageId |
+                Sort-Object Version -Descending |
+                Select-Object -First 1
+            if ($null -eq $package) {
+                throw "Store package '$($Config.packageId)' was not found on this machine."
+            }
+
+            $resolvedFamily = [string]$package.PackageFamilyName
+            $expectedFamily = [string]$Config.appSource.packageFamilyName
+            if (-not [string]::IsNullOrWhiteSpace($expectedFamily) -and
+                -not [string]::Equals($resolvedFamily, $expectedFamily, [System.StringComparison]::OrdinalIgnoreCase)) {
+                throw "Installed Store package family '$resolvedFamily' does not match configured family '$expectedFamily'."
+            }
+
+            return [pscustomobject]@{
+                packageFamilyName = $resolvedFamily
+                version = [string]$package.Version
+                installLocation = [string]$package.InstallLocation
+            }
+        }
+        default {
+            throw "Unsupported app source mode: $mode"
+        }
+    }
+}
+
+function Test-AppSourceCacheCompatible {
+    param(
+        [Parameter(Mandatory = $true)]$SourceMetadata,
+        [Parameter(Mandatory = $true)]$Config,
+        [Parameter(Mandatory = $false)]$ResolvedSource = $null
+    )
+
+    $configuredMode = [string]$Config.appSource.mode
+    $cachedMode = [string](Get-OptionalProperty -Object $SourceMetadata -Name 'sourceMode')
+    $cachedFamily = [string](Get-OptionalProperty -Object $SourceMetadata -Name 'packageFamilyName')
+    $expectedFamily = [string]$Config.appSource.packageFamilyName
+    if ([string]::IsNullOrWhiteSpace($cachedMode) -or
+        -not [string]::Equals($cachedMode, $configuredMode, [System.StringComparison]::OrdinalIgnoreCase) -or
+        [string]::IsNullOrWhiteSpace($cachedFamily) -or
+        -not [string]::Equals($cachedFamily, $expectedFamily, [System.StringComparison]::OrdinalIgnoreCase)) {
+        return $false
+    }
+
+    $cachedVersion = [string](Get-OptionalProperty -Object $SourceMetadata -Name 'version')
+    if ([string]::IsNullOrWhiteSpace($cachedVersion)) {
+        return $false
+    }
+
+    switch ($configuredMode) {
+        'installed_store' {
+            $resolvedVersion = [string](Get-OptionalProperty -Object $ResolvedSource -Name 'version')
+            if ([string]::IsNullOrWhiteSpace($resolvedVersion)) {
+                return $false
+            }
+
+            return [string]::Equals($cachedVersion, $resolvedVersion, [System.StringComparison]::OrdinalIgnoreCase)
+        }
+        'rg_adguard' {
+            if ($null -eq $ResolvedSource) {
+                return $false
+            }
+
+            $resolvedVersion = [string](Get-OptionalProperty -Object $ResolvedSource -Name 'version')
+            $resolvedSelected = Get-OptionalProperty -Object $ResolvedSource -Name 'selected'
+            $resolvedFileName = [string](Get-OptionalProperty -Object $resolvedSelected -Name 'fileName')
+            $resolvedSha1 = [string](Get-OptionalProperty -Object $resolvedSelected -Name 'sha1')
+            $cachedFileName = [string](Get-OptionalProperty -Object $SourceMetadata -Name 'sourceFileName')
+            $cachedSha1 = [string](Get-OptionalProperty -Object $SourceMetadata -Name 'sourceSha1')
+            if ([string]::IsNullOrWhiteSpace($resolvedVersion) -or
+                [string]::IsNullOrWhiteSpace($resolvedFileName) -or
+                [string]::IsNullOrWhiteSpace($resolvedSha1) -or
+                [string]::IsNullOrWhiteSpace($cachedFileName) -or
+                [string]::IsNullOrWhiteSpace($cachedSha1) -or
+                -not [string]::Equals($cachedVersion, $resolvedVersion, [System.StringComparison]::OrdinalIgnoreCase) -or
+                -not [string]::Equals($cachedFileName, $resolvedFileName, [System.StringComparison]::OrdinalIgnoreCase) -or
+                -not [string]::Equals($cachedSha1, $resolvedSha1, [System.StringComparison]::OrdinalIgnoreCase)) {
+                return $false
+            }
+
+            return $true
+        }
+        default {
+            return $false
+        }
+    }
+}
+
 function Export-AppSource {
     param(
         [Parameter(Mandatory = $true)]$Config,
         [Parameter(Mandatory = $true)][string]$ScriptRoot,
-        [Parameter(Mandatory = $true)][string]$SourceExportRoot
+        [Parameter(Mandatory = $true)][string]$SourceExportRoot,
+        [Parameter(Mandatory = $false)]$ResolvedSource = $null
     )
 
     $mode = [string]$Config.appSource.mode
@@ -267,12 +386,11 @@ function Export-AppSource {
             }
         }
         'rg_adguard' {
-            $resolverJson = node (Join-Path $ScriptRoot 'resolve-store-bundle-url.mjs') --package-family-name $Config.appSource.packageFamilyName --ring $Config.appSource.ring
-            if ($LASTEXITCODE -ne 0) {
-                throw 'The rg-adguard resolver failed.'
+            $resolved = if ($null -ne $ResolvedSource) {
+                $ResolvedSource
+            } else {
+                Resolve-AppSourceTarget -Config $Config -ScriptRoot $ScriptRoot
             }
-
-            $resolved = $resolverJson | ConvertFrom-Json
             & (Join-Path $ScriptRoot 'import-store-bundle-from-url.ps1') `
                 -BundleUrl $resolved.selected.href `
                 -DownloadedFileName $resolved.selected.fileName `
@@ -666,37 +784,47 @@ if ($null -ne $config.skills.official) {
 }
 
 $sourceMetadataPath = Join-Path $sourceExportRoot 'metadata/package-metadata.json'
-if ((Test-Path (Join-Path $sourceExportRoot 'app/ChatGPT.exe')) -and (Test-Path $sourceMetadataPath)) {
-  Write-BuildTrace 'Using cached app source (skip Export-AppSource).'
-  $sourceMetadata = Get-Content -Path $sourceMetadataPath -Raw | ConvertFrom-Json
-  $version = $sourceMetadata.version
-  $cachedSourceMode = [string](Get-OptionalProperty -Object $sourceMetadata -Name 'sourceMode')
-  if ([string]::IsNullOrWhiteSpace($cachedSourceMode)) {
-      $cachedSourceMode = [string]$config.appSource.mode
-  }
-  $appSourceInfo = [ordered]@{
-      mode = $cachedSourceMode
-      resolver = 'cached'
-      packageFamilyName = [string](Get-OptionalProperty -Object $sourceMetadata -Name 'packageFamilyName')
-      version = $version
-  }
-  $cachedInstallLocation = [string](Get-OptionalProperty -Object $sourceMetadata -Name 'installLocation')
-  if (-not [string]::IsNullOrWhiteSpace($cachedInstallLocation)) {
-      $appSourceInfo['installLocation'] = $cachedInstallLocation
-  }
-  $cachedSourceFileName = [string](Get-OptionalProperty -Object $sourceMetadata -Name 'sourceFileName')
-  if (-not [string]::IsNullOrWhiteSpace($cachedSourceFileName)) {
-      $appSourceInfo['selected'] = [ordered]@{
-          fileName = $cachedSourceFileName
-          href = [string](Get-OptionalProperty -Object $sourceMetadata -Name 'sourceBundleUrl')
-          sha1 = [string](Get-OptionalProperty -Object $sourceMetadata -Name 'sourceSha1')
+$sourceMetadata = $null
+$appSourceInfo = $null
+$version = $null
+$resolvedAppSource = Resolve-AppSourceTarget -Config $config -ScriptRoot $scriptRoot
+$cacheCandidate = (Test-Path (Join-Path $sourceExportRoot 'app/ChatGPT.exe')) -and (Test-Path $sourceMetadataPath)
+
+if ($cacheCandidate) {
+  $cachedMetadata = Get-Content -Path $sourceMetadataPath -Raw | ConvertFrom-Json
+  if (Test-AppSourceCacheCompatible -SourceMetadata $cachedMetadata -Config $config -ResolvedSource $resolvedAppSource) {
+      Write-BuildTrace 'Using matching cached app source (skip Export-AppSource).'
+      $sourceMetadata = $cachedMetadata
+      $version = [string](Get-OptionalProperty -Object $sourceMetadata -Name 'version')
+      $cachedSourceMode = [string](Get-OptionalProperty -Object $sourceMetadata -Name 'sourceMode')
+      $appSourceInfo = [ordered]@{
+          mode = $cachedSourceMode
+          resolver = 'cached'
+          packageFamilyName = [string](Get-OptionalProperty -Object $sourceMetadata -Name 'packageFamilyName')
+          version = $version
       }
+      $cachedInstallLocation = [string](Get-OptionalProperty -Object $sourceMetadata -Name 'installLocation')
+      if (-not [string]::IsNullOrWhiteSpace($cachedInstallLocation)) {
+          $appSourceInfo['installLocation'] = $cachedInstallLocation
+      }
+      $cachedSourceFileName = [string](Get-OptionalProperty -Object $sourceMetadata -Name 'sourceFileName')
+      if (-not [string]::IsNullOrWhiteSpace($cachedSourceFileName)) {
+          $appSourceInfo['selected'] = [ordered]@{
+              fileName = $cachedSourceFileName
+              href = [string](Get-OptionalProperty -Object $sourceMetadata -Name 'sourceBundleUrl')
+              sha1 = [string](Get-OptionalProperty -Object $sourceMetadata -Name 'sourceSha1')
+          }
+      }
+  } else {
+      Write-BuildTrace 'Cached app source does not match the configured source target; exporting again.'
   }
-} else {
+}
+
+if ($null -eq $sourceMetadata) {
   Write-BuildTrace 'Exporting app source.'
-  $appSourceInfo = Export-AppSource -Config $config -ScriptRoot $scriptRoot -SourceExportRoot $sourceExportRoot
+  $appSourceInfo = Export-AppSource -Config $config -ScriptRoot $scriptRoot -SourceExportRoot $sourceExportRoot -ResolvedSource $resolvedAppSource
   $sourceMetadata = Get-Content -Path $sourceMetadataPath -Raw | ConvertFrom-Json
-  $version = $sourceMetadata.version
+  $version = [string](Get-OptionalProperty -Object $sourceMetadata -Name 'version')
 }
 $releaseBase = '{0}-{1}' -f $config.releaseNamePrefix, $version
 $releaseTag = 'offline-v{0}' -f $version

@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-08-28
+
+### 中文
+
+- 修复 Codex `26.825` Store bundle 结构变化导致离线包构建失败的问题：Worktree `HEAD` resolver 和带引号的 `features.js_repl` 共享配置现在有窄兼容匹配；未知结构仍会阻止出包。构建器现在先解析线上目标，`rg_adguard` 仅在来源模式、包族、版本、文件名和 SHA1 全部匹配时复用 source cache。
+
+### English
+
+- Fixed offline package builds failing against the Codex `26.825` Store bundle. The Worktree `HEAD` resolver and quoted `features.js_repl` shared configuration now have narrow compatibility matches, while unknown structures still block packaging. The builder resolves the online target first and reuses an `rg_adguard` source cache only when source mode, package family, version, file name, and SHA1 all match.
+
 ## 2026-08-27
 
 ### 中文

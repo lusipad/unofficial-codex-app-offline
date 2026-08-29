@@ -47,6 +47,7 @@ $metadata = [ordered]@{
     appName = $package.Name
     packageFamilyName = $package.PackageFamilyName
     version = $package.Version.ToString()
+    sourceMode = 'installed_store'
     installLocation = $package.InstallLocation
     exportedAt = (Get-Date).ToString('o')
     exportedAppPath = 'app'

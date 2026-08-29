@@ -1,6 +1,7 @@
 "use strict";
 
 const assert = require("node:assert/strict");
+const { spawnSync } = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
@@ -45,7 +46,7 @@ function verifierSourceSlice(startNeedle, endNeedle) {
 
 test("26.715 settings IPC keeps its native config handler while patching settings routes", () => {
   const needleSource = sourceSlice(
-    "  // V5: open-config-toml has its own Electron implementation.",
+    "  // 26.825: open-config-toml has its own Electron implementation.",
     "  // Helper: reload the renderer at a given settings route.",
   );
   const replacementSource = sourceSlice(
@@ -802,7 +803,7 @@ test("26.820 dynamic tools accept a shared description binding", () => {
   assert.match(patched, /:B\.concat\(\[\{type:`function`,name:`js`/);
 });
 
-test("26.820 permanent worktrees keep literal HEAD out of refs/heads", () => {
+test("26.825 worktree resolver rejects the retired pre-HEAD shape", () => {
   const patchSource = sourceSlice(
     "function patchWorktreeHeadRefResolver(content, patchMarker) {",
     "\n\nfunction listJavaScriptFiles",
@@ -817,18 +818,9 @@ test("26.820 permanent worktrees keep literal HEAD out of refs/heads", () => {
     "return(await $2(e,r??t,o,n))?.state===`right-ahead`?{ref:o}:{ref:r??t}}";
 
   const patched = patchWorktreeHeadRefResolver(fixture, marker);
-  assert.equal(patched.patched, true);
-  assert.equal(patched.count, 1);
-  assert.match(
-    patched.content,
-    /async function a4\(e,t,n\)\{if\(t===`HEAD`\)return\{ref:`HEAD`\}\/\*codex-offline:worktree-head-ref\*\/;/,
-  );
-  assert.ok(!patched.content.includes("refs/heads/HEAD"));
-
-  const secondPass = patchWorktreeHeadRefResolver(patched.content, marker);
-  assert.equal(secondPass.alreadyCorrect, true);
-  assert.equal(secondPass.patched, false);
-  assert.equal(secondPass.content, patched.content);
+  assert.equal(patched.patched, false);
+  assert.equal(patched.alreadyCorrect, false);
+  assert.equal(patched.count, 0);
 
   const contract = require(path.join(
     repoRoot,
@@ -841,6 +833,167 @@ test("26.820 permanent worktrees keep literal HEAD out of refs/heads", () => {
   ));
   assert.ok(contract.DESKTOP_ASAR_PATCH_MARKERS.includes(marker));
   assert.ok(verifierScriptSource.includes(`requiredPatchMarker('${marker}')`));
+});
+
+test("26.825 worktree resolver keeps the upstream HEAD fast-path explicit", () => {
+  const patchSource = sourceSlice(
+    "function patchWorktreeHeadRefResolver(content, patchMarker) {",
+    "\n\nfunction listJavaScriptFiles",
+  );
+  const patchWorktreeHeadRefResolver = Function(
+    `"use strict";\n${patchSource}\nreturn patchWorktreeHeadRefResolver;`,
+  )();
+  const marker = "/*codex-offline:worktree-head-ref*/";
+  const fixture =
+    "async function Q2(e,t,n){if(t===`HEAD`||t===`@`)return await Y2(e,`${t}^{commit}`,n)==null?null:{ref:t};" +
+    "let r=Jle(t),i=await X2(e,t,n);if(i!=null){let a=`refs/remotes/${i}`,o=await Y2(e,`${a}^{commit}`,n)==null?Z2(i):a;" +
+    "return(await K2(e,r??t,o,n))?.state===`right-ahead`?{ref:o}:{ref:r??t}}" +
+    "if(r!=null&&await Y2(e,`${r}^{commit}`,n)!=null)return{ref:r};";
+  const unknownFixture =
+    "async function z1(e,t,n){if(t===`HEAD`||t===`@`)return await Y2(e,`${t}^{commit}`,n)==null?null:{ref:t};" +
+    "let r=Jle(t),i=await X2(e,t,n);return i!=null?{ref:i}:null}";
+
+  const patched = patchWorktreeHeadRefResolver(fixture, marker);
+  assert.equal(patched.patched, true);
+  assert.equal(patched.count, 1);
+  assert.match(
+    patched.content,
+    /async function Q2\(e,t,n\)\{if\(t===`HEAD`\)return\{ref:`HEAD`\}\/\*codex-offline:worktree-head-ref\*\/;if\(t===`HEAD`\|\|t===`@`\)/,
+  );
+
+  const secondPass = patchWorktreeHeadRefResolver(patched.content, marker);
+  assert.equal(secondPass.alreadyCorrect, true);
+  assert.equal(secondPass.patched, false);
+  assert.equal(secondPass.content, patched.content);
+
+  const unknown = patchWorktreeHeadRefResolver(unknownFixture, marker);
+  assert.equal(unknown.patched, false);
+  assert.equal(unknown.alreadyCorrect, false);
+  assert.equal(unknown.count, 0);
+});
+
+test("26.825 node_repl config enables quoted features.js_repl without touching js_repl_tools_only", () => {
+  const nodeReplFeatureConfigSource = sourceSlice(
+    "  const NODE_REPL_FEATURE_CONFIG_CURRENT_RE =",
+    "  const NODE_REPL_CONFIG_RECONCILE_FINALLY_PATCH_MARKER =",
+  );
+  const [currentRe, currentPatchedRe] = Function(
+    `"use strict";\n${nodeReplFeatureConfigSource}\nreturn [NODE_REPL_FEATURE_CONFIG_CURRENT_RE, NODE_REPL_FEATURE_CONFIG_CURRENT_PATCHED_RE];`,
+  )();
+  const marker = "/*codex-offline:node-repl-feature-enabled*/";
+  const fixture =
+    'let defaults={include_permissions_instructions:!1,"features.apps":!1,' +
+    '"features.js_repl":!1,"features.js_repl_tools_only":!1,web_search:`disabled`};';
+  const unknownFixture =
+    'let defaults={include_permissions_instructions:!1,"features.apps":!1,' +
+    '"features.js_repl":!1,"features.js_repl_tools_only":!1,web_search:`enabled`};';
+
+  const patched = fixture.replace(currentRe, `$1!0${marker}$3`);
+  assert.notEqual(patched, fixture);
+  assert.match(patched, currentPatchedRe);
+  assert.ok(patched.includes('"features.js_repl":!0'));
+  assert.ok(patched.includes('"features.js_repl_tools_only":!1'));
+
+  const alreadyPatched = patched.replace(currentRe, `$1!0${marker}$3`);
+  assert.equal(alreadyPatched, patched);
+  assert.doesNotMatch(unknownFixture, currentRe);
+
+  const retiredFixture = 'let defaults={"features.js_repl":!1};';
+  assert.doesNotMatch(retiredFixture, currentRe);
+});
+
+test("26.825 patcher keeps only current Settings and Worktree resolver shapes", () => {
+  assert.match(patchScriptSource, /const NOT_IMPLEMENTED_NEEDLE_V5 =/);
+  assert.match(patchScriptSource, /const SETTINGS_REPLACEMENT_V5 =/);
+  assert.doesNotMatch(patchScriptSource, /NOT_IMPLEMENTED_NEEDLE_V[1-4]/);
+  assert.doesNotMatch(patchScriptSource, /SETTINGS_REPLACEMENT_V[1-4]/);
+  assert.doesNotMatch(patchScriptSource, /resolverLegacyRe/);
+  assert.doesNotMatch(patchScriptSource, /NODE_REPL_FEATURE_CONFIG_RE =/);
+  assert.doesNotMatch(
+    verifierScriptSource,
+    /features\.js_repl":!1\}/,
+  );
+});
+
+test("rg_adguard app-source cache requires the current resolver target", {
+  skip: process.platform !== "win32",
+}, () => {
+  const helperStart = buildScriptSource.indexOf("function Get-OptionalProperty {");
+  const helperEnd = buildScriptSource.indexOf("\n\n$scriptRoot =", helperStart);
+  assert.notEqual(helperStart, -1, "Get-OptionalProperty is missing");
+  assert.notEqual(helperEnd, -1, "build helper terminator is missing");
+  const helperSource = buildScriptSource.slice(helperStart, helperEnd);
+  const packageFamilyName = "OpenAI.Codex_2p2nqsd0c76g0";
+  const config = {
+    appSource: { mode: "rg_adguard", packageFamilyName },
+  };
+  const resolved = {
+    packageFamilyName,
+    version: "26.825.3734.0",
+    selected: {
+      fileName: "OpenAI.Codex_26.825.3734.0_x64__2p2nqsd0c76g0.msix",
+      sha1: "abc123",
+    },
+  };
+  const cached = {
+    packageFamilyName,
+    sourceMode: "rg_adguard",
+    version: "26.825.3734.0",
+    sourceFileName: resolved.selected.fileName,
+    sourceSha1: resolved.selected.sha1,
+  };
+  const encode = (value) =>
+    Buffer.from(JSON.stringify(value), "utf8").toString("base64");
+  const command = [
+    "$ErrorActionPreference='Stop'",
+    helperSource,
+    `$config = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${encode(config)}')) | ConvertFrom-Json`,
+    `$resolved = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${encode(resolved)}')) | ConvertFrom-Json`,
+    `$cached = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${encode(cached)}')) | ConvertFrom-Json`,
+    `$staleVersion = $cached | ConvertTo-Json | ConvertFrom-Json; $staleVersion.version = '26.820.7780.0'`,
+    `$wrongSha1 = $cached | ConvertTo-Json | ConvertFrom-Json; $wrongSha1.sourceSha1 = 'def456'`,
+    `$missingSha1 = $cached | ConvertTo-Json | ConvertFrom-Json; $missingSha1.sourceSha1 = $null`,
+    `$wrongMode = $cached | ConvertTo-Json | ConvertFrom-Json; $wrongMode.sourceMode = 'installed_store'`,
+    `$wrongFamily = $cached | ConvertTo-Json | ConvertFrom-Json; $wrongFamily.packageFamilyName = 'OpenAI.Other_2p2nqsd0c76g0'`,
+    "function Get-AppxPackage { param([string]$Name) [pscustomobject]@{PackageFamilyName='OpenAI.Codex_2p2nqsd0c76g0';Version=[version]'26.825.4187.0';InstallLocation='C:\\Program Files\\WindowsApps\\OpenAI.Codex_2p2nqsd0c76g0_26.825.4187.0_x64__2p2nqsd0c76g0'} }",
+    `$installedConfig = @{packageId='OpenAI.Codex';appSource=@{mode='installed_store';packageFamilyName='OpenAI.Codex_2p2nqsd0c76g0'}} | ConvertTo-Json -Depth 5 | ConvertFrom-Json`,
+    `$installedTarget = Resolve-AppSourceTarget -Config $installedConfig -ScriptRoot '.'`,
+    `$installedCached = @{packageFamilyName='OpenAI.Codex_2p2nqsd0c76g0';sourceMode='installed_store';version='26.825.4187.0'} | ConvertTo-Json -Depth 5 | ConvertFrom-Json`,
+    `$installedStale = $installedCached | ConvertTo-Json | ConvertFrom-Json; $installedStale.version = '26.820.7780.0'`,
+    "[ordered]@{matching=(Test-AppSourceCacheCompatible -SourceMetadata $cached -Config $config -ResolvedSource $resolved);versionMismatch=(Test-AppSourceCacheCompatible -SourceMetadata $staleVersion -Config $config -ResolvedSource $resolved);shaMismatch=(Test-AppSourceCacheCompatible -SourceMetadata $wrongSha1 -Config $config -ResolvedSource $resolved);missingSha1=(Test-AppSourceCacheCompatible -SourceMetadata $missingSha1 -Config $config -ResolvedSource $resolved);sourceModeMismatch=(Test-AppSourceCacheCompatible -SourceMetadata $wrongMode -Config $config -ResolvedSource $resolved);packageFamilyMismatch=(Test-AppSourceCacheCompatible -SourceMetadata $wrongFamily -Config $config -ResolvedSource $resolved);installedMatching=(Test-AppSourceCacheCompatible -SourceMetadata $installedCached -Config $installedConfig -ResolvedSource $installedTarget);installedVersionMismatch=(Test-AppSourceCacheCompatible -SourceMetadata $installedStale -Config $installedConfig -ResolvedSource $installedTarget)} | ConvertTo-Json -Compress",
+  ].join("\n");
+  const result = spawnSync("powershell.exe", ["-NoProfile", "-Command", command], {
+    encoding: "utf8",
+  });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  const values = JSON.parse(result.stdout.trim());
+  assert.deepEqual(values, {
+    matching: true,
+    versionMismatch: false,
+    shaMismatch: false,
+    missingSha1: false,
+    sourceModeMismatch: false,
+    packageFamilyMismatch: false,
+    installedMatching: true,
+    installedVersionMismatch: false,
+  });
+});
+
+test("26.825 verifier rejects a disabled quoted shared node_repl config", () => {
+  const verifierBlock = verifierSourceSlice(
+    "const NODE_REPL_FEATURE_CONFIG_CURRENT_DISABLED_RE =",
+    "const NODE_REPL_CONFIG_RECONCILE_FINALLY_PATCH_MARKER =",
+  );
+  const currentDisabledRe = Function(
+    `"use strict";\n${verifierBlock}\nreturn NODE_REPL_FEATURE_CONFIG_CURRENT_DISABLED_RE;`,
+  )();
+  const disabledFixture =
+    'let defaults={include_permissions_instructions:!1,"features.apps":!1,' +
+    '"features.js_repl":!1,"features.js_repl_tools_only":!1,web_search:`disabled`};';
+  const enabledFixture = disabledFixture.replace('"features.js_repl":!1', '"features.js_repl":!0');
+
+  assert.match(disabledFixture, currentDisabledRe);
+  assert.doesNotMatch(enabledFixture, currentDisabledRe);
 });
 
 test("26.727 archived settings keeps local errors separate from cloud task errors", () => {

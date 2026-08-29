@@ -22,8 +22,8 @@
  *    The Electron build throws "not implemented" for these messages.  We
  *    replace the throw with real handlers: show-settings reloads the window
  *    with the appropriate initialRoute, and open-config-toml opens the TOML
- *    config file in the system editor.  Three variable-naming variants are
- *    handled (V1: message=t/wc=e, V2: message=r/wc=n, V3: message=i/wc=r).
+ *    config file in the system editor.  The current Store bundle shape is
+ *    matched explicitly; unknown handler layouts fail closed.
  *
  * 3. Fix i18n defaults for offline builds
  *    The settings page defaults enable_i18n to true (so the language selector
@@ -419,17 +419,17 @@ function patchWorktreeHeadRefResolver(content, patchMarker) {
     return { content, alreadyCorrect: true, patched: false, count: 0 };
   }
 
+  // 26.825 added an upstream HEAD/@ fast path before the existing local and
+  // remote branch resolution. Match the complete stable prefix and the
+  // beginning of that resolver, while leaving minified helper names variable.
   const resolverRe =
-    /async function (?<resolver>[A-Za-z_$][\w$]*)\((?<repository>[A-Za-z_$][\w$]*),(?<branch>[A-Za-z_$][\w$]*),(?<signal>[A-Za-z_$][\w$]*)\)\{(?=let (?<normalized>[A-Za-z_$][\w$]*)=[A-Za-z_$][\w$]*\(\k<branch>\),(?<upstream>[A-Za-z_$][\w$]*)=await [A-Za-z_$][\w$]*\(\k<repository>,\k<branch>,\k<signal>\);if\(\k<upstream>!=null\)\{let [A-Za-z_$][\w$]*=`refs\/remotes\/\$\{\k<upstream>\}`)/g;
+    /async function (?<resolver>[A-Za-z_$][\w$]*)\((?<repository>[A-Za-z_$][\w$]*),(?<branch>[A-Za-z_$][\w$]*),(?<signal>[A-Za-z_$][\w$]*)\)\{(?=if\(\k<branch>===`HEAD`\|\|\k<branch>===`@`\)return await [A-Za-z_$][\w$]*\(\k<repository>,`\$\{\k<branch>\}\^\{commit\}`,\k<signal>\)==null\?null:\{ref:\k<branch>\};let [A-Za-z_$][\w$]*=[A-Za-z_$][\w$]*\(\k<branch>\),[A-Za-z_$][\w$]*=await [A-Za-z_$][\w$]*\(\k<repository>,\k<branch>,\k<signal>\);if\([A-Za-z_$][\w$]*!=null\)\{let [A-Za-z_$][\w$]*=`refs\/remotes\/\$\{[A-Za-z_$][\w$]*\}`)/g;
   let count = 0;
   const next = content.replace(resolverRe, (...args) => {
     const match = args[0];
     const groups = args.at(-1);
     count += 1;
-    return (
-      `${match}if(${groups.branch}===\`HEAD\`)return{ref:\`HEAD\`}` +
-      `${patchMarker};`
-    );
+    return `${match}if(${groups.branch}===\`HEAD\`)return{ref:\`HEAD\`}${patchMarker};`;
   });
 
   return {
@@ -1978,31 +1978,8 @@ try {
   //
   // The remaining cases (open-vscode-command, etc.) keep throwing.
 
-  const NOT_IMPLEMENTED_NEEDLE_V1 =
-    'case`navigate-in-new-editor-tab`:case`open-vscode-command`:' +
-    'case`open-extension-settings`:case`open-keyboard-shortcuts`:' +
-    'case`open-config-toml`:case`show-settings`:case`install-wsl`:' +
-    'throw Error(`"${t.type}" is not implemented in Electron.`)';
-  const NOT_IMPLEMENTED_NEEDLE_V2 =
-    'case`navigate-in-new-editor-tab`:case`open-vscode-command`:' +
-    'case`open-extension-settings`:case`open-keyboard-shortcuts`:' +
-    'case`open-config-toml`:case`show-settings`:case`install-wsl`:' +
-    'throw Error(`"${r.type}" is not implemented in Electron.`)';
-  // V3: message variable renamed to `i`, webContents to `r`, electron module to `n`
-  // (seen in builds ≥ 26.422.8496.0)
-  const NOT_IMPLEMENTED_NEEDLE_V3 =
-    'case`navigate-in-new-editor-tab`:case`open-vscode-command`:' +
-    'case`open-extension-settings`:case`open-keyboard-shortcuts`:' +
-    'case`open-config-toml`:case`show-settings`:case`install-wsl`:' +
-    'throw Error(`"${i.type}" is not implemented in Electron.`)';
-  // V4: message=n, webContents=e, electron=a (seen in builds ≥ 26.611.x)
-  const NOT_IMPLEMENTED_NEEDLE_V4 =
-    'case`navigate-in-new-editor-tab`:case`open-vscode-command`:' +
-    'case`open-extension-settings`:case`open-keyboard-shortcuts`:' +
-    'case`open-config-toml`:case`show-settings`:case`install-wsl`:' +
-    'throw Error(`"${n.type}" is not implemented in Electron.`)';
-  // V5: open-config-toml has its own Electron implementation. message=t,
-  // webContents=e, electron=c (seen in builds >= 26.715.x).
+  // 26.825: open-config-toml has its own Electron implementation. message=t,
+  // webContents=e, electron=c.
   const NOT_IMPLEMENTED_NEEDLE_V5 =
     'case`navigate-in-new-editor-tab`:case`open-vscode-command`:' +
     'case`open-extension-settings`:case`open-keyboard-shortcuts`:' +
@@ -2018,113 +1995,6 @@ try {
   const SETTINGS_ROUTE_DIRECT_RE_GLOBAL =
     /([A-Za-z_$][\w$]*)\.searchParams\.set\("initialRoute","\/settings\/"\+\(([A-Za-z_$][\w$]*)\.section\|\|"agent"\)\);/g;
 
-  const SETTINGS_REPLACEMENT_V1 =
-    // show-settings: reload the renderer with the desired settings route
-    'case`show-settings`:{' +
-      NAV_HELPER + ';' +
-      'let _codexOfflineSettingsSection=t.section||"agent";' +
-      `_nav(e,"/settings/"+${buildSettingsRouteMappingExpression('_codexOfflineSettingsSection')});` +
-      `${SETTINGS_ROUTE_PATCH_MARKER};break}` +
-    // open-extension-settings: route to general settings
-    'case`open-extension-settings`:{' +
-      NAV_HELPER + ';' +
-      '_nav(e,"/settings/general-settings");break}' +
-    // open-keyboard-shortcuts: route to general settings (no dedicated page)
-    'case`open-keyboard-shortcuts`:{' +
-      NAV_HELPER + ';' +
-      '_nav(e,"/settings/general-settings");break}' +
-    // open-config-toml: open the file in the system default editor
-    'case`open-config-toml`:{' +
-      'let _cfg=require("path").join(require("os").homedir(),".codex","config.toml");' +
-      'require("fs").mkdirSync(require("path").dirname(_cfg),{recursive:true});' +
-      'if(!require("fs").existsSync(_cfg))require("fs").writeFileSync(_cfg,"# Codex config\\n",{encoding:"utf8"});' +
-      'm.shell.openPath(_cfg);break}' +
-    // keep throwing for the rest
-    'case`navigate-in-new-editor-tab`:case`open-vscode-command`:' +
-    'case`install-wsl`:' +
-    'throw Error(`"${t.type}" is not implemented in Electron.`)';
-  const SETTINGS_REPLACEMENT_V2 =
-    'case`show-settings`:{' +
-      'let e=t.BrowserWindow.fromWebContents(n);' +
-      'if(e){let i=new URL(e.getURL());' +
-      buildSettingsRouteStatement('i', 'r') +
-      'e.loadURL(i.toString())}' +
-      'break}' +
-    'case`open-extension-settings`:{' +
-      'let e=t.BrowserWindow.fromWebContents(n);' +
-      'if(e){let i=new URL(e.getURL());' +
-      'i.searchParams.set("initialRoute","/settings/general-settings");' +
-      'e.loadURL(i.toString())}' +
-      'break}' +
-    'case`open-keyboard-shortcuts`:{' +
-      'let e=t.BrowserWindow.fromWebContents(n);' +
-      'if(e){let i=new URL(e.getURL());' +
-      'i.searchParams.set("initialRoute","/settings/general-settings");' +
-      'e.loadURL(i.toString())}' +
-      'break}' +
-    'case`open-config-toml`:{' +
-      'let e=require("path").join(require("os").homedir(),".codex","config.toml");' +
-      'require("fs").mkdirSync(require("path").dirname(e),{recursive:true});' +
-      'if(!require("fs").existsSync(e))require("fs").writeFileSync(e,"# Codex config\\n",{encoding:"utf8"});' +
-      't.shell.openPath(e);break}' +
-    'case`navigate-in-new-editor-tab`:case`open-vscode-command`:' +
-    'case`install-wsl`:' +
-    'throw Error(`"${r.type}" is not implemented in Electron.`)';
-  // V3: electron=n, webContents=r, message=i
-  const SETTINGS_REPLACEMENT_V3 =
-    'case`show-settings`:{' +
-      'let e=n.BrowserWindow.fromWebContents(r);' +
-      'if(e){let t=new URL(e.getURL());' +
-      buildSettingsRouteStatement('t', 'i') +
-      'e.loadURL(t.toString())}' +
-      'break}' +
-    'case`open-extension-settings`:{' +
-      'let e=n.BrowserWindow.fromWebContents(r);' +
-      'if(e){let t=new URL(e.getURL());' +
-      't.searchParams.set("initialRoute","/settings/general-settings");' +
-      'e.loadURL(t.toString())}' +
-      'break}' +
-    'case`open-keyboard-shortcuts`:{' +
-      'let e=n.BrowserWindow.fromWebContents(r);' +
-      'if(e){let t=new URL(e.getURL());' +
-      't.searchParams.set("initialRoute","/settings/general-settings");' +
-      'e.loadURL(t.toString())}' +
-      'break}' +
-    'case`open-config-toml`:{' +
-      'let e=require("path").join(require("os").homedir(),".codex","config.toml");' +
-      'require("fs").mkdirSync(require("path").dirname(e),{recursive:true});' +
-      'if(!require("fs").existsSync(e))require("fs").writeFileSync(e,"# Codex config\\n",{encoding:"utf8"});' +
-      'n.shell.openPath(e);break}' +
-    'case`navigate-in-new-editor-tab`:case`open-vscode-command`:' +
-    'case`install-wsl`:' +
-    'throw Error(`"${i.type}" is not implemented in Electron.`)';
-  const SETTINGS_REPLACEMENT_V4 =
-    'case`show-settings`:{' +
-      'let _win=a.BrowserWindow.fromWebContents(e);' +
-      'if(_win){let _url=new URL(_win.getURL());' +
-      buildSettingsRouteStatement('_url', 'n') +
-      '_win.loadURL(_url.toString())}' +
-      'break}' +
-    'case`open-extension-settings`:{' +
-      'let _win=a.BrowserWindow.fromWebContents(e);' +
-      'if(_win){let _url=new URL(_win.getURL());' +
-      '_url.searchParams.set("initialRoute","/settings/general-settings");' +
-      '_win.loadURL(_url.toString())}' +
-      'break}' +
-    'case`open-keyboard-shortcuts`:{' +
-      'let _win=a.BrowserWindow.fromWebContents(e);' +
-      'if(_win){let _url=new URL(_win.getURL());' +
-      '_url.searchParams.set("initialRoute","/settings/general-settings");' +
-      '_win.loadURL(_url.toString())}' +
-      'break}' +
-    'case`open-config-toml`:{' +
-      'let _cfg=require("path").join(require("os").homedir(),".codex","config.toml");' +
-      'require("fs").mkdirSync(require("path").dirname(_cfg),{recursive:true});' +
-      'if(!require("fs").existsSync(_cfg))require("fs").writeFileSync(_cfg,"# Codex config\\n",{encoding:"utf8"});' +
-      'a.shell.openPath(_cfg);break}' +
-    'case`navigate-in-new-editor-tab`:case`open-vscode-command`:' +
-    'case`install-wsl`:' +
-    'throw Error(`"${n.type}" is not implemented in Electron.`)';
   const SETTINGS_REPLACEMENT_V5 =
     'case`show-settings`:{' +
       'let _win=c.BrowserWindow.fromWebContents(e);' +
@@ -2182,10 +2052,10 @@ try {
     /,([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)===`win32`&&([A-Za-z_$][\w$]*)\.CODEX_ELECTRON_ENABLE_WINDOWS_COMPUTER_USE===`1`\?\{\.\.\.([A-Za-z_$][\w$]*),computerUse:!0,computerUseNodeRepl:!0\}:\4(?=,)/;
   const NODE_REPL_FEATURE_ENABLED_PATCH_MARKER =
     contractPatchMarker('/*codex-offline:node-repl-feature-enabled*/');
-  const NODE_REPL_FEATURE_CONFIG_RE =
-    /([A-Za-z_$][\w$]*=\{"features\.js_repl":)(!0|!1)(?:\/\*codex-offline:node-repl-feature-enabled\*\/)?(\})/g;
-  const NODE_REPL_FEATURE_CONFIG_PATCHED_RE =
-    /[A-Za-z_$][\w$]*=\{"features\.js_repl":!0\/\*codex-offline:node-repl-feature-enabled\*\/\}/;
+  const NODE_REPL_FEATURE_CONFIG_CURRENT_RE =
+    /([A-Za-z_$][\w$]*=\{(?=[\s\S]{0,120}include_permissions_instructions:!1,)[\s\S]{0,800}?["']features\.js_repl["']:\s*)(!0|!1)(?:\/\*codex-offline:node-repl-feature-enabled\*\/)?([\s\S]{0,500}?web_search:`disabled`\})(?=[,;)\]])/;
+  const NODE_REPL_FEATURE_CONFIG_CURRENT_PATCHED_RE =
+    /[A-Za-z_$][\w$]*=\{(?=[\s\S]{0,120}include_permissions_instructions:!1,)[\s\S]{0,800}?["']features\.js_repl["']:\s*!0\/\*codex-offline:node-repl-feature-enabled\*\/[\s\S]{0,500}?web_search:`disabled`\}(?=[,;)\]])/;
   const NODE_REPL_CONFIG_RECONCILE_FINALLY_PATCH_MARKER =
     contractPatchMarker('/*codex-offline:node-repl-config-reconcile-finally*/');
   const NODE_REPL_DISABLE_SANDBOX_PATCH_MARKER =
@@ -3228,35 +3098,7 @@ try {
 
     settingsHandlerSeen ||= content.includes('case`show-settings`:{');
 
-    if (content.includes(NOT_IMPLEMENTED_NEEDLE_V1)) {
-      content = content.replace(
-        NOT_IMPLEMENTED_NEEDLE_V1,
-        SETTINGS_REPLACEMENT_V1,
-      );
-      modified = true;
-      settingsPatchedFiles.push(path.relative(tmpDir, filePath));
-    } else if (content.includes(NOT_IMPLEMENTED_NEEDLE_V2)) {
-      content = content.replace(
-        NOT_IMPLEMENTED_NEEDLE_V2,
-        SETTINGS_REPLACEMENT_V2,
-      );
-      modified = true;
-      settingsPatchedFiles.push(path.relative(tmpDir, filePath));
-    } else if (content.includes(NOT_IMPLEMENTED_NEEDLE_V3)) {
-      content = content.replace(
-        NOT_IMPLEMENTED_NEEDLE_V3,
-        SETTINGS_REPLACEMENT_V3,
-      );
-      modified = true;
-      settingsPatchedFiles.push(path.relative(tmpDir, filePath));
-    } else if (content.includes(NOT_IMPLEMENTED_NEEDLE_V4)) {
-      content = content.replace(
-        NOT_IMPLEMENTED_NEEDLE_V4,
-        SETTINGS_REPLACEMENT_V4,
-      );
-      modified = true;
-      settingsPatchedFiles.push(path.relative(tmpDir, filePath));
-    } else if (content.includes(NOT_IMPLEMENTED_NEEDLE_V5)) {
+    if (content.includes(NOT_IMPLEMENTED_NEEDLE_V5)) {
       content = content.replace(
         NOT_IMPLEMENTED_NEEDLE_V5,
         SETTINGS_REPLACEMENT_V5,
@@ -3545,20 +3387,20 @@ try {
 
   for (const filePath of mainBundleFiles) {
     let content = fs.readFileSync(filePath, 'utf8');
-    if (NODE_REPL_FEATURE_CONFIG_PATCHED_RE.test(content)) {
+    if (
+      NODE_REPL_FEATURE_CONFIG_CURRENT_PATCHED_RE.test(content)
+    ) {
       nodeReplFeatureConfigAlreadyCorrect = true;
       nodeReplFeatureConfigPatchedFiles.push(path.relative(tmpDir, filePath));
       continue;
     }
 
-    NODE_REPL_FEATURE_CONFIG_RE.lastIndex = 0;
-    if (!NODE_REPL_FEATURE_CONFIG_RE.test(content)) continue;
-
-    NODE_REPL_FEATURE_CONFIG_RE.lastIndex = 0;
-    content = content.replace(
-      NODE_REPL_FEATURE_CONFIG_RE,
+    const patchedContent = content.replace(
+      NODE_REPL_FEATURE_CONFIG_CURRENT_RE,
       `$1!0${NODE_REPL_FEATURE_ENABLED_PATCH_MARKER}$3`,
     );
+    if (patchedContent === content) continue;
+    content = patchedContent;
     fs.writeFileSync(filePath, content, 'utf8');
     nodeReplFeatureConfigPatched = true;
     nodeReplFeatureConfigPatchedFiles.push(path.relative(tmpDir, filePath));

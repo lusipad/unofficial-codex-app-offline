@@ -1350,6 +1350,8 @@ const BUNDLED_RUNTIME_PLUGINS_PATCH_MARKER = requiredPatchMarker('/*codex-offlin
 const WINDOWS_BROWSER_USE_CAPABILITY_PATCH_MARKER = requiredPatchMarker('/*codex-offline:windows-browser-use-capability*/');
 const APP_SERVER_SANDBOX_OVERRIDE = '`-c`,`windows.sandbox=\'unelevated\'`,`app-server`,`--analytics-default-enabled`';
 const NODE_REPL_FEATURE_ENABLED_PATCH_MARKER = requiredPatchMarker('/*codex-offline:node-repl-feature-enabled*/');
+const NODE_REPL_FEATURE_CONFIG_CURRENT_DISABLED_RE =
+  /[A-Za-z_$][\w$]*=\{(?=[\s\S]{0,120}include_permissions_instructions:!1,)[\s\S]{0,800}?["']features\.js_repl["']:\s*!1[\s\S]{0,500}?web_search:`disabled`\}(?=[,;)\]])/;
 const NODE_REPL_CONFIG_RECONCILE_FINALLY_PATCH_MARKER =
   requiredPatchMarker('/*codex-offline:node-repl-config-reconcile-finally*/');
 const NODE_REPL_DISABLE_SANDBOX_PATCH_MARKER =
@@ -1982,7 +1984,9 @@ if (bundledPluginCacheLockFatalResiduals.length > 0) {
 if (!bundledPluginCacheLockNonfatalPatched) {
   info('Current app version does not expose the bundled plugin cache lock fatal branch; nonfatal marker is not required.');
 }
-if (allJavaScriptContent.some(content => /[A-Za-z_$][\w$]*=\{"features\.js_repl":!1\}/.test(content))) {
+if (allJavaScriptContent.some(content =>
+  NODE_REPL_FEATURE_CONFIG_CURRENT_DISABLED_RE.test(content)
+)) {
   throw new Error('Browser Use thread config still disables features.js_repl by default.');
 }
 
