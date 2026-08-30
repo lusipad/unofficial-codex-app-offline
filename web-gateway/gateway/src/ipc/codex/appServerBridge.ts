@@ -8,6 +8,7 @@ function createAppServerBridge(deps) {
   const WARNED_UNSUPPORTED_FEATURE_ENABLEMENTS = deps.warnedUnsupportedFeatureEnablements;
   const filterUnsupportedFeatureEnablements = deps.filterUnsupportedFeatureEnablements;
   const patchCodexConfigResult = deps.patchCodexConfigResult;
+  const patchExperimentalFeatureListResult = deps.patchExperimentalFeatureListResult;
 
   /** renderer 需要这个时间才能把历史折叠摘要显示成“已处理 xs”。 */
   function isFiniteNumber(value) {
@@ -97,7 +98,12 @@ function createAppServerBridge(deps) {
       }
     }
     try {
-      return enrichWorkedForAppServerResult(appServerMethod, await appServer.request(appServerMethod, appServerPayload));
+      const rawResult = await appServer.request(appServerMethod, appServerPayload);
+      const patchedResult =
+        appServerMethod === "experimentalFeature/list" && typeof patchExperimentalFeatureListResult === "function"
+          ? patchExperimentalFeatureListResult(rawResult)
+          : rawResult;
+      return enrichWorkedForAppServerResult(appServerMethod, patchedResult);
     } catch (error) {
       if (appServerMethod === "app/list" && isOptionalAppDirectoryFailure(error)) {
         logger && logger.warn("[app-server] app/list unavailable; returning empty app directory");

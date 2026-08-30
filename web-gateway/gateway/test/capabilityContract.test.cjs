@@ -4,7 +4,10 @@ const path = require("node:path");
 const test = require("node:test");
 
 const contract = require("../dist/ipc/codex/capabilityContract.js");
-const { filterUnsupportedFeatureEnablements } = require("../dist/ipc/codex/featurePatches.js");
+const {
+  filterUnsupportedFeatureEnablements,
+  patchExperimentalFeatureListResult,
+} = require("../dist/ipc/codex/featurePatches.js");
 const { makeHandlers } = require("../dist/ipc/codex/GatewayCodexIpcPort.js");
 const { createConversationIpcHandlers } = require("../dist/ipc/codex/conversation.js");
 const contractData = require("../src/ipc/codex/capabilityContractData.cjs");
@@ -109,6 +112,67 @@ test("feature enablement refresh drops unsupported entries without inventing app
   assert.deepEqual(result.removed, ["auth_elicitation"]);
   assert.equal(result.skipped, true);
   assert.deepEqual(result.payload.enablement, {});
+});
+
+test("experimental feature list enables browser and computer-use capabilities", () => {
+  const result = patchExperimentalFeatureListResult({
+    data: [
+      { name: "computer_use", enabled: false, defaultEnabled: false },
+      { name: "browser_use", enabled: false },
+      { name: "browser_use_external", enabled: false },
+      { name: "unrelated_feature", enabled: false },
+    ],
+    nextCursor: "next",
+  });
+
+  assert.deepEqual(result.data.slice(0, 3).map((feature) => feature.enabled), [true, true, true]);
+  assert.equal(result.data[0].defaultEnabled, false);
+  assert.equal(result.data[3].enabled, false);
+  assert.equal(result.nextCursor, "next");
+});
+
+test("gateway patches experimental feature lists on direct and mcp request paths", async () => {
+  const featureResult = {
+    data: [
+      { name: "computer_use", enabled: false },
+      { name: "browser_use", enabled: false },
+      { name: "browser_use_external", enabled: false },
+    ],
+    nextCursor: null,
+  };
+  const broadcasts = [];
+  let resolveMcpResponse;
+  const handlers = makeHandlers({
+    appServer: {
+      isConnected: () => true,
+      request: async (method) => {
+        assert.equal(method, "experimentalFeature/list");
+        return featureResult;
+      },
+    },
+    broadcast: (message) => {
+      broadcasts.push(message);
+      if (message.channel === "mcp-response") resolveMcpResponse(message.payload.message.result);
+    },
+    logger: { warn: () => {} },
+    isClientConnected: () => false,
+  });
+
+  const direct = await handlers.handle("experimentalFeature/list", {});
+  assert.deepEqual(direct.data.map((feature) => feature.enabled), [true, true, true]);
+
+  const mcpResponse = new Promise((resolve) => {
+    resolveMcpResponse = resolve;
+  });
+  assert.equal(
+    await handlers.handle("codex_desktop:message-from-view", {
+      type: "mcp-request",
+      request: { id: "feature-list", method: "experimentalFeature/list", params: {} },
+    }),
+    true
+  );
+  const mcpResult = await mcpResponse;
+  assert.deepEqual(mcpResult.data.map((feature) => feature.enabled), [true, true, true]);
 });
 
 test("source data contract declares every required desktop asar marker", () => {

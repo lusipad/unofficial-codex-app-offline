@@ -5,10 +5,12 @@
 ### 中文
 
 - 修复 portable ZIP 解压时的路径过深问题：归档条目现在相对于包根写入，保留隐藏文件并移除不必要的版本目录前缀；包验证器新增 200 字符的 ZIP 条目路径预算检查。
+- 修复 26.825 设置页将 Computer Use、应用内浏览器和外部浏览器显示为不可用的问题：Gateway 现在在 `experimentalFeature/list` 边界强制补齐这三项 renderer 必需能力，同时保留其他实验特性和分页信息。
 
 ### English
 
 - Fixed portable ZIP extraction failures caused by deep paths: archive entries are now written relative to the package root, hidden files remain included, and the unnecessary version-directory prefix is removed. The package verifier now enforces a 200-character ZIP entry path budget.
+- Fixed Codex 26.825 settings reporting Computer Use, in-app browser, and external browser as unavailable: the Gateway now normalizes these three renderer-required capabilities at the `experimentalFeature/list` boundary while preserving other experimental features and pagination.
 
 ## 2026-08-28
 

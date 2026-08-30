@@ -11,6 +11,7 @@ const {
   isPlainObject,
   patchCodexConfigResult,
   patchConfigRequirementsResult,
+  patchExperimentalFeatureListResult,
   patchStatsigDefaultFeatureSnapshot,
   patchStatsigDefaultFeatures,
 } = require("./featurePatches");
@@ -262,6 +263,7 @@ function makeHandlers({ appServer, broadcast, logger, isClientConnected }) {
     warnedUnsupportedFeatureEnablements: WARNED_UNSUPPORTED_FEATURE_ENABLEMENTS,
     filterUnsupportedFeatureEnablements,
     patchCodexConfigResult,
+    patchExperimentalFeatureListResult,
   });
 
   /** �?invoke context 中取浏览�?clientId�?*/

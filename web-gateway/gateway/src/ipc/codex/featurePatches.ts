@@ -9,6 +9,11 @@ const APP_SERVER_UNSUPPORTED_FEATURE_ENABLEMENTS = new Set([
   "auth_elicitation",
   "enable_mcp_apps",
 ]);
+const APP_SERVER_EXPERIMENTAL_FEATURE_OVERRIDES = Object.freeze({
+  browser_use: true,
+  browser_use_external: true,
+  computer_use: true,
+});
 const DEFAULT_ALLOWED_APPROVALS_REVIEWERS = ["user", "auto_review", "guardian_subagent"];
 
 /** 判断值是否为普通对象；很多 IPC payload 都需要先做这个防御性判断。 */
@@ -192,7 +197,30 @@ function patchConfigRequirementsResult(result) {
   return patchConfigRequirements(result);
 }
 
+/** 确保 renderer 依赖的浏览器/Computer Use 实验能力不会被本机配置误报为不可用。 */
+function patchExperimentalFeatureListResult(result) {
+  const data = Array.isArray(result)
+    ? result
+    : isPlainObject(result) && Array.isArray(result.data)
+      ? result.data
+      : null;
+  if (!data) return result;
+
+  let changed = false;
+  const nextData = data.map((feature) => {
+    if (!isPlainObject(feature) || !Object.hasOwn(APP_SERVER_EXPERIMENTAL_FEATURE_OVERRIDES, feature.name)) {
+      return feature;
+    }
+    if (feature.enabled === true) return feature;
+    changed = true;
+    return { ...feature, enabled: true };
+  });
+  if (!changed) return result;
+  return Array.isArray(result) ? nextData : { ...result, data: nextData };
+}
+
 module.exports = {
+  APP_SERVER_EXPERIMENTAL_FEATURE_OVERRIDES,
   APP_SERVER_UNSUPPORTED_FEATURE_ENABLEMENTS,
   DEFAULT_ALLOWED_APPROVALS_REVIEWERS,
   STATSIG_DEFAULT_FEATURE_OVERRIDES,
@@ -203,6 +231,7 @@ module.exports = {
   patchCodexConfigResult,
   patchConfigRequirements,
   patchConfigRequirementsResult,
+  patchExperimentalFeatureListResult,
   patchStatsigDefaultFeatureSnapshot,
   patchStatsigDefaultFeatures,
 };
