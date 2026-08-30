@@ -105,6 +105,9 @@ jobs:
       - name: Install resolver dependencies
         run: npm ci
 
+      - name: Install resolver browser
+        run: npx playwright install chromium
+
       - name: Resolve source version
         id: source
         shell: pwsh
