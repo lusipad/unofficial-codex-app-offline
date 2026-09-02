@@ -2676,6 +2676,10 @@ try {
     /function (?<functionName>[A-Za-z_$][\w$]*)\((?<requestClient>[A-Za-z_$][\w$]*),\{modelProviders:(?<modelProviders>[A-Za-z_$][\w$]*),archived:(?<archived>[A-Za-z_$][\w$]*)=!1,sourceKinds:(?<sourceKinds>[A-Za-z_$][\w$]*)=(?<defaultSourceKinds>[A-Za-z_$][\w$]*),useStateDbOnly:(?<useStateDbOnly>[A-Za-z_$][\w$]*)=!1\}\)\{let (?<threads>[A-Za-z_$][\w$]*)=\[\],(?<loadPage>[A-Za-z_$][\w$]*)=async (?<cursor>[A-Za-z_$][\w$]*)=>\{let (?<query>[A-Za-z_$][\w$]*)=\{limit:100,cursor:\k<cursor>,sortKey:\k<requestClient>\.recentConversationsSortKey,modelProviders:\k<modelProviders>,sourceKinds:\k<sourceKinds>,archived:\k<archived>,useStateDbOnly:\k<useStateDbOnly>\},(?<page>[A-Za-z_$][\w$]*)=await \k<requestClient>\.sendRequest\(`thread\/list`,\k<query>,\{priority:`background`,source:`thread_list`\}\);\k<threads>\.push\(\.\.\.\k<page>\.data\),\k<page>\.nextCursor&&await \k<loadPage>\(\k<page>\.nextCursor\)\};return await \k<loadPage>\(null\),\k<threads>\}/;
   const ARCHIVED_THREADS_LIST_ALL_CURRENT_V2_RE =
     /function (?<functionName>[A-Za-z_$][\w$]*)\((?<requestClient>[A-Za-z_$][\w$]*),\{modelProviders:(?<modelProviders>[A-Za-z_$][\w$]*),archived:(?<archived>[A-Za-z_$][\w$]*)=!1,sourceKinds:(?<sourceKinds>[A-Za-z_$][\w$]*)=(?<defaultSourceKinds>[A-Za-z_$][\w$]*)\}\)\{let (?<threads>[A-Za-z_$][\w$]*)=\[\],(?<loadPage>[A-Za-z_$][\w$]*)=async (?<cursor>[A-Za-z_$][\w$]*)=>\{let (?<query>[A-Za-z_$][\w$]*)=\{limit:100,cursor:\k<cursor>,sortKey:\k<requestClient>\.recentConversationsSortKey,modelProviders:\k<modelProviders>,sourceKinds:\k<sourceKinds>,archived:\k<archived>,useStateDbOnly:!0\},(?<page>[A-Za-z_$][\w$]*)=await \k<requestClient>\.sendRequest\(`thread\/list`,\k<query>,\{priority:`background`,source:`thread_list`\}\);\k<threads>\.push\(\.\.\.\k<page>\.data\),\k<page>\.nextCursor&&await \k<loadPage>\(\k<page>\.nextCursor\)\};return await \k<loadPage>\(null\),\k<threads>\}/;
+  // 26.831 moved archived-thread loading into the data-controls component.
+  // Keep this exact shape narrow so an upstream rewrite still fails closed.
+  const ARCHIVED_THREADS_DATA_CONTROLS_CURRENT_RE =
+    /(?<loader>[A-Za-z_$][\w$]*)=async\(\)=>\{let (?<threads>[A-Za-z_$][\w$]*)=\[\],(?<seen>[A-Za-z_$][\w$]*)=new Set,(?<cursor>[A-Za-z_$][\w$]*)=null;do\{let (?<page>[A-Za-z_$][\w$]*)=await (?<send>[A-Za-z_$][\w$]*)\((?<scope>[A-Za-z_$][\w$]*),(?<host>[A-Za-z_$][\w$]*)\)\.sendRequest\(`thread\/list`,\{archived:!0,cursor:\k<cursor>,limit:100,modelProviders:null,sortKey:`updated_at`,sourceKinds:(?<sourceKinds>[A-Za-z_$][\w$]*),useStateDbOnly:!0\},\{priority:`background`,source:`thread_list`\}\);if\(\k<threads>\.push\(\.\.\.\k<page>\.data\),\k<cursor>=\k<page>\.nextCursor,\k<cursor>!=null&&\k<seen>\.has\(\k<cursor>\)\)throw Error\(`App Server repeated an archived thread list cursor`\);\k<cursor>!=null&&\k<seen>\.add\(\k<cursor>\)\}while\(\k<cursor>!=null\);return \k<threads>\}/;
   function archivedThreadsReturnExpression(archived, failed, threads) {
     return `${archived}?(${failed}&&${threads}.length===0?` +
       `(globalThis.__codexOfflineArchivedThreadsCache??${threads}):` +
@@ -2891,6 +2895,33 @@ try {
             `throw _codexOfflineArchiveListError}${threads}.push(...(${page}.data??[])),` +
             `${page}.nextCursor&&await ${loadPage}(${page}.nextCursor)};return await ${loadPage}(null),` +
             `${archivedThreadsReturnExpression(archived, failed, threads)}}` +
+            ARCHIVED_THREADS_PARTIAL_LIST_PATCH_MARKER +
+            ARCHIVED_THREADS_CACHE_FALLBACK_PATCH_MARKER
+          );
+        },
+      );
+    }
+    if (next === content) {
+      next = content.replace(
+        ARCHIVED_THREADS_DATA_CONTROLS_CURRENT_RE,
+        (_match, ...args) => {
+          const { loader, threads, seen, cursor, page, send, scope, host, sourceKinds } =
+            args.at(-1);
+          const failed = '_codexOfflineArchiveListFailed';
+          return (
+            `${loader}=async()=>{let ${threads}=[],${seen}=new Set,${cursor}=null,${failed}=!1;` +
+            `try{do{let ${page}=await ${send}(${scope},${host}).sendRequest(` +
+            `\`thread/list\`,{archived:!0,cursor:${cursor},limit:100,modelProviders:null,` +
+            `sortKey:\`updated_at\`,sourceKinds:${sourceKinds},useStateDbOnly:!0},` +
+            `{priority:\`background\`,source:\`thread_list\`});` +
+            `if(${threads}.push(...${page}.data),${cursor}=${page}.nextCursor,` +
+            `${cursor}!=null&&${seen}.has(${cursor}))throw Error(` +
+            `\`App Server repeated an archived thread list cursor\`);` +
+            `${cursor}!=null&&${seen}.add(${cursor})}while(${cursor}!=null)}` +
+            `catch(_codexOfflineArchiveListError){${failed}=!0}` +
+            `return ${failed}&&${threads}.length===0?` +
+            `(globalThis.__codexOfflineArchivedThreadsCache??${threads}):` +
+            `(globalThis.__codexOfflineArchivedThreadsCache=${threads},${threads})}` +
             ARCHIVED_THREADS_PARTIAL_LIST_PATCH_MARKER +
             ARCHIVED_THREADS_CACHE_FALLBACK_PATCH_MARKER
           );

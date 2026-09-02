@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-09-02
+
+### 中文
+
+- 修复 Codex `26.831.2377.0` Store bundle 导致离线包构建失败的问题：归档会话分页已迁移到 `data-controls` 新布局，补丁器现在仅针对该精确形状注入离线缓存回退；未知布局仍会失败关闭。
+
+### English
+
+- Fixed offline package builds failing against the Codex `26.831.2377.0` Store bundle, which moved archived-thread pagination into the new `data-controls` layout. The patcher now adds the offline cache fallback only for that exact shape and still fails closed on unknown layouts.
+
 ## 2026-08-30
 
 ### 中文

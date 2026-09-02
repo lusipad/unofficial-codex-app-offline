@@ -902,6 +902,26 @@ test("26.825 node_repl config enables quoted features.js_repl without touching j
   assert.doesNotMatch(retiredFixture, currentRe);
 });
 
+test("26.831 archived thread loader accepts the data-controls pagination shape", () => {
+  const regexSource = sourceSlice(
+    "  const ARCHIVED_THREADS_DATA_CONTROLS_CURRENT_RE =",
+    "  function archivedThreadsReturnExpression",
+  );
+  const currentRe = Function(
+    `"use strict";\n${regexSource}\nreturn ARCHIVED_THREADS_DATA_CONTROLS_CURRENT_RE;`,
+  )();
+  const fixture =
+    "p=async()=>{let e=[],r=new Set,i=null;do{let a=await A(t,n).sendRequest(`thread/list`," +
+    "{archived:!0,cursor:i,limit:100,modelProviders:null,sortKey:`updated_at`,sourceKinds:L," +
+    "useStateDbOnly:!0},{priority:`background`,source:`thread_list`});if(e.push(...a.data)," +
+    "i=a.nextCursor,i!=null&&r.has(i))throw Error(`App Server repeated an archived thread list cursor`);" +
+    "i!=null&&r.add(i)}while(i!=null);return e}";
+  const match = currentRe.exec(fixture);
+  assert.ok(match, "26.831 data-controls archived loader shape should match");
+  assert.equal(match.groups.loader, "p");
+  assert.equal(match.groups.sourceKinds, "L");
+});
+
 test("26.825 patcher keeps only current Settings and Worktree resolver shapes", () => {
   assert.match(patchScriptSource, /const NOT_IMPLEMENTED_NEEDLE_V5 =/);
   assert.match(patchScriptSource, /const SETTINGS_REPLACEMENT_V5 =/);
