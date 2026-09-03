@@ -7,7 +7,14 @@ const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
 
-const asar = require("@electron/asar");
+// The CI "Validate patch scripts" gate runs `node --test` before `npm ci`,
+// so @electron/asar may be absent; the header-hash semantics test skips there.
+let asar = null;
+try {
+  asar = require("@electron/asar");
+} catch {
+  asar = null;
+}
 
 const {
   computeAsarHeaderHash,
@@ -90,7 +97,10 @@ test("updateEmbeddedAsarIntegrityResource persists the rewritten executable", (t
   assert.notEqual(persisted.indexOf(Buffer.from(NEW_HASH, "latin1")), -1);
 });
 
-test("computeAsarHeaderHash hashes the header string, not the archive file", async (t) => {
+test(
+  "computeAsarHeaderHash hashes the header string, not the archive file",
+  { skip: asar === null ? "@electron/asar is not installed yet" : false },
+  async (t) => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "asar-integrity-"));
   t.after(() => fs.rmSync(tempDir, { recursive: true, force: true }));
   const sourceDir = path.join(tempDir, "src");
@@ -110,4 +120,5 @@ test("computeAsarHeaderHash hashes the header string, not the archive file", asy
   assert.match(headerHash, /^[0-9a-f]{64}$/);
   assert.equal(headerHash, expected);
   assert.notEqual(headerHash, wholeFile);
-});
+  },
+);
