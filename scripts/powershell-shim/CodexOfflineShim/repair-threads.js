@@ -315,14 +315,23 @@ function collectSessionMetas(sessionsDir) {
   return [...byId.values()];
 }
 
+const SAFE_COLUMN_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
 function rowsById(db, columns = ["*"]) {
   const selection =
     columns.length === 1 && columns[0] === "*"
       ? "*"
-      : columns.map(quoteIdentifier).join(", ");
+      : columns
+          .map((column) => {
+            if (!SAFE_COLUMN_NAME_RE.test(column)) {
+              throw new Error(`不安全的列名 / unsafe column name: ${column}`);
+            }
+            return quoteIdentifier(column);
+          })
+          .join(", ");
   return new Map(
     db
-      .prepare(`SELECT ${selection} FROM threads`)
+      .prepare("SELECT " + selection + " FROM threads")
       .all()
       .map((row) => [row.id, row])
   );
