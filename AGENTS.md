@@ -30,6 +30,7 @@ Codex Offline - 离线版 Codex AI 编程助手 Web Gateway。
 - 插件服务共享兼容契约：`scripts/desktop-patches/plugin-service-compat.cjs`
 - 桌面运行时薄适配：`scripts/desktop-patches/init.cjs`
 - 版本相关的静态 `app.asar` 补丁：`scripts/patch-app-asar.mjs`
+- 主程序内嵌 asar 完整性资源（`ELECTRONASAR`）重写：`scripts/asar-integrity-resource.cjs`
 - 离线包构建编排：`scripts/build-offline-package.ps1`
 - 离线包完整性验证：`scripts/verify-offline-package.ps1`
 - 安装器模板：`installer/CodexOffline.iss.tpl`

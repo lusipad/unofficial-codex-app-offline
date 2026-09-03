@@ -156,6 +156,10 @@ const {
   CONTEXT_USAGE_CONTRACT,
   FAST_MODE_CONTRACT,
 } = require('../web-gateway/gateway/src/ipc/codex/capabilityContractData.cjs');
+const {
+  computeAsarHeaderHash,
+  updateEmbeddedAsarIntegrityResource,
+} = require('./asar-integrity-resource.cjs');
 
 const DESKTOP_ASAR_PATCH_MARKER_SET = new Set(DESKTOP_ASAR_PATCH_MARKERS);
 
@@ -4633,6 +4637,21 @@ try {
       `Current ${MAIN_EXECUTABLE_NAME} does not expose the Electron asar integrity fuse; ` +
       'no fuse flip needed.',
     );
+  }
+
+  // Newer Store builds embed the expected asar header hash in an
+  // ELECTRONASAR resource inside the executable, and Windows enforces it even
+  // when the fuse config sentinel is absent (so the fuse cannot be flipped).
+  // Rewrite the embedded value to the SHA256 of the repacked asar header.
+  const asarHeaderHash = computeAsarHeaderHash(asarPath);
+  const integrityResult = updateEmbeddedAsarIntegrityResource(exePath, asarHeaderHash);
+  if (integrityResult.status === 'updated') {
+    log(
+      `Embedded asar integrity resource updated ` +
+        `(${integrityResult.oldHash} -> ${asarHeaderHash}).`,
+    );
+  } else {
+    log('Main executable has no embedded asar integrity resource; nothing to update.');
   }
 
   log('Done.');

@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-09-03
+
+### 中文
+
+- 修复 Codex `26.901.1978.0` Store bundle 导致离线包验证失败的问题：新版本在 `ChatGPT.exe` 内嵌了 `ELECTRONASAR` asar 完整性资源且不暴露 fuse sentinel，导致无法再用 @electron/fuses 关闭校验。补丁器现在在重打包后把资源中的期望值重写为新 app.asar 头部字符串的 SHA256；资源形状漂移时构建失败关闭。
+
+### English
+
+- Fixed offline package verification failing against the Codex `26.901.1978.0` Store bundle, which embeds an `ELECTRONASAR` asar integrity resource in `ChatGPT.exe` without exposing the fuse sentinel, so the check can no longer be disabled via @electron/fuses. After repacking, the patcher now rewrites the embedded value to the SHA256 of the new app.asar header string and fails closed when the resource shape drifts.
+
 ## 2026-09-02
 
 ### 中文
