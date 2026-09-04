@@ -23,6 +23,14 @@ Codex Offline - 离线版 Codex AI 编程助手 Web Gateway。
 3. 只有官方桌面运行时代码无法通过 Gateway 修复时，才修改桌面注入脚本或静态 bundle 补丁；必须先锁定版本、调用形态和回归测试。
 4. 安装器与 setup 脚本只负责安装、升级、卸载和用户配置生命周期，不承载业务兼容逻辑。
 
+### 兼容问题的分层判断
+
+- 先区分“匹配失败的表现”和“需要修复的业务行为”：renderer bundle 的 matcher 失败通常只是上游编译产物漂移，不应直接把新的正则当作唯一长期方案。
+- 模型列表、Provider、能力列表、插件数据、分页、请求/响应兼容和错误降级，优先在 Gateway / App-Server 边界归一化；同一规则不得分别复制到多个桌面 bundle。
+- 只有启动前置条件、Electron/Fuse、主进程本地 IPC、本机路径/进程参数，以及 Gateway 无法拦截的纯 renderer 行为，才保留桌面运行时或静态 `app.asar` 补丁。
+- 对可以由 Gateway 提供稳定数据来绕开的 renderer fallback，先补齐 Gateway 数据契约；在确认桌面端实际调用路径经过 Gateway、并完成新包回归后，才能删除或降级静态补丁。
+- 静态 bundle 补丁必须使用稳定语义锚点，避免依赖 minified 局部变量名、chunk 文件名或完整代码片段；未知结构必须 fail-closed，禁止为了“匹配成功”放宽为跨版本宽泛替换。
+
 ## 关键文件地图
 
 - Gateway IPC 与 App-Server 适配：`web-gateway/gateway/src/ipc/codex/`
@@ -48,6 +56,7 @@ Codex Offline - 离线版 Codex AI 编程助手 Web Gateway。
 4. 优先修改最靠近数据源且职责正确的一层。能在 Gateway 统一处理的，不要在多个桌面 bundle 中重复补丁。
 5. 只做解决当前问题所需的最小改动，不顺带重构相邻代码，也不要用宽泛正则跨版本替换未知 bundle。
 6. 先运行目标测试，再运行完整验证矩阵；验证失败时继续定位，不用更新期望值来掩盖真实差异。
+7. 遇到静态 matcher 漂移时，先用当前 Store 包复现并记录实际 bundle 形态；同时检查是否能通过 Gateway 归一化输入/输出消除 renderer fallback，再决定是否增加版本兼容匹配。
 
 ## 必须同步的契约
 

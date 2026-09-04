@@ -1113,9 +1113,17 @@ function patchModelDisplayNameFallback(content) {
   }
   const functionEnd = nextFunction < 0 ? content.length : nextFunction;
   const functionContent = content.slice(functionStart, functionEnd);
-  const formatterMatch = functionContent.match(
-    /let\s+[A-Za-z_$][\w$]*=([A-Za-z_$][\w$]*)\([A-Za-z_$][\w$]*\);/,
+  const displayNameMatch = functionContent.match(
+    /\bdisplayName:([A-Za-z_$][\w$]*)\b/,
   );
+  const formatterMatch = displayNameMatch
+    ? functionContent.match(
+      new RegExp(
+        `(?:let\\s+)?[A-Za-z_$][\\w$]*=([A-Za-z_$][\\w$]*)\\(` +
+        `${displayNameMatch[1]}(?:,|\\))`,
+      ),
+    )
+    : null;
   const fallbackPattern =
     /else if\(([A-Za-z_$][\w$]*)\)\{let ([A-Za-z_$][\w$]*);[\s\S]{0,500}?id:`composer\.mode\.local\.model\.custom`,defaultMessage:`Custom`,description:`Custom model from config`\}[\s\S]{0,250}?,([A-Za-z_$][\w$]*)=\2\}else \3=\1/;
   if (!formatterMatch || !fallbackPattern.test(functionContent)) {

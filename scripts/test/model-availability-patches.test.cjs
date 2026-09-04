@@ -125,25 +125,42 @@ test("asar model-label patch replaces Custom with the existing ID formatter", ()
       '`/*codex-offline:model-id-display-name-fallback*/`;\n' +
       `${helperSource}\nreturn patchModelDisplayNameFallback;`,
   )();
-  const fixture =
-    "function x(e){let t=(0,C.c)(14),{model:n,displayName:r}=e,l;" +
-    "if(r!=null){let a=F(r);l=a}else if(n){let a;" +
-    "t[3]===Symbol.for(`react.memo_cache_sentinel`)?" +
-    "(a=(0,J.jsx)(I,{id:`composer.mode.local.model.custom`," +
-    "defaultMessage:`Custom`,description:`Custom model from config`})," +
-    "t[3]=a):a=t[3],l=a}else l=n;return l}function y(){}";
+  const fixtures = [
+    {
+      source:
+        "function x(e){let t=(0,C.c)(14),{model:n,displayName:r}=e,l;" +
+        "if(r!=null){let a=F(r);l=a}else if(n){let a;" +
+        "t[3]===Symbol.for(`react.memo_cache_sentinel`)?" +
+        "(a=(0,J.jsx)(I,{id:`composer.mode.local.model.custom`," +
+        "defaultMessage:`Custom`,description:`Custom model from config`})," +
+        "t[3]=a):a=t[3],l=a}else l=n;return l}function y(){}",
+      expected: "else if(n)l=F(n)/*codex-offline:model-id-display-name-fallback*/",
+    },
+    {
+      source:
+        "function P4(e){let t=(0,Gar.c)(16),{model:n,displayName:r," +
+        "labelClassName:i}=e,u;" +
+        "if(r!=null){let e=c&&!l,n;t[0]!==r||t[1]!==e?" +
+        "(n=jW(r,{stripGptPrefix:e}),t[0]=r,t[1]=e,t[2]=n):n=t[2],u=n" +
+        "}else if(n){let e;t[3]===Symbol.for(`react.memo_cache_sentinel`)?" +
+        "(e=(0,F4.jsx)($,{id:`composer.mode.local.model.custom`," +
+        "defaultMessage:`Custom`,description:`Custom model from config`})," +
+        "t[3]=e):e=t[3],u=e}else u=n;return u}function y(){}",
+      expected: "else if(n)u=jW(n)/*codex-offline:model-id-display-name-fallback*/",
+    },
+  ];
 
-  const patched = patchModelDisplayNameFallback(fixture);
-  assert.equal(patched.patched, true);
-  assert.match(
-    patched.content,
-    /else if\(n\)l=F\(n\)\/\*codex-offline:model-id-display-name-fallback\*\//,
-  );
-  assert.doesNotMatch(patched.content, /defaultMessage:`Custom`/);
+  for (const fixture of fixtures) {
+    const patched = patchModelDisplayNameFallback(fixture.source);
+    assert.equal(patched.patched, true);
+    assert.ok(patched.content.includes(fixture.expected));
+    assert.doesNotMatch(patched.content, /defaultMessage:`Custom`/);
 
-  const secondPass = patchModelDisplayNameFallback(patched.content);
-  assert.equal(secondPass.alreadyCorrect, true);
-  assert.equal(secondPass.content, patched.content);
+    const secondPass = patchModelDisplayNameFallback(patched.content);
+    assert.equal(secondPass.alreadyCorrect, true);
+    assert.equal(secondPass.content, patched.content);
+  }
+
   assert.match(source, /failRequiredPatch\([\s\S]*Custom model-label fallback/);
 });
 
