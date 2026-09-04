@@ -61,13 +61,23 @@ installer, or the packaged output changes.
 The post-extraction `marketplace.json` check is unchanged, so a partial
 extraction still fails the build.
 
+`scripts/test/current-bundle-compatibility.test.cjs` ran the build script's
+whole helper block through `powershell.exe -Command`. That payload was already
+near the 32,767-character Windows command-line limit and the new helpers pushed
+it past it, so `spawnSync` failed to launch and the test reported only
+`null !== 0`. It now writes the block to a temporary `.ps1` and runs it with
+`-File`, and reports `result.error` when the process never starts.
+
 ## Verification
 
 - `node --test scripts/test/primary-runtime-archive-extraction.test.cjs` — 6
   tests, all failing against the previous implementation.
-- `node --test scripts/test/*.test.cjs` — the two `repair-threads` PowerShell
-  cases fail only because no `pwsh` is installed in the sandbox used for this
-  change; they are unrelated to the extraction path.
+- `node --test scripts/test/*.test.cjs` — the three PowerShell cases that spawn
+  `powershell.exe` are skipped or fail only because the sandbox used for this
+  change has no Windows PowerShell; they are unrelated to the extraction path.
+- The Windows-only `rg_adguard app-source cache` case was re-run against
+  PowerShell 7.4 with the file-based invocation and passes (53/53 in that
+  file).
 - PowerShell AST parse of `scripts/build-offline-package.ps1` reports no
   syntax errors (the same check CI runs).
 - Behavior was exercised on PowerShell 7.4 with stub extractors: a bsdtar
