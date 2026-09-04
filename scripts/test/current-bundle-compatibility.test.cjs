@@ -3,6 +3,7 @@
 const assert = require("node:assert/strict");
 const { spawnSync } = require("node:child_process");
 const fs = require("node:fs");
+const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
 
@@ -937,7 +938,7 @@ test("26.825 patcher keeps only current Settings and Worktree resolver shapes", 
 
 test("rg_adguard app-source cache requires the current resolver target", {
   skip: process.platform !== "win32",
-}, () => {
+}, (t) => {
   const helperStart = buildScriptSource.indexOf("function Get-OptionalProperty {");
   const helperEnd = buildScriptSource.indexOf("\n\n$scriptRoot =", helperStart);
   assert.notEqual(helperStart, -1, "Get-OptionalProperty is missing");
@@ -982,10 +983,22 @@ test("rg_adguard app-source cache requires the current resolver target", {
     `$installedStale = $installedCached | ConvertTo-Json | ConvertFrom-Json; $installedStale.version = '26.820.7780.0'`,
     "[ordered]@{matching=(Test-AppSourceCacheCompatible -SourceMetadata $cached -Config $config -ResolvedSource $resolved);versionMismatch=(Test-AppSourceCacheCompatible -SourceMetadata $staleVersion -Config $config -ResolvedSource $resolved);shaMismatch=(Test-AppSourceCacheCompatible -SourceMetadata $wrongSha1 -Config $config -ResolvedSource $resolved);missingSha1=(Test-AppSourceCacheCompatible -SourceMetadata $missingSha1 -Config $config -ResolvedSource $resolved);sourceModeMismatch=(Test-AppSourceCacheCompatible -SourceMetadata $wrongMode -Config $config -ResolvedSource $resolved);packageFamilyMismatch=(Test-AppSourceCacheCompatible -SourceMetadata $wrongFamily -Config $config -ResolvedSource $resolved);installedMatching=(Test-AppSourceCacheCompatible -SourceMetadata $installedCached -Config $installedConfig -ResolvedSource $installedTarget);installedVersionMismatch=(Test-AppSourceCacheCompatible -SourceMetadata $installedStale -Config $installedConfig -ResolvedSource $installedTarget)} | ConvertTo-Json -Compress",
   ].join("\n");
-  const result = spawnSync("powershell.exe", ["-NoProfile", "-Command", command], {
-    encoding: "utf8",
-  });
-  assert.equal(result.status, 0, result.stderr || result.stdout);
+  // The helper block is far past the Windows command-line limit, so -Command cannot carry it.
+  const scriptRoot = fs.mkdtempSync(path.join(os.tmpdir(), "codex-app-source-cache-"));
+  const scriptPath = path.join(scriptRoot, "app-source-cache.ps1");
+  fs.writeFileSync(scriptPath, command, "utf8");
+  t.after(() => fs.rmSync(scriptRoot, { recursive: true, force: true }));
+
+  const result = spawnSync(
+    "powershell.exe",
+    ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", scriptPath],
+    { encoding: "utf8" },
+  );
+  assert.equal(
+    result.status,
+    0,
+    result.error ? result.error.message : result.stderr || result.stdout,
+  );
   const values = JSON.parse(result.stdout.trim());
   assert.deepEqual(values, {
     matching: true,

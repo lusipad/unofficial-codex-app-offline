@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-09-04
+
+### 中文
+
+- 修复本地构建在解压 primary runtime 插件包（`.tar.xz`）时报 `tar exit code 1` 的问题：构建现在优先使用 Windows 自带的 `System32\tar.exe`，并先用 `--version` 确认它支持 xz（bsdtar 需带 `liblzma`，GNU tar 需有 `xz` 且以 `--force-local` 调用）；都不满足时回退到 7-Zip，没有可用解压器时失败关闭并列出检查过的候选。解压失败还会带上解压器的真实输出与排查提示（缺少 xz 支持、符号链接权限、杀软占用、磁盘不足、工作目录过深或含非 ASCII 字符）。
+
+### English
+
+- Fixed local builds failing with `tar exit code 1` while extracting the primary runtime plugin archive (`.tar.xz`). The build now prefers the Windows-bundled `System32\tar.exe`, probes `--version` to confirm xz support (bsdtar must report `liblzma`; GNU tar needs an `xz` binary and is invoked with `--force-local`), falls back to 7-Zip when no tar qualifies, and fails closed listing every inspected candidate when nothing can read the archive. Extraction failures now carry the extractor's real output plus hints for the known causes: missing xz support, symlink privilege, antivirus locks, a full disk, and deep or non-ASCII work roots.
+
 ## 2026-09-03
 
 ### 中文
