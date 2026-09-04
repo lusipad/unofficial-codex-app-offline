@@ -302,7 +302,7 @@ if (@($modelCatalogSlugs | Sort-Object -Unique).Count -ne $modelCatalogSlugs.Cou
     throw 'API model catalog contains duplicate model slugs.'
 }
 
-foreach ($slug in @('gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna')) {
+foreach ($slug in @('gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna')) {
     $model = @($modelCatalogModels | Where-Object { $_.slug -eq $slug })
     if ($model.Count -ne 1) {
         throw "API model catalog must contain exactly one $slug entry."
@@ -313,6 +313,9 @@ foreach ($slug in @('gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna')) {
         $model[0].supports_search_tool -ne $true -or
         [string]::IsNullOrWhiteSpace([string]$model[0].web_search_tool_type)) {
         throw "API model catalog has unexpected custom-provider fields for $slug."
+    }
+    if ($slug -eq 'gpt-6-astra' -and $model[0].visibility -ne 'list') {
+        throw 'API model catalog must expose gpt-6-astra in the model picker.'
     }
 }
 
@@ -388,6 +391,7 @@ try {
         '_internal\web\start-web.mjs',
         '_internal\web\gateway\dist\server.js',
         '_internal\web\gateway\dist\ipc\codex\pluginServiceCompat.cjs',
+        '_internal\web\gateway\dist\ipc\codex\modelCatalogCompat.cjs',
         '_internal\web\web-shell\index.html',
         '_internal\web\web-shell\codex-bridge-polyfill.js',
         '_internal\web\node_modules\express\package.json',
@@ -432,7 +436,7 @@ try {
         }
         $loadedCatalog = $catalogDebugOutput -join [Environment]::NewLine | ConvertFrom-Json
         $loadedSlugs = @($loadedCatalog.models | ForEach-Object { [string]$_.slug })
-        foreach ($slug in @('gpt-5.6-sol', 'deepseek-v4-flash', 'deepseek-v4-pro')) {
+        foreach ($slug in @('gpt-6-astra', 'gpt-5.6-sol', 'deepseek-v4-flash', 'deepseek-v4-pro')) {
             if ($loadedSlugs -notcontains $slug) {
                 throw "Bundled Codex did not load expected model from models-api.json: $slug"
             }

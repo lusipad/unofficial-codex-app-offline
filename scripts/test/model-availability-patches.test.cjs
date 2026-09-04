@@ -11,6 +11,12 @@ const initPath = path.join(repoRoot, "scripts", "desktop-patches", "init.cjs");
 const patchScriptPath = path.join(repoRoot, "scripts", "patch-app-asar.mjs");
 const buildScriptPath = path.join(repoRoot, "scripts", "build-offline-package.ps1");
 const modelCatalogBuilderPath = path.join(repoRoot, "scripts", "build-api-model-catalog.mjs");
+const modelCatalogCompatPath = path.join(
+  repoRoot,
+  "scripts",
+  "desktop-patches",
+  "model-catalog-compat.cjs",
+);
 const verifyScriptPath = path.join(repoRoot, "scripts", "verify-offline-package.ps1");
 const modelCatalogDocPath = path.join(repoRoot, "docs", "models-api.md");
 const readmePath = path.join(repoRoot, "README.md");
@@ -176,9 +182,40 @@ test("package verification requires both model availability patches", () => {
   assert.match(verifier, /result\.key === STATSIG_MODEL_AVAILABILITY_CONFIG/);
 });
 
-test("models-api.json is generated as a single release artifact with GPT-5.6 and DeepSeek compatibility fields", () => {
+test("shared model compatibility exposes Astra without exposing other hidden models", () => {
+  const { ASTRA_MODEL_SLUG, patchModelListResult } = require(modelCatalogCompatPath);
+  const original = {
+    data: [
+      { model: "gpt-hidden-other", hidden: true },
+      { model: "gpt-5.6-sol", hidden: false },
+    ],
+    nextCursor: null,
+  };
+
+  const patched = patchModelListResult(original);
+  assert.equal(patched.data[0].model, ASTRA_MODEL_SLUG);
+  assert.equal(patched.data[0].displayName, "GPT-6-Astra");
+  assert.equal(patched.data[0].hidden, false);
+  assert.equal(
+    patched.data.find((model) => model.model === "gpt-hidden-other").hidden,
+    true,
+  );
+  assert.deepEqual(original.data.map((model) => model.model), [
+    "gpt-hidden-other",
+    "gpt-5.6-sol",
+  ]);
+
+  const existing = patchModelListResult({
+    data: [{ model: ASTRA_MODEL_SLUG, displayName: "GPT-6-Astra", hidden: true }],
+  });
+  assert.equal(existing.data.length, 1);
+  assert.equal(existing.data[0].hidden, false);
+});
+
+test("models-api.json is generated as a single release artifact with Astra, GPT-5.6 and DeepSeek compatibility fields", () => {
   const buildSource = fs.readFileSync(buildScriptPath, "utf8");
   const builderSource = fs.readFileSync(modelCatalogBuilderPath, "utf8");
+  const compatSource = fs.readFileSync(modelCatalogCompatPath, "utf8");
   const verifierSource = fs.readFileSync(verifyScriptPath, "utf8");
   const docSource = fs.readFileSync(modelCatalogDocPath, "utf8");
   const readmeSource = fs.readFileSync(readmePath, "utf8");
@@ -186,9 +223,11 @@ test("models-api.json is generated as a single release artifact with GPT-5.6 and
   assert.match(buildSource, /build-api-model-catalog\.mjs/);
   assert.match(buildSource, /models-api\.json/);
   assert.match(builderSource, /OPENAI_CATALOG_URL/);
+  assert.match(builderSource, /OPENAI_LATEST_CATALOG_URL/);
+  assert.match(compatSource, /gpt-6-astra/);
   assert.match(builderSource, /DEEPSEEK_SETUP_URL/);
   assert.match(builderSource, /GPT_56_SLUGS/);
-  assert.match(builderSource, /GPT_56_CUSTOM_PROVIDER_PATCH/);
+  assert.match(builderSource, /OPENAI_CUSTOM_PROVIDER_PATCH/);
   assert.match(builderSource, /deepseek-v4-flash/);
   assert.match(builderSource, /deepseek-v4-pro/);
   assert.match(builderSource, /tool_mode: null/);
@@ -199,6 +238,7 @@ test("models-api.json is generated as a single release artifact with GPT-5.6 and
   assert.match(verifierSource, /API model catalog does not contain any models/);
   assert.match(verifierSource, /API model catalog has unexpected custom-provider fields for/);
   assert.match(verifierSource, /API model catalog has unexpected DeepSeek fields for/);
+  assert.match(verifierSource, /gpt-6-astra/);
 
   assert.match(readmeSource, /models-api\.json/);
   assert.match(readmeSource, /docs\/models-api\.md/);

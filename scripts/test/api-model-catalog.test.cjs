@@ -38,6 +38,16 @@ function deepSeekModel(slug) {
   return model;
 }
 
+function astraModel() {
+  return {
+    ...openAiModel("gpt-6-astra"),
+    display_name: "GPT-6-Astra",
+    description: "Our most capable model for complex, demanding work.",
+    visibility: "hide",
+    minimal_client_version: "0.153.0",
+  };
+}
+
 function fixtures() {
   return {
     openAi: {
@@ -48,6 +58,7 @@ function fixtures() {
         openAiModel("gpt-5.6-luna", "v1"),
       ],
     },
+    astra: astraModel(),
     deepSeek: {
       models: [
         deepSeekModel("deepseek-v4-flash"),
@@ -58,12 +69,18 @@ function fixtures() {
   };
 }
 
-test("merges DeepSeek entries and applies only the GPT-5.6 provider workaround", async () => {
+test("merges Astra and DeepSeek entries and applies the OpenAI provider workaround", async () => {
   const { mergeModelCatalogs } = await modulePromise;
-  const { openAi, deepSeek } = fixtures();
-  const merged = mergeModelCatalogs(openAi, deepSeek);
+  const { openAi, astra, deepSeek } = fixtures();
+  const merged = mergeModelCatalogs(openAi, deepSeek, astra);
   const expected = structuredClone(openAi);
-  for (const slug of ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"]) {
+  expected.models.unshift(structuredClone(astra));
+  for (const slug of [
+    "gpt-6-astra",
+    "gpt-5.6-sol",
+    "gpt-5.6-terra",
+    "gpt-5.6-luna",
+  ]) {
     Object.assign(
       expected.models.find((model) => model.slug === slug),
       {
@@ -73,6 +90,7 @@ test("merges DeepSeek entries and applies only the GPT-5.6 provider workaround",
       },
     );
   }
+  expected.models[0].visibility = "list";
   expected.models.push(...structuredClone(deepSeek.models));
 
   assert.deepEqual(merged, expected);
@@ -80,6 +98,7 @@ test("merges DeepSeek entries and applies only the GPT-5.6 provider workaround",
   assert.deepEqual(
     merged.models.map((model) => model.slug),
     [
+      "gpt-6-astra",
       "gpt-5.5",
       "gpt-5.6-sol",
       "gpt-5.6-terra",
@@ -89,9 +108,16 @@ test("merges DeepSeek entries and applies only the GPT-5.6 provider workaround",
       "deepseek-v4-flash-vision-exp",
     ],
   );
-  assert.deepEqual(merged.models[0], openAi.models[0]);
+  assert.equal(merged.models[0].display_name, "GPT-6-Astra");
+  assert.equal(merged.models[0].visibility, "list");
+  assert.deepEqual(merged.models[1], openAi.models[0]);
 
-  for (const slug of ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"]) {
+  for (const slug of [
+    "gpt-6-astra",
+    "gpt-5.6-sol",
+    "gpt-5.6-terra",
+    "gpt-5.6-luna",
+  ]) {
     const model = merged.models.find((entry) => entry.slug === slug);
     assert.equal(model.tool_mode, null);
     assert.equal(model.multi_agent_version, null);
@@ -100,6 +126,8 @@ test("merges DeepSeek entries and applies only the GPT-5.6 provider workaround",
     assert.equal(model.web_search_tool_type, "text_and_image");
   }
 
+  assert.equal(astra.tool_mode, "code_mode_only");
+  assert.equal(astra.visibility, "hide");
   assert.equal(openAi.models[1].tool_mode, "code_mode_only");
   assert.equal(openAi.models[1].use_responses_lite, true);
 });
@@ -122,22 +150,32 @@ test("rejects an upstream GPT-5.6 metadata change instead of silently overwritin
     ["multi_agent_version", null],
     ["use_responses_lite", false],
   ]) {
-    const { openAi, deepSeek } = fixtures();
+    const { openAi, astra, deepSeek } = fixtures();
     openAi.models.find((model) => model.slug === "gpt-5.6-sol")[field] = value;
     assert.throws(
-      () => mergeModelCatalogs(openAi, deepSeek),
+      () => mergeModelCatalogs(openAi, deepSeek, astra),
       /compatibility fields changed upstream/,
     );
   }
 });
 
-test("rejects duplicate DeepSeek slugs already supplied by OpenAI", async () => {
+test("requires an official Astra entry when the versioned catalog does not contain it", async () => {
   const { mergeModelCatalogs } = await modulePromise;
   const { openAi, deepSeek } = fixtures();
-  openAi.models.push(deepSeekModel("deepseek-v4-flash"));
 
   assert.throws(
     () => mergeModelCatalogs(openAi, deepSeek),
+    /Astra model catalog is missing required model: gpt-6-astra/,
+  );
+});
+
+test("rejects duplicate DeepSeek slugs already supplied by OpenAI", async () => {
+  const { mergeModelCatalogs } = await modulePromise;
+  const { openAi, astra, deepSeek } = fixtures();
+  openAi.models.push(deepSeekModel("deepseek-v4-flash"));
+
+  assert.throws(
+    () => mergeModelCatalogs(openAi, deepSeek, astra),
     /remove the manual DeepSeek merge/,
   );
 });

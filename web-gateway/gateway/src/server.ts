@@ -34,6 +34,7 @@ const CODEX_HOME = process.env.CODEX_HOME || path.join(os.homedir(), ".codex");
 const CODEX_GENERATED_IMAGES_DIR = path.join(CODEX_HOME, "generated_images");
 const CODEX_WEB_PICKED_FILES_DIR = path.join(CODEX_HOME, ".tmp", "web-picked-files");
 const PORT = Number(process.env.PORT || 3737);
+const { patchModelListResult } = require("./ipc/codex/modelCatalogCompat.cjs");
 const HOST = process.env.HOST || "0.0.0.0";
 const PASSWORD = process.env.CODEX_WEB_PASSWORD || "";
 const COOKIE_NAME = "codex_web_auth";
@@ -828,7 +829,9 @@ function summarizeOpenFileResult(value) {
 /** 把 app-server 已缓存的模型列表塞进首屏配置，减少远端设备打开会话时的等待。 */
 function cachedModelListForWebConfig(appServer) {
   if (!appServer || typeof appServer.getCachedResponse !== "function") return null;
-  const result = appServer.getCachedResponse("model/list", {}, true);
+  const result = patchModelListResult(
+    appServer.getCachedResponse("model/list", {}, true),
+  );
   const data = result && typeof result === "object" && Array.isArray(result.data) ? result.data : null;
   if (!data) return null;
   return {

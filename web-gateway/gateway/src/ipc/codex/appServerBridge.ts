@@ -1,6 +1,8 @@
 // @ts-nocheck
 export {};
 
+const { patchModelListResult } = require("./modelCatalogCompat.cjs");
+
 function createAppServerBridge(deps) {
   const appServer = deps.appServer;
   const logger = deps.logger;
@@ -100,9 +102,12 @@ function createAppServerBridge(deps) {
     try {
       const rawResult = await appServer.request(appServerMethod, appServerPayload);
       const patchedResult =
-        appServerMethod === "experimentalFeature/list" && typeof patchExperimentalFeatureListResult === "function"
-          ? patchExperimentalFeatureListResult(rawResult)
-          : rawResult;
+        appServerMethod === "model/list"
+          ? patchModelListResult(rawResult)
+          : appServerMethod === "experimentalFeature/list" &&
+              typeof patchExperimentalFeatureListResult === "function"
+            ? patchExperimentalFeatureListResult(rawResult)
+            : rawResult;
       return enrichWorkedForAppServerResult(appServerMethod, patchedResult);
     } catch (error) {
       if (appServerMethod === "app/list" && isOptionalAppDirectoryFailure(error)) {

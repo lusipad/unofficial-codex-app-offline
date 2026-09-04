@@ -4,7 +4,9 @@
 
 `models-api.json` 是每个 GitHub Release 附带的可选 Codex 模型目录。它面向 API Key、CRS 和其他 Responses API 兼容 provider；项目不会默认安装或启用它，也不会在文件中写入 API Key。
 
-该文件是完整目录，不是增量补丁：CI 从安装包内 `codex.exe --version` 读取精确的 `codex-cli` 版本，下载对应 `rust-v<version>` 的 OpenAI 官方目录，应用 GPT-5.6 custom-provider 临时修正，再合并 DeepSeek 官方 Codex 目录。
+该文件是完整目录，不是增量补丁：CI 从安装包内 `codex.exe --version` 读取精确的 `codex-cli` 版本，下载对应 `rust-v<version>` 的 OpenAI 官方目录，补入经内容指纹固定的官方 `gpt-6-astra` 条目，应用 GPT-6-Astra / GPT-5.6 custom-provider 临时修正，再合并 DeepSeek 官方 Codex 目录。
+
+`gpt-6-astra` 会在自定义目录和软件默认模型列表中显示。默认列表的兼容规则位于 Gateway 边界，只补入或取消隐藏 Astra，不会同时放出其他隐藏模型。
 
 ## Windows 安装器选项
 
@@ -42,7 +44,7 @@ env_key = "CRS_API_KEY"
 wire_api = "responses"
 ```
 
-GPT-5.6 官方条目原本已经声明 `supports_search_tool = true`。目录只对以下字段应用临时兼容覆盖，避免 custom provider 请求使用 Codex 后端专用的 Responses Lite / collaboration 形状：
+GPT-6-Astra 和 GPT-5.6 官方条目原本已经声明 `supports_search_tool = true`。目录只对以下字段应用临时兼容覆盖，避免 custom provider 请求使用 Codex 后端专用的 Responses Lite / collaboration 形状：
 
 ```json
 {
@@ -89,7 +91,7 @@ wire_api = "responses"
 
 ## 数据来源和维护
 
-- OpenAI 基础目录：[`openai/codex`](https://github.com/openai/codex) 中与包内 CLI 精确匹配的 `rust-v<codex-cli-version>/codex-rs/models-manager/models.json`，不使用会持续变化的 `main`。
+- OpenAI 基础目录：[`openai/codex`](https://github.com/openai/codex) 中与包内 CLI 精确匹配的 `rust-v<codex-cli-version>/codex-rs/models-manager/models.json`。当该版本目录尚未包含 Astra 时，只从 `main` 提取 `gpt-6-astra`，并校验固定内容指纹；条目变化会停止构建并要求人工复核。
 - DeepSeek 条目：[DeepSeek Codex 集成指南](https://api-docs.deepseek.com/quick_start/agent_integrations/codex/)提供的官方安装脚本。CI 校验提取后目录的内容指纹；上游内容变化时会停止发布，要求人工复核。
 - GPT-5.6 临时修正对应上游问题 [openai/codex#31882](https://github.com/openai/codex/issues/31882) 和 [openai/codex#33250](https://github.com/openai/codex/issues/33250)。
 
@@ -107,6 +109,8 @@ The matching Windows `*-setup.exe` can install its bundled copy as `CODEX_HOME/m
 
 Download it from the same GitHub Release as the app, copy it into `CODEX_HOME`, set an absolute `model_catalog_json` path in `CODEX_HOME/config.toml` (by default `%USERPROFILE%/.codex/config.toml`), and fully restart Codex. The catalog lists both GPT and DeepSeek models, but it does not bind models to providers; keep `gpt-*` on the matching OpenAI/CRS provider and `deepseek-*` on the DeepSeek provider.
 
-The GPT-5.6 entries retain their official search metadata while temporarily disabling `tool_mode`, `multi_agent_version`, and Responses Lite for custom-provider compatibility. The provider must still implement or forward hosted Responses API `web_search`.
+GPT-6-Astra is visible in both the generated custom catalog and the default app model list. The Gateway compatibility rule exposes only Astra and leaves other hidden models hidden.
+
+The GPT-6-Astra and GPT-5.6 entries retain their official search metadata while temporarily disabling `tool_mode`, `multi_agent_version`, and Responses Lite for custom-provider compatibility. The provider must still implement or forward hosted Responses API `web_search`.
 
 CI builds the file from the exact OpenAI catalog tag matching the bundled CLI and from DeepSeek's official Codex setup catalog. Upstream metadata changes fail the build for review instead of silently changing the Release asset. See the Chinese sections above for complete CRS and DeepSeek configuration examples and removal criteria.

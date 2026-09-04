@@ -6,13 +6,22 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
+import modelCatalogCompat from "./desktop-patches/model-catalog-compat.cjs";
 
 const execFileAsync = promisify(execFile);
+const {
+  ASTRA_MODEL_SLUG,
+  makeAstraCatalogModelVisible,
+} = modelCatalogCompat;
 
 const OPENAI_CATALOG_URL =
   "https://raw.githubusercontent.com/openai/codex/rust-v{version}/codex-rs/models-manager/models.json";
+const OPENAI_LATEST_CATALOG_URL =
+  "https://raw.githubusercontent.com/openai/codex/main/codex-rs/models-manager/models.json";
 const DEEPSEEK_SETUP_URL =
   "https://cdn.deepseek.com/api-docs/codex-deepseek-setup-en.ps1";
+const ASTRA_CATALOG_SHA256 =
+  "d1d24c2cbcf0c5d489b27eb622d6487a4731dc6909cd9af30e9321f7b8a51f54";
 const DEEPSEEK_CATALOG_SHA256 =
   "b78e9ba4df6be1457d7c610989fed9b4b3ff19e634d947708b443e360ec9ae11";
 
@@ -22,12 +31,16 @@ const GPT_56_UPSTREAM_MULTI_AGENT_VERSIONS = Object.freeze({
   "gpt-5.6-terra": "v2",
   "gpt-5.6-luna": "v1",
 });
+const CUSTOM_PROVIDER_MODEL_VERSIONS = Object.freeze({
+  [ASTRA_MODEL_SLUG]: "v2",
+  ...GPT_56_UPSTREAM_MULTI_AGENT_VERSIONS,
+});
 const DEEPSEEK_SLUGS = [
   "deepseek-v4-flash",
   "deepseek-v4-pro",
   "deepseek-v4-flash-vision-exp",
 ];
-const GPT_56_CUSTOM_PROVIDER_PATCH = Object.freeze({
+const OPENAI_CUSTOM_PROVIDER_PATCH = Object.freeze({
   tool_mode: null,
   multi_agent_version: null,
   use_responses_lite: false,
@@ -161,14 +174,36 @@ function clone(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
-export function mergeModelCatalogs(openAiCatalog, deepSeekCatalog) {
+export function mergeModelCatalogs(openAiCatalog, deepSeekCatalog, astraModel = null) {
   validateCatalog(openAiCatalog, "OpenAI model catalog");
   validateCatalog(deepSeekCatalog, "DeepSeek model catalog");
 
   const merged = clone(openAiCatalog);
   const modelsBySlug = new Map(merged.models.map((model) => [model.slug, model]));
 
-  for (const slug of GPT_56_SLUGS) {
+  if (!modelsBySlug.has(ASTRA_MODEL_SLUG)) {
+    if (!astraModel || astraModel.slug !== ASTRA_MODEL_SLUG) {
+      throw new Error(
+        `Astra model catalog is missing required model: ${ASTRA_MODEL_SLUG}`,
+      );
+    }
+    const visibleAstra = makeAstraCatalogModelVisible(clone(astraModel));
+    merged.models.unshift(visibleAstra);
+    modelsBySlug.set(ASTRA_MODEL_SLUG, visibleAstra);
+  } else {
+    const visibleAstra = makeAstraCatalogModelVisible(
+      modelsBySlug.get(ASTRA_MODEL_SLUG),
+    );
+    if (visibleAstra !== modelsBySlug.get(ASTRA_MODEL_SLUG)) {
+      const astraIndex = merged.models.findIndex(
+        (model) => model.slug === ASTRA_MODEL_SLUG,
+      );
+      merged.models[astraIndex] = visibleAstra;
+      modelsBySlug.set(ASTRA_MODEL_SLUG, visibleAstra);
+    }
+  }
+
+  for (const slug of [ASTRA_MODEL_SLUG, ...GPT_56_SLUGS]) {
     const model = modelsBySlug.get(slug);
     if (!model) {
       throw new Error(`OpenAI model catalog is missing required model: ${slug}`);
@@ -178,12 +213,12 @@ export function mergeModelCatalogs(openAiCatalog, deepSeekCatalog) {
     }
     if (
       model.tool_mode !== "code_mode_only" ||
-      model.multi_agent_version !== GPT_56_UPSTREAM_MULTI_AGENT_VERSIONS[slug] ||
+      model.multi_agent_version !== CUSTOM_PROVIDER_MODEL_VERSIONS[slug] ||
       model.use_responses_lite !== true
     ) {
       throw new Error(`${slug} compatibility fields changed upstream; review the temporary patch`);
     }
-    Object.assign(model, GPT_56_CUSTOM_PROVIDER_PATCH);
+    Object.assign(model, OPENAI_CUSTOM_PROVIDER_PATCH);
   }
 
   const deepSeekModels = new Map(
@@ -238,6 +273,30 @@ export async function buildApiModelCatalog({ codexVersion, outputPath }) {
 
   const openAiCatalog = parseCatalog(openAiText, "OpenAI model catalog");
   const deepSeekCatalog = extractDeepSeekCatalog(deepSeekSetupScript);
+  let astraModel = openAiCatalog.models.find(
+    (model) => model.slug === ASTRA_MODEL_SLUG,
+  );
+  let astraHash = null;
+  if (!astraModel) {
+    const latestOpenAiCatalog = parseCatalog(
+      await fetchText(OPENAI_LATEST_CATALOG_URL, "Latest OpenAI model catalog"),
+      "Latest OpenAI model catalog",
+    );
+    astraModel = latestOpenAiCatalog.models.find(
+      (model) => model.slug === ASTRA_MODEL_SLUG,
+    );
+    if (!astraModel) {
+      throw new Error(
+        `Latest OpenAI model catalog is missing required model: ${ASTRA_MODEL_SLUG}`,
+      );
+    }
+    astraHash = catalogSha256({ models: [astraModel] });
+    if (astraHash !== ASTRA_CATALOG_SHA256) {
+      throw new Error(
+        `OpenAI Astra model changed (${astraHash}); review it and update the pinned hash`,
+      );
+    }
+  }
   const deepSeekHash = catalogSha256(deepSeekCatalog);
   if (deepSeekHash !== DEEPSEEK_CATALOG_SHA256) {
     throw new Error(
@@ -245,13 +304,15 @@ export async function buildApiModelCatalog({ codexVersion, outputPath }) {
     );
   }
 
-  const merged = mergeModelCatalogs(openAiCatalog, deepSeekCatalog);
+  const merged = mergeModelCatalogs(openAiCatalog, deepSeekCatalog, astraModel);
   const resolvedOutput = path.resolve(outputPath);
   await mkdir(path.dirname(resolvedOutput), { recursive: true });
   await writeFile(resolvedOutput, `${JSON.stringify(merged, null, 2)}\n`, "utf8");
 
   return {
     codexVersion: version,
+    astraCatalogSha256: astraHash,
+    astraCatalogUrl: astraHash ? OPENAI_LATEST_CATALOG_URL : openAiUrl,
     deepSeekCatalogSha256: deepSeekHash,
     modelCount: merged.models.length,
     openAiCatalogUrl: openAiUrl,

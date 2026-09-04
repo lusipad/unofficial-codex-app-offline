@@ -175,6 +175,39 @@ test("gateway patches experimental feature lists on direct and mcp request paths
   assert.deepEqual(mcpResult.data.map((feature) => feature.enabled), [true, true, true]);
 });
 
+test("gateway exposes Astra in the default model list without exposing other hidden models", async () => {
+  const handlers = makeHandlers({
+    appServer: {
+      isConnected: () => true,
+      request: async (method) => {
+        assert.equal(method, "model/list");
+        return {
+          data: [
+            { model: "gpt-hidden-other", displayName: "Hidden", hidden: true },
+            { model: "gpt-5.6-sol", displayName: "GPT-5.6-Sol", hidden: false },
+          ],
+          nextCursor: null,
+        };
+      },
+    },
+    broadcast: () => {},
+    logger: { warn: () => {} },
+    isClientConnected: () => false,
+  });
+
+  const result = await handlers.handle("list-models-for-host", {
+    hostId: "local",
+    includeHidden: false,
+  });
+
+  assert.deepEqual(result.data.map((model) => model.model), [
+    "gpt-6-astra",
+    "gpt-5.6-sol",
+  ]);
+  assert.equal(result.data[0].displayName, "GPT-6-Astra");
+  assert.equal(result.data[0].hidden, false);
+});
+
 test("source data contract declares every required desktop asar marker", () => {
   const repoRoot = path.resolve(__dirname, "../../..");
   const markerCalls = [
