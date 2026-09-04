@@ -547,7 +547,6 @@ function Resolve-ArchiveExtractionTool {
         $tarCandidates.Add([string]$pathTar.Source)
     }
 
-    $fallbackTarPath = ''
     foreach ($candidate in $tarCandidates) {
         if ([string]::IsNullOrWhiteSpace($candidate)) { continue }
         if ($seenPaths -contains $candidate.ToLowerInvariant()) { continue }
@@ -565,9 +564,6 @@ function Resolve-ArchiveExtractionTool {
             }
         }
 
-        if ([string]::IsNullOrWhiteSpace($fallbackTarPath) -and $capability.flavor -eq 'unknown') {
-            $fallbackTarPath = $candidate
-        }
     }
 
     foreach ($sevenZipCandidate in (Get-SevenZipCandidatePath)) {
@@ -580,15 +576,6 @@ function Resolve-ArchiveExtractionTool {
         return [ordered]@{
             kind = 'sevenzip'
             path = $sevenZipCandidate
-            forceLocal = $false
-            inspected = $inspected.ToArray()
-        }
-    }
-
-    if (-not [string]::IsNullOrWhiteSpace($fallbackTarPath)) {
-        return [ordered]@{
-            kind = 'tar'
-            path = $fallbackTarPath
             forceLocal = $false
             inspected = $inspected.ToArray()
         }

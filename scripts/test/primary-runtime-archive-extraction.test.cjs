@@ -1,7 +1,9 @@
 "use strict";
 
 const assert = require("node:assert/strict");
+const { spawnSync } = require("node:child_process");
 const fs = require("node:fs");
+const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
 
@@ -18,6 +20,72 @@ function functionSource(name) {
   assert.notEqual(end, -1, `function ${name} has no successor to bound it`);
   return buildScriptSource.slice(start, end);
 }
+
+function resolveToolWithStubs(t, capability, sevenZipCandidates = []) {
+  const scriptRoot = fs.mkdtempSync(path.join(os.tmpdir(), "codex-archive-tool-"));
+  const scriptPath = path.join(scriptRoot, "resolve-archive-tool.ps1");
+  t.after(() => fs.rmSync(scriptRoot, { recursive: true, force: true }));
+
+  const script = [
+    functionSource("Resolve-ArchiveExtractionTool"),
+    "function Get-Command { return $null }",
+    "function Test-Path { return $true }",
+    `function Get-ArchiveToolCapability { [ordered]@{ flavor = '${capability.flavor}'; supportsXz = $${capability.supportsXz ? "true" : "false"}; version = 'stub' } }`,
+    `function Get-SevenZipCandidatePath { @(${sevenZipCandidates.map((candidate) => `'${candidate}'`).join(", ")}) }`,
+    "$env:SystemRoot = 'C:\\Windows'",
+    "Resolve-ArchiveExtractionTool | ConvertTo-Json -Compress",
+  ].join("\n");
+  fs.writeFileSync(scriptPath, script, "utf8");
+
+  const result = spawnSync(
+    "powershell.exe",
+    ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", scriptPath],
+    { encoding: "utf8" },
+  );
+  assert.equal(
+    result.status,
+    0,
+    result.error ? result.error.message : result.stderr || result.stdout,
+  );
+  return JSON.parse(result.stdout.trim());
+}
+
+test("primary runtime extraction rejects an unverified tar when no 7-Zip is available", {
+  skip: process.platform !== "win32",
+}, (t) => {
+  const tool = resolveToolWithStubs(t, {
+    flavor: "unknown",
+    supportsXz: false,
+  });
+
+  assert.equal(tool.kind, "none");
+  assert.equal(tool.path, "");
+});
+
+test("primary runtime extraction uses 7-Zip when tar support is unverified", {
+  skip: process.platform !== "win32",
+}, (t) => {
+  const tool = resolveToolWithStubs(
+    t,
+    { flavor: "unknown", supportsXz: false },
+    ["C:\\Tools\\7z.exe"],
+  );
+
+  assert.equal(tool.kind, "sevenzip");
+  assert.equal(tool.path, "C:\\Tools\\7z.exe");
+});
+
+test("primary runtime extraction enables force-local for a verified GNU tar", {
+  skip: process.platform !== "win32",
+}, (t) => {
+  const tool = resolveToolWithStubs(t, {
+    flavor: "gnutar",
+    supportsXz: true,
+  });
+
+  assert.equal(tool.kind, "tar");
+  assert.equal(tool.forceLocal, true);
+});
 
 test("primary runtime extraction prefers the Windows tar over an MSYS tar on PATH", () => {
   const resolver = functionSource("Resolve-ArchiveExtractionTool");
