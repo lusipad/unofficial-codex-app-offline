@@ -123,6 +123,12 @@ pwsh -NoProfile -File ./scripts/build-offline-package.ps1
 
 产物输出到 `dist/offline/<release-name>/`。
 
+构建需要一个能解压 `.tar.xz` 的工具来展开 primary runtime 插件包：`tar --version`
+里带 `liblzma` 的 `tar.exe`（Windows 自带的 `%SystemRoot%\System32\tar.exe` 在部分
+版本上只链接了 zlib），或者安装 7-Zip 作为回退。两者都没有时构建会直接失败并列出
+检查过的路径。仓库路径过深或含非 ASCII 字符时，用 `-WorkRoot C:\codex-build` 指定
+一个短的纯 ASCII 工作目录。
+
 ### 核心脚本
 
 | 脚本 | 用途 |
@@ -157,6 +163,7 @@ pwsh -NoProfile -File ./scripts/build-offline-package.ps1
 - [插件服务兼容迁移计划](docs/plugin-service-compat-migration-plan.md)
 - [插件服务兼容实施记录](docs/implementation-notes-plugin-service-compat.md)
 - [API/custom provider 模型目录](docs/models-api.md)
+- [Primary runtime 解压失败排查](docs/issue-108-primary-runtime-extract-failure.md)
 
 ## 配置
 
@@ -219,6 +226,8 @@ bash setup-linux.sh update
 ### Building from Source
 
 Windows 10/11 x64, Node.js 18+, PowerShell 7+, optional Inno Setup 6.
+
+Extracting the primary runtime plugin archive needs a `.tar.xz` reader: a `tar.exe` whose `tar --version` reports `liblzma` (some Windows builds ship `%SystemRoot%\System32\tar.exe` linked against zlib only), or 7-Zip as a fallback. Pass `-WorkRoot C:\codex-build` when the checkout path is deep or contains non-ASCII characters.
 
 ```powershell
 npm ci

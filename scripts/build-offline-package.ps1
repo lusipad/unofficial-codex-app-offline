@@ -442,6 +442,283 @@ function Get-ChromeExtensionConfig {
     }
 }
 
+function Invoke-CapturedProcess {
+    param(
+        [Parameter(Mandatory = $true)][string]$FilePath,
+        [Parameter(Mandatory = $true)][string[]]$Arguments
+    )
+
+    $stdoutPath = [System.IO.Path]::GetTempFileName()
+    $stderrPath = [System.IO.Path]::GetTempFileName()
+    try {
+        $quotedArguments = @($Arguments | ForEach-Object {
+            if ($_ -match '\s') { '"' + $_ + '"' } else { $_ }
+        })
+
+        $process = Start-Process -FilePath $FilePath -ArgumentList $quotedArguments -NoNewWindow -Wait -PassThru -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
+        $outputParts = @()
+        foreach ($capturePath in @($stdoutPath, $stderrPath)) {
+            $captured = Get-Content -LiteralPath $capturePath -Raw -ErrorAction SilentlyContinue
+            if (-not [string]::IsNullOrWhiteSpace($captured)) {
+                $outputParts += $captured.TrimEnd()
+            }
+        }
+
+        return [ordered]@{
+            exitCode = [int]$process.ExitCode
+            output = ($outputParts -join [System.Environment]::NewLine)
+        }
+    }
+    finally {
+        Remove-Item -LiteralPath $stdoutPath -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $stderrPath -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Get-ArchiveToolCapability {
+    param([Parameter(Mandatory = $true)][string]$ToolPath)
+
+    $versionText = ''
+    try {
+        $probe = Invoke-CapturedProcess -FilePath $ToolPath -Arguments @('--version')
+        $versionText = [string]$probe.output
+    }
+    catch {
+        $versionText = ''
+    }
+
+    if ($versionText -match '(?i)bsdtar|libarchive') {
+        # Windows ships bsdtar without liblzma on several builds, so those tar.exe copies
+        # cannot read the .tar.xz primary runtime archive at all.
+        return [ordered]@{
+            flavor = 'bsdtar'
+            supportsXz = ($versionText -match '(?i)liblzma')
+            version = $versionText
+        }
+    }
+
+    if ($versionText -match '(?i)GNU tar') {
+        # GNU tar shells out to the xz binary for .tar.xz payloads.
+        $xzCommand = Get-Command 'xz' -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+        return [ordered]@{
+            flavor = 'gnutar'
+            supportsXz = ($null -ne $xzCommand)
+            version = $versionText
+        }
+    }
+
+    return [ordered]@{
+        flavor = 'unknown'
+        supportsXz = $false
+        version = $versionText
+    }
+}
+
+function Get-SevenZipCandidatePath {
+    $candidates = New-Object System.Collections.Generic.List[string]
+    foreach ($commandName in @('7z', '7zz', '7za')) {
+        $command = Get-Command $commandName -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($null -ne $command) {
+            $candidates.Add([string]$command.Source)
+        }
+    }
+
+    foreach ($programFilesRoot in @($env:ProgramFiles, ${env:ProgramFiles(x86)})) {
+        if ([string]::IsNullOrWhiteSpace($programFilesRoot)) { continue }
+        $candidates.Add((Join-Path $programFilesRoot '7-Zip\7z.exe'))
+    }
+
+    return $candidates.ToArray()
+}
+
+function Resolve-ArchiveExtractionTool {
+    $inspected = New-Object System.Collections.Generic.List[string]
+    $seenPaths = New-Object System.Collections.Generic.List[string]
+    $tarCandidates = New-Object System.Collections.Generic.List[string]
+
+    if (-not [string]::IsNullOrWhiteSpace($env:SystemRoot)) {
+        # Prefer the Windows-bundled bsdtar: a Git/MSYS GNU tar earlier on PATH reads
+        # "C:\..." as a remote host specification and cannot extract into a Windows path.
+        $tarCandidates.Add((Join-Path $env:SystemRoot 'System32\tar.exe'))
+    }
+
+    $pathTar = Get-Command 'tar' -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($null -ne $pathTar) {
+        $tarCandidates.Add([string]$pathTar.Source)
+    }
+
+    $fallbackTarPath = ''
+    foreach ($candidate in $tarCandidates) {
+        if ([string]::IsNullOrWhiteSpace($candidate)) { continue }
+        if ($seenPaths -contains $candidate.ToLowerInvariant()) { continue }
+        $seenPaths.Add($candidate.ToLowerInvariant())
+        if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) { continue }
+
+        $capability = Get-ArchiveToolCapability -ToolPath $candidate
+        $inspected.Add("$candidate [$($capability.flavor), xz=$($capability.supportsXz)]")
+        if ($capability.supportsXz) {
+            return [ordered]@{
+                kind = 'tar'
+                path = $candidate
+                forceLocal = ($capability.flavor -eq 'gnutar')
+                inspected = $inspected.ToArray()
+            }
+        }
+
+        if ([string]::IsNullOrWhiteSpace($fallbackTarPath) -and $capability.flavor -eq 'unknown') {
+            $fallbackTarPath = $candidate
+        }
+    }
+
+    foreach ($sevenZipCandidate in (Get-SevenZipCandidatePath)) {
+        if ([string]::IsNullOrWhiteSpace($sevenZipCandidate)) { continue }
+        if ($seenPaths -contains $sevenZipCandidate.ToLowerInvariant()) { continue }
+        $seenPaths.Add($sevenZipCandidate.ToLowerInvariant())
+        if (-not (Test-Path -LiteralPath $sevenZipCandidate -PathType Leaf)) { continue }
+
+        $inspected.Add("$sevenZipCandidate [7-zip]")
+        return [ordered]@{
+            kind = 'sevenzip'
+            path = $sevenZipCandidate
+            forceLocal = $false
+            inspected = $inspected.ToArray()
+        }
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($fallbackTarPath)) {
+        return [ordered]@{
+            kind = 'tar'
+            path = $fallbackTarPath
+            forceLocal = $false
+            inspected = $inspected.ToArray()
+        }
+    }
+
+    return [ordered]@{
+        kind = 'none'
+        path = ''
+        forceLocal = $false
+        inspected = $inspected.ToArray()
+    }
+}
+
+function Get-ArchiveExtractionHint {
+    param(
+        [Parameter(Mandatory = $true)][AllowEmptyString()][string]$Output,
+        [Parameter(Mandatory = $true)][string]$ExtractRoot
+    )
+
+    $hints = New-Object System.Collections.Generic.List[string]
+    if ($Output -match '(?i)unrecognized archive format|unsupported compression|liblzma|lzma') {
+        $hints.Add('The extractor cannot read .tar.xz. Install 7-Zip, or update Windows until "tar --version" reports liblzma.')
+    }
+    if ($Output -match '(?i)symlink|symbolic link|privilege') {
+        $hints.Add('A privileged operation failed, usually creating a symbolic link. Enable Windows developer mode or run the build from an elevated PowerShell session.')
+    }
+    if ($Output -match '(?i)permission denied|access is denied|used by another process') {
+        $hints.Add('A file could not be written. Exclude the build directory from real-time antivirus scanning and close anything holding the build output open.')
+    }
+    if ($Output -match '(?i)no space left|not enough space|disk full') {
+        $hints.Add('The build drive ran out of space during extraction.')
+    }
+    if ($ExtractRoot.Length -gt 120) {
+        $hints.Add("The extraction root is $($ExtractRoot.Length) characters long; deep paths break extraction on Windows. Re-run with a short work root, for example -WorkRoot C:\codex-build.")
+    }
+    if ($ExtractRoot -cmatch '[^\u0020-\u007E]') {
+        $hints.Add('The extraction root contains non-ASCII characters, which some extractors cannot resolve. Re-run with an ASCII-only work root, for example -WorkRoot C:\codex-build.')
+    }
+
+    return $hints.ToArray()
+}
+
+function New-ArchiveExtractionErrorMessage {
+    param(
+        [Parameter(Mandatory = $true)][string]$ToolPath,
+        [Parameter(Mandatory = $true)][int]$ExitCode,
+        [Parameter(Mandatory = $true)][AllowEmptyString()][string]$Output,
+        [Parameter(Mandatory = $true)][string]$ExtractRoot
+    )
+
+    $lines = New-Object System.Collections.Generic.List[string]
+    $lines.Add("Failed to extract Codex primary runtime archive with exit code $ExitCode (extractor: $ToolPath).")
+    if ([string]::IsNullOrWhiteSpace($Output)) {
+        $lines.Add('The extractor reported no output.')
+    }
+    else {
+        $lines.Add('Extractor output:')
+        $outputLines = @($Output -split "`r?`n" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Last 20)
+        foreach ($outputLine in $outputLines) {
+            $lines.Add("  $($outputLine.Trim())")
+        }
+    }
+
+    foreach ($hint in (Get-ArchiveExtractionHint -Output $Output -ExtractRoot $ExtractRoot)) {
+        $lines.Add("Hint: $hint")
+    }
+
+    return ($lines -join [System.Environment]::NewLine)
+}
+
+function Expand-CodexRuntimeArchive {
+    param(
+        [Parameter(Mandatory = $true)][string]$ArchivePath,
+        [Parameter(Mandatory = $true)][string]$ExtractRoot
+    )
+
+    $tool = Resolve-ArchiveExtractionTool
+    $inspectedText = if ($tool.inspected.Count -gt 0) { $tool.inspected -join '; ' } else { 'none' }
+    if ($tool.kind -eq 'none') {
+        throw "No extractor able to read the Codex primary runtime archive (.tar.xz) was found. Install 7-Zip, or use a tar build with xz support. Inspected: $inspectedText"
+    }
+
+    Write-BuildTrace "Extracting Codex primary runtime with $($tool.path)."
+
+    if ($tool.kind -eq 'sevenzip') {
+        # 7-Zip cannot stream .tar.xz in one pass, so decompress to a staged tar first.
+        $stageRoot = Join-Path (Split-Path -Parent $ExtractRoot) 'xz-stage'
+        if (Test-Path -LiteralPath $stageRoot) {
+            Remove-Item -LiteralPath $stageRoot -Recurse -Force
+        }
+        New-Item -ItemType Directory -Force -Path $stageRoot | Out-Null
+
+        try {
+            $decompressResult = Invoke-CapturedProcess -FilePath $tool.path -Arguments @('x', '-y', $ArchivePath, "-o$stageRoot")
+            if ($decompressResult.exitCode -ne 0) {
+                throw (New-ArchiveExtractionErrorMessage -ToolPath $tool.path -ExitCode $decompressResult.exitCode -Output $decompressResult.output -ExtractRoot $ExtractRoot)
+            }
+
+            $stagedTar = @(Get-ChildItem -LiteralPath $stageRoot -Filter '*.tar' -File) | Select-Object -First 1
+            if ($null -eq $stagedTar) {
+                throw "7-Zip did not produce a tar archive for the Codex primary runtime under $stageRoot."
+            }
+
+            $unpackResult = Invoke-CapturedProcess -FilePath $tool.path -Arguments @('x', '-y', $stagedTar.FullName, "-o$ExtractRoot")
+            if ($unpackResult.exitCode -ne 0) {
+                throw (New-ArchiveExtractionErrorMessage -ToolPath $tool.path -ExitCode $unpackResult.exitCode -Output $unpackResult.output -ExtractRoot $ExtractRoot)
+            }
+        }
+        finally {
+            if (Test-Path -LiteralPath $stageRoot) {
+                Remove-Item -LiteralPath $stageRoot -Recurse -Force -ErrorAction SilentlyContinue
+            }
+        }
+
+        return
+    }
+
+    $tarArguments = @()
+    if ($tool.forceLocal) {
+        # GNU tar otherwise reads the drive letter in "C:\..." as a remote host specification.
+        $tarArguments += '--force-local'
+    }
+    $tarArguments += @('-xf', $ArchivePath, '-C', $ExtractRoot)
+
+    $extractionResult = Invoke-CapturedProcess -FilePath $tool.path -Arguments $tarArguments
+    if ($extractionResult.exitCode -ne 0) {
+        throw (New-ArchiveExtractionErrorMessage -ToolPath $tool.path -ExitCode $extractionResult.exitCode -Output $extractionResult.output -ExtractRoot $ExtractRoot)
+    }
+}
+
 function Resolve-OfflineRuntimePluginMarketplaceRoot {
     param(
         [Parameter(Mandatory = $true)]$Config,
@@ -505,16 +782,8 @@ function Resolve-OfflineRuntimePluginMarketplaceRoot {
     }
     New-Item -ItemType Directory -Force -Path $extractRoot | Out-Null
 
-    $tarCommand = Get-Command tar -ErrorAction SilentlyContinue
-    if ($null -eq $tarCommand) {
-        throw 'tar was not found. It is required to extract the Codex primary runtime archive.'
-    }
-
     Write-BuildTrace "Extracting Codex primary runtime $version."
-    & $tarCommand.Source -xf $archivePath -C $extractRoot
-    if ($LASTEXITCODE -ne 0) {
-        throw "Failed to extract Codex primary runtime archive with tar exit code $LASTEXITCODE."
-    }
+    Expand-CodexRuntimeArchive -ArchivePath $archivePath -ExtractRoot $extractRoot
 
     if (-not (Test-Path -LiteralPath (Join-Path $marketplaceRoot '.agents\plugins\marketplace.json') -PathType Leaf)) {
         throw "Codex primary runtime marketplace was not found after extraction: $marketplaceRoot"
