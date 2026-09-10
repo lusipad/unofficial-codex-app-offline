@@ -1125,6 +1125,7 @@ if (Test-Path $desktopPatchesSource) {
   )) {
     New-Item -ItemType Directory -Force -Path $desktopPatchesDest | Out-Null
     Copy-Item -Path (Join-Path $desktopPatchesSource '*') -Destination $desktopPatchesDest -Recurse -Force
+    Copy-Item -Path (Join-Path $repoRoot 'web-gateway\gateway\src\ipc\codex\capabilityContractData.cjs') -Destination (Join-Path $desktopPatchesDest 'capabilityContractData.cjs') -Force
   }
   Write-BuildTrace 'Desktop patches copied to _internal/patches/ and app/patches/.'
 } else {

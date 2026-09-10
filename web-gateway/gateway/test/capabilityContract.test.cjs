@@ -229,8 +229,8 @@ test("source data contract declares every required desktop asar marker", () => {
     }
   }
 
-  assert.equal(declared.has("/*codex-offline:default-on-gate-wrapper*/"), false);
-  assert.equal(Object.hasOwn(contractData, "DESKTOP_GATE_DENYLIST"), false);
+  assert.equal(declared.has("/*codex-offline:default-on-gate-wrapper*/"), true);
+  assert.deepEqual(contractData.DESKTOP_GATE_DENYLIST, []);
 });
 
 test("source data contract covers direct exe asar patch surfaces", () => {

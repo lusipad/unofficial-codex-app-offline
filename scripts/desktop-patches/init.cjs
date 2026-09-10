@@ -16,6 +16,13 @@
   try { _electron = require('electron'); } catch (_e) { return; }
   if (!_electron || !_electron.ipcMain) return;
 
+  var _capabilityContract;
+  try {
+    _capabilityContract = require('./capabilityContractData.cjs');
+  } catch (_e) {
+    _capabilityContract = null;
+  }
+
   var ipcMain = _electron.ipcMain;
   var app = _electron.app;
   var session = _electron.session;
@@ -173,73 +180,13 @@
   // Gate Override Data (synced with capabilityContractData.cjs)
   // ═══════════════════════════════════════════════════════════════════════
 
-  var STATSIG_DEFAULT_FEATURES_CONFIG = 'statsig_default_enable_features';
+  var STATSIG_DEFAULT_FEATURES_CONFIG = _capabilityContract &&
+    _capabilityContract.STATSIG_DEFAULT_FEATURES_CONFIG || 'statsig_default_enable_features';
   var STATSIG_MODEL_AVAILABILITY_CONFIG = '107580212';
 
   /** Every Statsig gate that should be unconditionally enabled offline. */
-  var STATSIG_GATE_OVERRIDES = {
-    // From STATSIG_DEFAULT_FEATURE_OVERRIDES
-    '4166894088': true,   // Settings page
-    '824038554': true,    // Codex/Work mode selector
-    '2106641128': true,   // Experimental features settings
-    '3693343337': true,   // Model features settings
-    '3026692602': true,   // Workspace dependencies settings
-    '4039078146': true,   // Sidebar activity view
-    '410262010': true,    // Browser use agent
-    '410065390': true,    // External Chrome plugin @mentions
-    '4250630194': true,   // In-app browser
-    '2177625257': true,   // Browser history and profile import
-    '2679188970': true,   // Avatar overlay
-    '1060282072': true,   // Thread overlay
-    '1506311413': true,   // Computer Use
-    '2171042036': true,   // Control desktop feature
-    '3903563814': true,   // Browser non-local sites
-    '3032432888': true,   // Thread hover cards
-    '3903742690': true,   // Artifacts pane
-    '3326157269': true,   // External agent config import
-    '2900529421': true,   // External agent config
-    '2711149772': true,   // External agent config
-    '816842483': true,    // External agent config
-    '3278809559': true,   // Import settings page (26.803.81509+)
-    guardian_approval: true,
-    fast_mode: true,
-    browserPane: true,
-    inAppBrowserUse: true,
-    inAppBrowserUseAllowed: true,
-    externalBrowserUse: true,
-    externalBrowserUseAllowed: true,
-    computerUse: true,
-    computerUseNodeRepl: true,
-    control: true,
-    avatarOverlay: true,
-    artifacts: true,
-
-    // Additional gates currently only in DESKTOP_ASAR_KNOWN_GATE_IDS
-    '3075919032': true,   // Automations
-    '3789238711': true,   // Pull Requests
-    '2302560359': true,   // Scratchpad
-    '1488233300': true,   // Heartbeat automations
-    '2425897452': true,   // Ambient suggestions
-    '2553306736': true,   // PR badge icons
-    '875176429': true,    // Memories
-    '505458': true,       // Worktree mode
-    '1907601843': true,   // Local env cloud onboarding
-    '588076040': true,    // Bundled plugins marketplace
-    '533078438': true,    // Plugins nav (bypass API-key lockout)
-    '3413548395': false,  // Unified plugins page; true selects the legacy storefront
-    '1609556872': true,   // Slash commands menu
-    '1221508807': true,   // Background subagents
-    '459748632': true,    // Multi-window
-    '1244621283': true,   // Global dictation
-    '4100906017': true,   // Global dictation (alt)
-    '2574306096': true,   // Chronicle
-    '1444479692': true,   // Agent personality
-    '717035860': true,    // Sidebar customization and destination discovery
-    '1042620455': true,   // Remote connections
-    '4114442250': true,   // Remote connections feature flag
-    '839469903': true,    // Artifact Electron native
-  };
-
+  var STATSIG_GATE_OVERRIDES = _capabilityContract &&
+    _capabilityContract.STATSIG_DEFAULT_FEATURE_OVERRIDES || {};
   /** Forced desktop feature state (always-on). */
   var FORCED_DESKTOP_FEATURE_STATE = {
     artifactsPane: true,

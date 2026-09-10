@@ -63,6 +63,10 @@ const STATSIG_DEFAULT_FEATURE_OVERRIDES = Object.freeze({
   "4114442250": true,
 });
 
+// Unknown desktop renderer gates are opened by the central Statsig SDK seam.
+// Keep this list empty until a real bundle review proves a gate must remain off.
+const DESKTOP_GATE_DENYLIST = Object.freeze([]);
+
 const DEFAULT_DESKTOP_FEATURE_STATE = Object.freeze({
   ambientSuggestions: false,
   artifactsPane: true,
@@ -250,6 +254,7 @@ const DESKTOP_ASAR_PATCH_MARKERS = Object.freeze([
   "/*codex-offline:ultra-reasoning-effort*/",
   "/*codex-offline:codex-mobile-auth-relogin*/",
   "/*codex-offline:electron-namespace-no-auto-updater*/",
+  "/*codex-offline:default-on-gate-wrapper*/",
 ]);
 
 const FAST_MODE_CONTRACT = Object.freeze({
@@ -292,5 +297,6 @@ module.exports = {
   REQUIRED_WEB_SHELL_FEATURE_MARKERS,
   STATSIG_DEFAULT_FEATURE_OVERRIDES,
   STATSIG_DEFAULT_FEATURES_CONFIG,
+  DESKTOP_GATE_DENYLIST,
   normalizeDesktopFeatureValues,
 };

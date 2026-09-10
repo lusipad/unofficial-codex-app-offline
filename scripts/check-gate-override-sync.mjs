@@ -70,6 +70,13 @@ function readKnownGateIds() {
 /** Numeric gate ids set to true in init.cjs STATSIG_GATE_OVERRIDES (runtime list). */
 function readInitGateIds() {
   const source = fs.readFileSync(INIT_CJS_PATH, 'utf8');
+  if (source.includes("require('./capabilityContractData.cjs')") &&
+      source.includes('_capabilityContract.STATSIG_DEFAULT_FEATURE_OVERRIDES')) {
+    const contract = require(CONTRACT_PATH);
+    return new Set(Object.entries(contract.STATSIG_DEFAULT_FEATURE_OVERRIDES)
+      .filter(([id, value]) => value === true && /^\d+$/.test(id))
+      .map(([id]) => id));
+  }
   const block = source.match(/STATSIG_GATE_OVERRIDES\s*=\s*\{([\s\S]*?)\n\s*\};/);
   if (!block) {
     throw new Error(

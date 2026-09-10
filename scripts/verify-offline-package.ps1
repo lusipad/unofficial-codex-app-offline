@@ -406,9 +406,11 @@ try {
         '_internal\app\resources\app.asar',
         '_internal\app\resources\codex.exe',
         '_internal\app\resources\cua_node\bin\node_modules\@oai\sky\dist\js-deps\tslib.es6.js',
-        '_internal\patches\init.cjs',
-        '_internal\patches\plugin-service-compat.cjs',
-        '_internal\app\patches\init.cjs',
+         '_internal\patches\init.cjs',
+         '_internal\patches\capabilityContractData.cjs',
+         '_internal\patches\plugin-service-compat.cjs',
+         '_internal\app\patches\init.cjs',
+         '_internal\app\patches\capabilityContractData.cjs',
         '_internal\app\patches\plugin-service-compat.cjs',
         '_internal\powershell-shim\CodexOfflineShim\CodexOfflineShim.psd1',
         '_internal\powershell-shim\CodexOfflineShim\CodexOfflineShim.psm1',
@@ -468,13 +470,8 @@ try {
                 throw "Packaged init.cjs is missing plugin-service adapter '$marker': $relativePath"
             }
         }
-        if ($initPatchContent -notmatch "'3413548395'\s*:\s*false") {
-            throw "Packaged init.cjs does not select the unified plugins page: $relativePath"
-        }
-        foreach ($gateId in @('3278809559', '1042620455', '4114442250')) {
-            if ($initPatchContent -notmatch "'$gateId'\s*:\s*true") {
-                throw "Packaged init.cjs does not enable settings gate '$gateId': $relativePath"
-            }
+        if ($initPatchContent -notmatch "_capabilityContract\.STATSIG_DEFAULT_FEATURE_OVERRIDES") {
+            throw "Packaged init.cjs does not consume the shared capability contract: $relativePath"
         }
     }
 

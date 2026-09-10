@@ -72,11 +72,7 @@ test("offline builds force the supported product and navigation UI gates", () =>
       contract.REQUIRED_STATSIG_FEATURE_MARKERS.includes(gateId),
       `${label}: package verifier markers`,
     );
-    assert.match(
-      initSource,
-      new RegExp(`["']${gateId}["']\\s*:\\s*true`),
-      `${label}: desktop runtime injection`,
-    );
+    assert.match(initSource, /require\('\.\/capabilityContractData\.cjs'\)/, `${label}: shared desktop contract`);
   }
 
   const workspaceMarker = "/*codex-offline:workspace-dependencies-settings*/";
@@ -94,7 +90,7 @@ test("offline builds select the unified plugins page instead of the legacy store
   assert.equal(contract.STATSIG_DEFAULT_FEATURE_OVERRIDES[gateId], false);
   assert.equal(contract.DESKTOP_ASAR_KNOWN_GATE_IDS.includes(gateId), false);
   assert.equal(contract.REQUIRED_STATSIG_FEATURE_MARKERS.includes(gateId), false);
-  assert.match(initSource, new RegExp(`["']${gateId}["']\\s*:\\s*false`));
+  assert.match(initSource, /_capabilityContract\.STATSIG_DEFAULT_FEATURE_OVERRIDES/);
   assert.ok(contract.DESKTOP_ASAR_PATCH_MARKERS.includes(patchMarker));
   assert.ok(verifyScriptSource.includes(`requiredPatchMarker('${patchMarker}')`));
   assert.equal(
@@ -150,6 +146,21 @@ test("runtime gate fallback patches custom sessions and asynchronous IPC results
     initSource,
     /statsigConfig\.value\[gateKeys\[j\]\] !== configGateValue/,
     "runtime fallback must overwrite a stale false gate instead of only filling missing keys",
+  );
+});
+
+test("desktop renderer defaults unknown gates on while preserving explicit false gates", () => {
+  assert.match(patchScriptSource, /function patchDefaultOnStatsigCheckGate\(/);
+  assert.match(patchScriptSource, /DESKTOP_GATE_DENYLIST/);
+  assert.match(
+    patchScriptSource,
+    /filter\(\(\[, value\]\) => value === false\)/,
+    "explicit false contract entries must remain authoritative",
+  );
+  assert.match(
+    patchScriptSource,
+    /default-on-gate-wrapper/,
+    "the central wrapper must have a verifiable marker",
   );
 });
 

@@ -155,6 +155,7 @@ const {
   DESKTOP_BROWSER_USE_CAPABILITY_KEYS,
   CONTEXT_USAGE_CONTRACT,
   FAST_MODE_CONTRACT,
+  DESKTOP_GATE_DENYLIST,
 } = require('../web-gateway/gateway/src/ipc/codex/capabilityContractData.cjs');
 const {
   computeAsarHeaderHash,
@@ -784,6 +785,19 @@ function patchDirectStatsigGateCalls(content, gateIds, patchMarker) {
   }
 
   return { content: next, count };
+}
+
+function patchDefaultOnStatsigCheckGate(content, patchMarker, denylist, overrides) {
+  if (content.includes(patchMarker)) return { content, seen: true, patched: false, alreadyCorrect: true };
+  const anchor = /checkGate\(([A-Za-z_$][\w$]*),([A-Za-z_$][\w$]*)\)\{return this\.getFeatureGate\(\1,\2\)\.value\}/;
+  const match = anchor.exec(content);
+  if (!match) return { content, seen: false, patched: false, alreadyCorrect: false };
+  const explicitFalse = Object.entries(overrides || {})
+    .filter(([, value]) => value === false)
+    .map(([key]) => String(key));
+  const denied = JSON.stringify([...new Set([...explicitFalse, ...Array.from(denylist || []).map(String)])]);
+  const replacement = `checkGate(${match[1]},${match[2]}){return ${denied}.includes(String(${match[1]}))?this.getFeatureGate(${match[1]},${match[2]}).value:!0${patchMarker}}`;
+  return { content: content.replace(anchor, replacement), seen: true, patched: true, alreadyCorrect: false };
 }
 
 function patchOfflineNetworkModeDefaults(
@@ -4298,6 +4312,9 @@ try {
     let fastModeAuthPatched = false;
     let fastModeServiceTierPatched = false;
     let rendererKnownStatsigGatePatchCount = 0;
+    var defaultOnStatsigGatePatched = false;
+    var defaultOnStatsigGateSeen = false;
+    var defaultOnStatsigGateAlreadyCorrect = false;
     let sidebarActivitySurfaceSeen = false;
     let sidebarActivityViewPatched = false;
     const legacyPluginsPagePatchResidualFiles = [];
@@ -4430,6 +4447,19 @@ try {
         rendererKnownStatsigGatePatchCount += rendererKnownStatsigGatePatch.count;
         changed = true;
       }
+      const defaultOnStatsigGatePatch = patchDefaultOnStatsigCheckGate(
+        content,
+        contractPatchMarker('/*codex-offline:default-on-gate-wrapper*/'),
+        DESKTOP_GATE_DENYLIST,
+        require('../web-gateway/gateway/src/ipc/codex/capabilityContractData.cjs').STATSIG_DEFAULT_FEATURE_OVERRIDES,
+      );
+      if (defaultOnStatsigGatePatch.patched) {
+        content = defaultOnStatsigGatePatch.content;
+        defaultOnStatsigGatePatched = true;
+        changed = true;
+      }
+      defaultOnStatsigGateSeen ||= defaultOnStatsigGatePatch.seen;
+      defaultOnStatsigGateAlreadyCorrect ||= defaultOnStatsigGatePatch.alreadyCorrect;
       const offlineNetworkModePatch = patchOfflineNetworkModeDefaults(
         content,
         OFFLINE_QUERY_NETWORK_MODE_PATCH_MARKER,
@@ -4608,6 +4638,11 @@ try {
     );
   }
   log('Renderer Statsig gates handled by static surface patches plus init.cjs runtime fallback.');
+  if (!defaultOnStatsigGateSeen) {
+    warn('Central Statsig checkGate seam was not found; unknown gates will use the known-gate fallback.');
+  } else if (defaultOnStatsigGateAlreadyCorrect || defaultOnStatsigGatePatched) {
+    log('Unknown desktop renderer gates use the central default-on Statsig seam.');
+  }
 
   // Surface drift first (so optional misses are always visible), then fail the
   // build before repacking if any required patch did not apply, so an upstream

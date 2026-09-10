@@ -247,3 +247,4 @@
 - `pwsh -NoProfile -File ./scripts/build-offline-package.ps1 -SkipInstaller -MetadataOutputPath ./build/tmp/web-refactor-build-metadata.json`
 - `pwsh -NoProfile -File ./scripts/verify-offline-package.ps1 -BuildMetadataPath ./build/tmp/web-refactor-build-metadata.json`
 - Browser smoke on `http://127.0.0.1:3744`
+- Desktop feature gates now use the shared capability contract from both the Gateway and `init.cjs`. A central renderer Statsig seam enables unknown gates by default while preserving explicit false decisions; the existing known-gate patch remains as a fallback when the upstream seam drifts.
