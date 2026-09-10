@@ -867,46 +867,6 @@ function patchSidebarActivitySurface(content) {
   };
 }
 
-function migrateLegacyPluginsPageSelection(content) {
-  let next = content;
-  let migratedCount = 0;
-  const legacyPageSelectionSource =
-    `([A-Za-z_$][\\w$]*)=!0${escapeRegExp(RENDERER_KNOWN_STATSIG_GATES_PATCH_MARKER)}` +
-    '&&([A-Za-z_$][\\w$]*)===`plugins`&&\\(' +
-    '([A-Za-z_$][\\w$]*)\\.initialTab===`plugins`\\|\\|\\3\\.initialTab===`skills`\\)';
-  const legacyPageSelectionRe = new RegExp(legacyPageSelectionSource, 'g');
-  const legacyPrefetchRe = new RegExp(
-    `([A-Za-z_$][\\w$]*)&&!0${escapeRegExp(LEGACY_PLUGINS_MANAGEMENT_IN_SKILLS_PATCH_MARKER)}` +
-      '&&Promise\\.all\\(\\[',
-    'g',
-  );
-
-  next = next.replace(
-    legacyPageSelectionRe,
-    (_match, selected, browseTab, initialState) => {
-      migratedCount += 1;
-      return (
-        `${selected}=!1${UNIFIED_PLUGINS_PAGE_PATCH_MARKER}&&` +
-        `${browseTab}===\`plugins\`&&(${initialState}.initialTab===\`plugins\`||` +
-        `${initialState}.initialTab===\`skills\`)`
-      );
-    },
-  );
-  next = next.replace(legacyPrefetchRe, (_match, enabled) => {
-    migratedCount += 1;
-    return `${enabled}&&!1${UNIFIED_PLUGINS_PAGE_PATCH_MARKER}&&Promise.all([`;
-  });
-
-  return {
-    content: next,
-    migratedCount,
-    legacyMarkerResidual: next.includes(
-      LEGACY_PLUGINS_MANAGEMENT_IN_SKILLS_PATCH_MARKER,
-    ),
-    legacySelectionResidual: new RegExp(legacyPageSelectionSource).test(next),
-  };
-}
-
 function patchWorkspaceDependenciesSettingsGate(
   content,
   patchMarker,
@@ -1055,10 +1015,6 @@ const SIDEBAR_ACTIVITY_VIEW_PATCH_MARKER =
   contractPatchMarker('/*codex-offline:sidebar-activity-view*/');
 const RENDERER_KNOWN_STATSIG_GATES_PATCH_MARKER =
   contractPatchMarker('/*codex-offline:renderer-known-statsig-gates*/');
-const LEGACY_PLUGINS_MANAGEMENT_IN_SKILLS_PATCH_MARKER =
-  '/*codex-offline:plugins-management-in-skills*/';
-const UNIFIED_PLUGINS_PAGE_PATCH_MARKER =
-  contractPatchMarker('/*codex-offline:unified-plugins-page*/');
 const OFFLINE_QUERY_NETWORK_MODE_PATCH_MARKER =
   contractPatchMarker('/*codex-offline:offline-query-network-mode*/');
 const OFFLINE_MUTATION_NETWORK_MODE_PATCH_MARKER =
@@ -2043,8 +1999,6 @@ try {
     contractPatchMarker('/*codex-offline:node-repl-disable-sandbox*/');
   const NODE_REPL_TOOL_SEARCH_FEATURE_PATCH_MARKER =
     contractPatchMarker('/*codex-offline:node-repl-tool-search-feature*/');
-  const COMPUTER_USE_PLUGIN_ROOT_FALLBACK_PATCH_MARKER =
-    contractPatchMarker('/*codex-offline:computer-use-plugin-root-fallback*/');
   const COMPUTER_USE_RESOURCE_RUNTIME_PATHS_PATCH_MARKER =
     contractPatchMarker('/*codex-offline:computer-use-resource-runtime-paths*/');
   const COMPUTER_USE_FORWARD_THREAD_START_DIAGNOSTICS_PATCH_MARKER =
@@ -2061,10 +2015,6 @@ try {
     '/*codex-offline:computer-use-mcp-status-diagnostics*/';
   const COMPUTER_USE_THREAD_START_TOOL_SEARCH_PATCH_MARKER =
     contractPatchMarker('/*codex-offline:computer-use-thread-start-tool-search*/');
-  const COMPUTER_USE_INPUT_MENTION_PATCH_MARKER =
-    contractPatchMarker('/*codex-offline:computer-use-input-mention*/');
-  const COMPUTER_USE_INPUT_MENTION_V2_PATCH_MARKER =
-    contractPatchMarker('/*codex-offline:computer-use-input-mention-v2*/');
   const COMPUTER_USE_INPUT_SKILL_PATCH_MARKER =
     contractPatchMarker('/*codex-offline:computer-use-input-skill*/');
   const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_PATCH_MARKER =
@@ -2077,45 +2027,6 @@ try {
     contractPatchMarker('/*codex-offline:archived-threads-cache-fallback*/');
   const ARCHIVED_SETTINGS_OFFLINE_LOCAL_VISIBILITY_PATCH_MARKER =
     contractPatchMarker('/*codex-offline:archived-settings-offline-local-visibility*/');
-  const COMPUTER_USE_INPUT_MENTION_HELPER =
-    'function _codexOfflineComputerUseMentionItems(e){let t=typeof e==`string`?e.trimStart():``;' +
-    'let n=t.match(/\\[(@?(?:[^\\]]+))\\]\\((plugin:\\/\\/computer-use(?:@[^)]+)?)\\)/),' +
-    'r=n?.[2]??`plugin://computer-use@openai-bundled`,i=typeof n?.[1]==`string`?' +
-    'n[1].replace(/^@/,``).trim():``;' +
-    'i.length===0&&(i=/^(?:@?\\u7535\\u8111)(?=\\s|$)/.test(t)?`\\u7535\\u8111`:`Computer`);' +
-    'r.includes(`@`)||(r=`plugin://computer-use@openai-bundled`);' +
-    'return(t.includes(`plugin://computer-use`)||/^(?:@?(?:\\u7535\\u8111|Computer(?: Use)?))(?=\\s|$)/i.test(t))?' +
-    '[{type:`mention`,name:i,path:r}]:[]}' +
-    COMPUTER_USE_INPUT_MENTION_PATCH_MARKER +
-    COMPUTER_USE_INPUT_MENTION_V2_PATCH_MARKER;
-  const COMPUTER_USE_INPUT_MENTION_HELPER_RE =
-    /function _codexOfflineComputerUseMentionItems\(e\)\{[\s\S]*?\}\/\*codex-offline:computer-use-input-mention\*\/(?:\/\*codex-offline:computer-use-input-mention-v2\*\/)?/;
-  const COMPUTER_USE_INPUT_MENTION_HELPER_NEEDLE =
-    'async function $g({context:e,prompt:t,workspaceRoots:n,cwd:r,hostId:i,agentMode:a,serviceTier:o,collaborationMode:s,memoryPreferences:c,workspaceKind:l=`project`,projectlessOutputDirectory:u,projectAssignment:d})';
-  const COMPUTER_USE_INPUT_MENTION_PATCHES = [
-    {
-      needle:
-        'input:[{type:`text`,text:t,text_elements:[]},...Qg(e,i!==He,{shouldRestrictRemoteHostImageSize:!1})]',
-      replacement:
-        'input:[{type:`text`,text:t,text_elements:[]},..._codexOfflineComputerUseMentionItems(t),...Qg(e,i!==He,{shouldRestrictRemoteHostImageSize:!1})]',
-    },
-    {
-      needle:
-        'p=[{type:`text`,text:v(i),text_elements:[]},...Qg(i,d,{shouldRestrictRemoteHostImageSize:!1})]',
-      replacement:
-        'p=[{type:`text`,text:v(i),text_elements:[]},..._codexOfflineComputerUseMentionItems(v(i)),...Qg(i,d,{shouldRestrictRemoteHostImageSize:!1})]',
-    },
-    {
-      needle:
-        'f=[{type:`text`,text:v(u),text_elements:[]},...Qg(u,c,{shouldRestrictRemoteHostImageSize:!1})]',
-      replacement:
-        'f=[{type:`text`,text:v(u),text_elements:[]},..._codexOfflineComputerUseMentionItems(v(u)),...Qg(u,c,{shouldRestrictRemoteHostImageSize:!1})]',
-    },
-  ];
-  const COMPUTER_USE_INPUT_MENTION_CURRENT_RE =
-    /(\[\{type:`text`,text:([^,\]]+?),text_elements:\[\]\},)\.\.\.([A-Za-z_$][\w$]*)\(([^)]*?\{shouldRestrictRemoteHostImageSize:!1\})\)\]/g;
-  const COMPUTER_USE_INPUT_MENTION_CURRENT_TEST_RE =
-    /(\[\{type:`text`,text:([^,\]]+?),text_elements:\[\]\},)\.\.\.([A-Za-z_$][\w$]*)\(([^)]*?\{shouldRestrictRemoteHostImageSize:!1\})\)\]/;
   const FEATURE_OVERRIDES_PRESERVE_MCP_CONFIG_PATCH_MARKER =
     contractPatchMarker('/*codex-offline:feature-overrides-preserve-mcp-config*/');
   const FEATURE_OVERRIDES_CONFIG_NAMESPACE_RE =
@@ -2162,32 +2073,7 @@ try {
     NODE_REPL_TOOL_SEARCH_FEATURE_PATCH_MARKER +
     '}' +
     NODE_REPL_DISABLE_SANDBOX_PATCH_MARKER;
-  const COMPUTER_USE_PLUGIN_ROOT_FALLBACK_NEEDLE =
-    'function Tt({codexHome:t,env:r=process.env,marketplaceName:i=e.ir(n.j.resolve()),' +
-    'marketplaces:a,pathExists:o=c.existsSync}){for(let n of ft({marketplaceName:i,marketplaces:a}))' +
-    '{let i=n.plugins.find(e=>e.name===`computer-use`&&e.installed&&e.enabled&&e.source.type===`local`);' +
-    'if(i?.source.type===`local`)return wt({env:r,installedPluginRoot:e.cr({codexHome:t,' +
-    'localVersion:i.localVersion,marketplaceName:n.name,pluginName:i.name}),pathExists:o})}' +
-    'return wt({env:r,pathExists:o})}';
-  const COMPUTER_USE_PLUGIN_ROOT_FALLBACK_REPLACEMENT =
-    'function Tt({codexHome:t,env:r=process.env,marketplaceName:i=e.ir(n.j.resolve()),' +
-    'marketplaces:a,pathExists:l=c.existsSync}){for(let n of ft({marketplaceName:i,marketplaces:a}))' +
-    '{let i=n.plugins.find(e=>e.name===`computer-use`&&e.installed&&e.enabled&&e.source.type===`local`);' +
-    'if(i?.source.type===`local`)return wt({env:r,installedPluginRoot:e.cr({codexHome:t,' +
-    'localVersion:i.localVersion,marketplaceName:n.name,pluginName:i.name}),pathExists:l});' +
-    'let u=n.plugins.find(e=>e.name===`computer-use`&&' +
-    '(e.source?.type===`local`||e.source?.source===`local`)),d=u?.source?.path??null,' +
-    'f=n.path!=null&&d!=null?o.default.resolve(n.path,d):null;' +
-    'if(f!=null&&l(f)){Cn.info(`computer_use_plugin_root_fallback_used`,' +
-    '{safe:{marketplaceName:n.name},sensitive:{installedPluginRoot:f}});' +
-    'return wt({env:r,installedPluginRoot:f,pathExists:l})}}' +
-    COMPUTER_USE_PLUGIN_ROOT_FALLBACK_PATCH_MARKER +
-    'return wt({env:r,pathExists:l})}';
-  const COMPUTER_USE_PLUGIN_ROOT_FALLBACK_CURRENT_RE =
-    /function ([A-Za-z_$][\w$]*)\(\{codexHome:([A-Za-z_$][\w$]*),env:([A-Za-z_$][\w$]*)=process\.env,marketplaceName:([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\.or\(([A-Za-z_$][\w$]*)\.M\.resolve\(\)\),marketplaces:([A-Za-z_$][\w$]*),pathExists:([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\.existsSync\}\)\{for\(let ([A-Za-z_$][\w$]*) of ([A-Za-z_$][\w$]*)\(\{marketplaceName:\4,marketplaces:\7\}\)\)\{let ([A-Za-z_$][\w$]*)=\10\.plugins\.find\(([A-Za-z_$][\w$]*)=>\13\.name===`computer-use`&&\13\.installed&&\13\.enabled&&\13\.source\.type===`local`\);if\(\12\?\.source\.type===`local`\)return ([A-Za-z_$][\w$]*)\(\{env:\3,installedPluginRoot:\5\.([A-Za-z_$][\w$]*)\(\{codexHome:\2,localVersion:\12\.localVersion,marketplaceName:\10\.name,pluginName:\12\.name\}\),pathExists:\8\}\)\}return \14\(\{env:\3,pathExists:\8\}\)\}/;
-  const COMPUTER_USE_PLUGIN_ROOT_FALLBACK_CURRENT_RE_V2 =
-    /function ([A-Za-z_$][\w$]*)\(\{codexHome:([A-Za-z_$][\w$]*),env:([A-Za-z_$][\w$]*)=process\.env,marketplaceName:([A-Za-z_$][\w$]*)=([^,{}]+?\([^{}]*?\.resolve\(\)\)),marketplaces:([A-Za-z_$][\w$]*),pathExists:([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\.existsSync\}\)\{for\(let ([A-Za-z_$][\w$]*) of ([A-Za-z_$][\w$]*)\(\{marketplaceName:\4,marketplaces:\6\}\)\)\{let ([A-Za-z_$][\w$]*)=\9\.plugins\.find\(([A-Za-z_$][\w$]*)=>\12\.name===`computer-use`&&\12\.installed&&\12\.enabled&&\12\.source\.type===`local`\);if\(\11\?\.source\.type===`local`\)return ([A-Za-z_$][\w$]*)\(\{env:\3,installedPluginRoot:([A-Za-z_$][\w$]*)\.([A-Za-z_$][\w$]*)\(\{codexHome:\2,localVersion:\11\.localVersion,marketplaceName:\9\.name,pluginName:\11\.name\}\),pathExists:\7\}\)\}return \13\(\{env:\3,pathExists:\7\}\)\}/;
-  const COMPUTER_USE_PLUGIN_ROOT_FALLBACK_CURRENT_RE_V3 =
+  const COMPUTER_USE_RUNTIME_PATHS_CANONICAL_RE =
     /function (?<functionName>[A-Za-z_$][\w$]*)\(\{codexHome:(?<codexHome>[A-Za-z_$][\w$]*),env:(?<env>[A-Za-z_$][\w$]*)=process\.env,marketplaceName:(?<marketplaceName>[A-Za-z_$][\w$]*)=(?<marketplaceNameDefault>[^,]+),marketplaces:(?<marketplaces>[A-Za-z_$][\w$]*),pathExists:(?<pathExists>[A-Za-z_$][\w$]*)=(?<fsNamespace>[A-Za-z_$][\w$]*)\.existsSync\}\)\{for\(let (?<marketplace>[A-Za-z_$][\w$]*) of (?<listMarketplaces>[A-Za-z_$][\w$]*)\(\{marketplaceName:\k<marketplaceName>,marketplaces:\k<marketplaces>\}\)\)if\(\k<marketplace>\.plugins\.find\((?<pluginEntry>[A-Za-z_$][\w$]*)=>\k<pluginEntry>\.name===`computer-use`&&\k<pluginEntry>\.installed&&\k<pluginEntry>\.enabled&&\k<pluginEntry>\.source\.type===`local`\)\?\.source\.type===`local`\)return (?<computerUsePaths>[A-Za-z_$][\w$]*)\(\{codexHome:\k<codexHome>,env:\k<env>,pathExists:\k<pathExists>\}\);return \k<computerUsePaths>\(\{env:\k<env>,pathExists:\k<pathExists>\}\)\}/;
   const COMPUTER_USE_RESOURCE_RUNTIME_PATHS_CURRENT_RE =
     /function ([A-Za-z_$][\w$]*)\(\{codexHome:([A-Za-z_$][\w$]*),env:([A-Za-z_$][\w$]*)=process\.env,marketplaceName:([A-Za-z_$][\w$]*)=([^,{}]+),marketplaces:([A-Za-z_$][\w$]*),pathExists:([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\.existsSync\}\)\{for\(let ([A-Za-z_$][\w$]*) of ([A-Za-z_$][\w$]*)\(\{marketplaceName:\4,marketplaces:\6\}\)\)if\(\9\.plugins\.find\(([A-Za-z_$][\w$]*)=>\11\.name===`computer-use`&&\11\.installed&&\11\.enabled&&\11\.source\.type===`local`\)\?\.source\.type===`local`\)return ([A-Za-z_$][\w$]*)\(\{codexHome:\2,env:\3,pathExists:\7\}\);return \12\(\{env:\3,pathExists:\7\}\)\}/;
@@ -3608,89 +3494,15 @@ try {
 
   for (const filePath of mainBundleFiles) {
     let content = fs.readFileSync(filePath, 'utf8');
-    if (
-      content.includes(COMPUTER_USE_PLUGIN_ROOT_FALLBACK_PATCH_MARKER) ||
-      content.includes(COMPUTER_USE_RESOURCE_RUNTIME_PATHS_PATCH_MARKER)
-    ) {
+    if (content.includes(COMPUTER_USE_RESOURCE_RUNTIME_PATHS_PATCH_MARKER)) {
       computerUsePluginRootFallbackAlreadyCorrect = true;
       computerUsePluginRootFallbackPatchedFiles.push(path.relative(tmpDir, filePath));
       continue;
     }
 
-    if (content.includes(COMPUTER_USE_PLUGIN_ROOT_FALLBACK_NEEDLE)) {
+    if (COMPUTER_USE_RUNTIME_PATHS_CANONICAL_RE.test(content)) {
       content = content.replace(
-        COMPUTER_USE_PLUGIN_ROOT_FALLBACK_NEEDLE,
-        COMPUTER_USE_PLUGIN_ROOT_FALLBACK_REPLACEMENT,
-      );
-    } else if (COMPUTER_USE_PLUGIN_ROOT_FALLBACK_CURRENT_RE.test(content)) {
-      content = content.replace(
-        COMPUTER_USE_PLUGIN_ROOT_FALLBACK_CURRENT_RE,
-        (
-          match,
-          functionName,
-          codexHomeVar,
-          envVar,
-          marketplaceNameVar,
-          pluginPathNamespace,
-          buildFlavorNamespace,
-          marketplacesVar,
-          pathExistsVar,
-          fsNamespace,
-          marketplaceVar,
-          listMarketplacesFunction,
-          installedPluginVar,
-          pluginEntryVar,
-          computerUsePathsFunction,
-          pluginRootFunction,
-        ) =>
-          `function ${functionName}({codexHome:${codexHomeVar},env:${envVar}=process.env,` +
-          `marketplaceName:${marketplaceNameVar}=${pluginPathNamespace}.or(${buildFlavorNamespace}.M.resolve()),` +
-          `marketplaces:${marketplacesVar},pathExists:${pathExistsVar}=${fsNamespace}.existsSync})` +
-          `{for(let ${marketplaceVar} of ${listMarketplacesFunction}({marketplaceName:${marketplaceNameVar},marketplaces:${marketplacesVar}}))` +
-          `{let ${installedPluginVar}=${marketplaceVar}.plugins.find(${pluginEntryVar}=>${pluginEntryVar}.name===\`computer-use\`&&${pluginEntryVar}.installed&&${pluginEntryVar}.enabled&&${pluginEntryVar}.source.type===\`local\`);` +
-          `if(${installedPluginVar}?.source.type===\`local\`)return ${computerUsePathsFunction}({env:${envVar},installedPluginRoot:${pluginPathNamespace}.${pluginRootFunction}({codexHome:${codexHomeVar},localVersion:${installedPluginVar}.localVersion,marketplaceName:${marketplaceVar}.name,pluginName:${installedPluginVar}.name}),pathExists:${pathExistsVar}});` +
-          `let u=${marketplaceVar}.plugins.find(e=>e.name===\`computer-use\`&&(e.source?.type===\`local\`||e.source?.source===\`local\`)),d=u?.source?.path??null,` +
-          `f=d==null?null:/^(?:[A-Za-z]:[\\\\/]|\\\\\\\\)/.test(d)?d:${marketplaceVar}.path!=null?\`${'${'}String(${marketplaceVar}.path).replace(/[\\\\/]+$/,\`\`)}\\\\${'${'}String(d).replace(/^\\\\.?[\\\\/]/,\`\`)}\`:null;` +
-          `if(f!=null&&${pathExistsVar}(f))return ${computerUsePathsFunction}({env:${envVar},installedPluginRoot:f,pathExists:${pathExistsVar}})}` +
-          COMPUTER_USE_PLUGIN_ROOT_FALLBACK_PATCH_MARKER +
-          `return ${computerUsePathsFunction}({env:${envVar},pathExists:${pathExistsVar}})}`,
-      );
-    } else if (COMPUTER_USE_PLUGIN_ROOT_FALLBACK_CURRENT_RE_V2.test(content)) {
-      content = content.replace(
-        COMPUTER_USE_PLUGIN_ROOT_FALLBACK_CURRENT_RE_V2,
-        (
-          match,
-          functionName,
-          codexHomeVar,
-          envVar,
-          marketplaceNameVar,
-          marketplaceNameDefaultExpr,
-          marketplacesVar,
-          pathExistsVar,
-          fsNamespace,
-          marketplaceVar,
-          listMarketplacesFunction,
-          installedPluginVar,
-          pluginEntryVar,
-          computerUsePathsFunction,
-          pluginPathNamespace,
-          pluginRootFunction,
-        ) =>
-          `function ${functionName}({codexHome:${codexHomeVar},env:${envVar}=process.env,` +
-          `marketplaceName:${marketplaceNameVar}=${marketplaceNameDefaultExpr},` +
-          `marketplaces:${marketplacesVar},pathExists:${pathExistsVar}=${fsNamespace}.existsSync})` +
-          `{for(let ${marketplaceVar} of ${listMarketplacesFunction}({marketplaceName:${marketplaceNameVar},marketplaces:${marketplacesVar}}))` +
-          `{let ${installedPluginVar}=${marketplaceVar}.plugins.find(${pluginEntryVar}=>${pluginEntryVar}.name===\`computer-use\`&&${pluginEntryVar}.installed&&${pluginEntryVar}.enabled&&${pluginEntryVar}.source.type===\`local\`);` +
-          `if(${installedPluginVar}?.source.type===\`local\`)return ${computerUsePathsFunction}({env:${envVar},installedPluginRoot:${pluginPathNamespace}.${pluginRootFunction}({codexHome:${codexHomeVar},localVersion:${installedPluginVar}.localVersion,marketplaceName:${marketplaceVar}.name,pluginName:${installedPluginVar}.name}),pathExists:${pathExistsVar}});` +
-          `let u=${marketplaceVar}.plugins.find(e=>e.name===\`computer-use\`&&(e.source?.type===\`local\`||e.source?.source===\`local\`)),d=u?.source?.path??null,` +
-          `f=d==null?null:/^(?:[A-Za-z]:[\\\\/]|\\\\\\\\)/.test(d)?d:${marketplaceVar}.path!=null?\`${'${'}String(${marketplaceVar}.path).replace(/[\\\\/]+$/,\`\`)}\\\\${'${'}String(d).replace(/^\\\\.?[\\\\/]/,\`\`)}\`:null;` +
-          `if(f!=null&&${pathExistsVar}(f))return ${computerUsePathsFunction}({env:${envVar},installedPluginRoot:f,pathExists:${pathExistsVar}})}` +
-          COMPUTER_USE_PLUGIN_ROOT_FALLBACK_PATCH_MARKER +
-          `return ${computerUsePathsFunction}({env:${envVar},pathExists:${pathExistsVar}})}`,
-      );
-    } else if (COMPUTER_USE_PLUGIN_ROOT_FALLBACK_CURRENT_RE_V3.test(content)) {
-      content = content.replace(
-        COMPUTER_USE_PLUGIN_ROOT_FALLBACK_CURRENT_RE_V3,
+        COMPUTER_USE_RUNTIME_PATHS_CANONICAL_RE,
         `$&${COMPUTER_USE_RESOURCE_RUNTIME_PATHS_PATCH_MARKER}`,
       );
     } else if (
@@ -4059,7 +3871,6 @@ try {
     throw new Error('webview/assets directory not found. Package structure may have changed.');
   }
   let legacyPluginRendererPatchesRemoved = 0;
-  let legacyPluginsPagePatchMigrations = 0;
   {
     const webviewJsFiles = listJavaScriptFiles(assetsDir);
     let patchedCount = 0;
@@ -4071,7 +3882,6 @@ try {
     var defaultOnStatsigGateAlreadyCorrect = false;
     let sidebarActivitySurfaceSeen = false;
     let sidebarActivityViewPatched = false;
-    const legacyPluginsPagePatchResidualFiles = [];
     let offlineQueryNetworkModePatched = false;
     let offlineMutationNetworkModePatched = false;
     let offlineNetworkModeSurfaceSeen = false;
@@ -4178,18 +3988,6 @@ try {
       }
       sidebarActivityViewPatched ||= sidebarActivityPatch.sidebarCorrect;
 
-      const pluginsPageMigration = migrateLegacyPluginsPageSelection(content);
-      if (pluginsPageMigration.migratedCount > 0) {
-        content = pluginsPageMigration.content;
-        legacyPluginsPagePatchMigrations += pluginsPageMigration.migratedCount;
-        changed = true;
-      }
-      if (
-        pluginsPageMigration.legacyMarkerResidual ||
-        pluginsPageMigration.legacySelectionResidual
-      ) {
-        legacyPluginsPagePatchResidualFiles.push(path.relative(tmpDir, filePath));
-      }
 
       const rendererKnownStatsigGatePatch = patchDirectStatsigGateCalls(
         content,
@@ -4332,12 +4130,6 @@ try {
         'Could not statically enable the sidebar Activity priority surface.',
       );
     }
-    if (legacyPluginsPagePatchResidualFiles.length > 0) {
-      failRequiredPatch(
-        'Could not migrate legacy plugin-page gate patches in ' +
-          `${legacyPluginsPagePatchResidualFiles.join(', ')}.`,
-      );
-    }
     if (!offlineNetworkModeSurfaceSeen) {
       failRequiredPatch(
         'Could not locate the renderer QueryClient defaults for offline operation.',
@@ -4382,12 +4174,6 @@ try {
   if (legacyPluginRendererPatchesRemoved > 0) {
     log(
       `Removed ${legacyPluginRendererPatchesRemoved} legacy renderer plugin-service injections.`,
-    );
-  }
-  if (legacyPluginsPagePatchMigrations > 0) {
-    log(
-      `Migrated ${legacyPluginsPagePatchMigrations} legacy plugin-page gate patches ` +
-        'to the unified plugins page.',
     );
   }
   log('Renderer Statsig gates handled by static surface patches plus init.cjs runtime fallback.');

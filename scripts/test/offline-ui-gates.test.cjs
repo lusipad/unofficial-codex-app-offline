@@ -85,14 +85,14 @@ test("offline builds force the supported product and navigation UI gates", () =>
 
 test("offline builds select the unified plugins page instead of the legacy storefront", () => {
   const gateId = "3413548395";
-  const patchMarker = "/*codex-offline:unified-plugins-page*/";
 
+  // The unified page is now selected purely by the contract gate override. The
+  // asar-level marker was retired together with the legacy-shape migration that
+  // was its only writer.
   assert.equal(contract.STATSIG_DEFAULT_FEATURE_OVERRIDES[gateId], false);
   assert.equal(contract.DESKTOP_ASAR_KNOWN_GATE_IDS.includes(gateId), false);
   assert.equal(contract.REQUIRED_STATSIG_FEATURE_MARKERS.includes(gateId), false);
   assert.match(initSource, /_capabilityContract\.STATSIG_DEFAULT_FEATURE_OVERRIDES/);
-  assert.ok(contract.DESKTOP_ASAR_PATCH_MARKERS.includes(patchMarker));
-  assert.ok(verifyScriptSource.includes(`requiredPatchMarker('${patchMarker}')`));
   assert.equal(
     patchScriptSource.includes(
       "contractPatchMarker('/*codex-offline:plugins-management-in-skills*/')",
@@ -384,7 +384,7 @@ test("priority surface carries its dedicated static gate marker", () => {
     "function patchSidebarActivitySurface",
   );
   const functionEnd = patchScriptSource.indexOf(
-    "\nfunction migrateLegacyPluginsPageSelection",
+    "\nfunction patchWorkspaceDependenciesSettingsGate",
     functionStart,
   );
   assert.notEqual(functionStart, -1, "sidebar gate helper is missing");
@@ -437,63 +437,6 @@ test("priority surface carries its dedicated static gate marker", () => {
 
   assert.ok(contract.DESKTOP_ASAR_PATCH_MARKERS.includes(sidebarMarker), sidebarMarker);
   assert.ok(verifyScriptSource.includes(`requiredPatchMarker('${sidebarMarker}')`));
-});
-
-test("legacy plugin page patches migrate to the unified plugins page", () => {
-  const functionStart = patchScriptSource.indexOf(
-    "function migrateLegacyPluginsPageSelection",
-  );
-  const functionEnd = patchScriptSource.indexOf(
-    "\nfunction patchWorkspaceDependenciesSettingsGate",
-    functionStart,
-  );
-  assert.notEqual(functionStart, -1, "plugin page migration helper is missing");
-  assert.notEqual(functionEnd, -1, "plugin page migration helper terminator is missing");
-
-  const legacyPluginsMarker = "/*codex-offline:plugins-management-in-skills*/";
-  const rendererGateMarker = "/*codex-offline:renderer-known-statsig-gates*/";
-  const unifiedPluginsMarker = "/*codex-offline:unified-plugins-page*/";
-  const helperSource = patchScriptSource.slice(functionStart, functionEnd);
-  const migrateLegacyPluginsPageSelection = Function(
-    "LEGACY_PLUGINS_MANAGEMENT_IN_SKILLS_PATCH_MARKER",
-    "RENDERER_KNOWN_STATSIG_GATES_PATCH_MARKER",
-    "UNIFIED_PLUGINS_PAGE_PATCH_MARKER",
-    "escapeRegExp",
-    `"use strict";\n${helperSource}\nreturn migrateLegacyPluginsPageSelection;`,
-  )(
-    legacyPluginsMarker,
-    rendererGateMarker,
-    unifiedPluginsMarker,
-    escapeRegExp,
-  );
-  const fixture =
-    "let o=H(dr,a),s=!0/*codex-offline:renderer-known-statsig-gates*/&&" +
-    "o===`plugins`&&(r.initialTab===`plugins`||r.initialTab===`skills`);" +
-    "function nOc(e,t,n){t&&!0/*codex-offline:plugins-management-in-skills*/" +
-    "&&Promise.all([])}";
-
-  const result = migrateLegacyPluginsPageSelection(fixture);
-  assert.equal(result.migratedCount, 2);
-  assert.equal(result.legacyMarkerResidual, false);
-  assert.ok(
-    result.content.includes(
-      `s=!1${unifiedPluginsMarker}&&o===\`plugins\`&&` +
-        "(r.initialTab===`plugins`||r.initialTab===`skills`)",
-    ),
-  );
-  assert.ok(result.content.includes(`t&&!1${unifiedPluginsMarker}&&Promise.all`));
-
-  const secondPass = migrateLegacyPluginsPageSelection(result.content);
-  assert.equal(secondPass.migratedCount, 0);
-  assert.equal(secondPass.content, result.content);
-  assert.equal(secondPass.legacyMarkerResidual, false);
-
-  const runtimeDriven =
-    "let o=H(dr,a),s=gt(`3413548395`)&&o===`plugins`&&" +
-    "(r.initialTab===`plugins`||r.initialTab===`skills`)";
-  const untouched = migrateLegacyPluginsPageSelection(runtimeDriven);
-  assert.equal(untouched.migratedCount, 0);
-  assert.equal(untouched.content, runtimeDriven);
 });
 
 test("renderer gate verifier covers method-style gate reads and scoped alias surfaces", () => {

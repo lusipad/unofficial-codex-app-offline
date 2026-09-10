@@ -284,40 +284,13 @@ const DESKTOP_ASAR_PATCHES = Object.freeze([
     reverify: "Full portable package including the primary runtime plugin, plus a Computer Use end-to-end run.",
   }),
   Object.freeze({
-    marker: "/*codex-offline:computer-use-plugin-root-fallback*/",
-    kind: "patch",
-    tier: "required",
-    assert: "marker",
-    evidence:
-      "26.903.8094.0: this marker never lands. The branch that matches the current bundle inserts the computer-use-resource-runtime-paths marker instead.",
-    reverify: "Trace which branch of the plugin-root fallback the current bundle takes.",
-  }),
-  Object.freeze({
     marker: "/*codex-offline:computer-use-resource-runtime-paths*/",
     kind: "sentinel",
     tier: "required",
     assert: "marker",
     evidence:
-      "26.903.8094.0: the applied branch is content.replace(RE, '$&' + MARKER) — it appends the marker and changes no behaviour. It exists so an unrecognized upstream shape fails the build.",
+      "26.903.8094.0: the applied branch is content.replace(RE, '$&' + MARKER) — it appends the marker and changes no behaviour. It exists so an unrecognized upstream shape fails the build. It also absorbed the retired computer-use-plugin-root-fallback marker, whose rewriting branches never fired because upstream already resolves the canonical runtime path.",
     reverify: "Confirm the marker still only appears in an append-only branch of patch-app-asar.mjs.",
-  }),
-  Object.freeze({
-    marker: "/*codex-offline:computer-use-input-mention*/",
-    kind: "patch",
-    tier: "required",
-    assert: "marker",
-    evidence:
-      "26.903.8094.0: this marker never lands, although the browser_use_external and mentionItems literals it targets are still present.",
-    reverify: "Locate which patcher branch owns this marker and whether its pattern still matches.",
-  }),
-  Object.freeze({
-    marker: "/*codex-offline:computer-use-input-mention-v2*/",
-    kind: "patch",
-    tier: "required",
-    assert: "marker",
-    evidence:
-      "26.903.8094.0: this marker never lands, although the browser_use_external and mentionItems literals it targets are still present.",
-    reverify: "Locate which patcher branch owns this marker and whether its pattern still matches.",
   }),
   Object.freeze({
     marker: "/*codex-offline:computer-use-input-skill*/",
@@ -444,15 +417,6 @@ const DESKTOP_ASAR_PATCHES = Object.freeze([
     evidence:
       "26.903.8094.0: the same fail-closed gate problem, for a gate whose id is held in a variable rather than a literal, so the generic pass cannot reach it.",
     reverify: "Check whether the sidebar activity gate is still read through a variable id.",
-  }),
-  Object.freeze({
-    marker: "/*codex-offline:unified-plugins-page*/",
-    kind: "patch",
-    tier: "required",
-    assert: "marker",
-    evidence:
-      "26.903.8094.0: this marker never lands, although the plugins-settings literal it targets is still present in several assets.",
-    reverify: "Locate which patcher branch owns this marker and whether its pattern still matches.",
   }),
   Object.freeze({
     marker: "/*codex-offline:workspace-dependencies-settings*/",

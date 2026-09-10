@@ -64,7 +64,32 @@ const REMOVED_MARKERS = [
   "/*codex-offline:context-usage-visible*/",
   "/*codex-offline:node-repl-config-reconcile-finally*/",
   "/*codex-offline:feature-enablement-preserve-unified-exec*/",
+  "/*codex-offline:computer-use-input-mention*/",
+  "/*codex-offline:computer-use-input-mention-v2*/",
+  "/*codex-offline:unified-plugins-page*/",
+  "/*codex-offline:computer-use-plugin-root-fallback*/",
 ];
+
+test("the surviving Computer Use runtime-path sentinel records what it absorbed", () => {
+  const survivor = contract.getPatchRecord(
+    "/*codex-offline:computer-use-resource-runtime-paths*/",
+  );
+  assert.ok(survivor, "computer-use-resource-runtime-paths must survive");
+  assert.match(survivor.evidence, /plugin-root-fallback/);
+});
+
+test("legacy plugin-page migration is gone from the patcher", () => {
+  const fs = require("node:fs");
+  const patcher = fs.readFileSync(path.join(repoRoot, "scripts", "patch-app-asar.mjs"), "utf8");
+  assert.ok(
+    !patcher.includes("migrateLegacyPluginsPageSelection"),
+    "the legacy plugins-page migration only fires on already-patched input",
+  );
+  assert.ok(
+    !patcher.includes("_codexOfflineComputerUseMentionItems"),
+    "the Computer Use mention helper had no applier and should be gone",
+  );
+});
 
 test("retired patches are gone from the contract", () => {
   for (const marker of REMOVED_MARKERS) {

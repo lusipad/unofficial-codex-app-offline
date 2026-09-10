@@ -1379,16 +1379,10 @@ const NODE_REPL_DISABLE_SANDBOX_PATCH_MARKER =
   requiredPatchMarker('/*codex-offline:node-repl-disable-sandbox*/');
 const NODE_REPL_TOOL_SEARCH_FEATURE_PATCH_MARKER =
   requiredPatchMarker('/*codex-offline:node-repl-tool-search-feature*/');
-const COMPUTER_USE_PLUGIN_ROOT_FALLBACK_PATCH_MARKER =
-  requiredPatchMarker('/*codex-offline:computer-use-plugin-root-fallback*/');
 const COMPUTER_USE_RESOURCE_RUNTIME_PATHS_PATCH_MARKER =
   requiredPatchMarker('/*codex-offline:computer-use-resource-runtime-paths*/');
 const COMPUTER_USE_CANONICAL_RUNTIME_PATHS_PATCHED_RE =
   /function [A-Za-z_$][\w$]*\(\{codexHome:[^}]+,env:[^}]+\}\)\{[^]*?source\.type===`local`\)\?\.source\.type===`local`\)return [A-Za-z_$][\w$]*\(\{codexHome:[^}]+pathExists:[A-Za-z_$][\w$]*\}\);return [A-Za-z_$][\w$]*\(\{env:[^}]+pathExists:[A-Za-z_$][\w$]*\}\)\}\/\*codex-offline:computer-use-resource-runtime-paths\*\//;
-const COMPUTER_USE_INPUT_MENTION_PATCH_MARKER =
-  requiredPatchMarker('/*codex-offline:computer-use-input-mention*/');
-const COMPUTER_USE_INPUT_MENTION_V2_PATCH_MARKER =
-  requiredPatchMarker('/*codex-offline:computer-use-input-mention-v2*/');
 const COMPUTER_USE_INPUT_SKILL_PATCH_MARKER =
   requiredPatchMarker('/*codex-offline:computer-use-input-skill*/');
 const COMPUTER_USE_THREAD_START_TOOL_SEARCH_PATCH_MARKER =
@@ -1411,10 +1405,6 @@ const SIDEBAR_ACTIVITY_VIEW_PATCH_MARKER =
   requiredPatchMarker('/*codex-offline:sidebar-activity-view*/');
 const RENDERER_KNOWN_STATSIG_GATES_PATCH_MARKER =
   requiredPatchMarker('/*codex-offline:renderer-known-statsig-gates*/');
-const LEGACY_PLUGINS_MANAGEMENT_IN_SKILLS_PATCH_MARKER =
-  '/*codex-offline:plugins-management-in-skills*/';
-const UNIFIED_PLUGINS_PAGE_PATCH_MARKER =
-  requiredPatchMarker('/*codex-offline:unified-plugins-page*/');
 const WORKSPACE_DEPENDENCIES_SETTINGS_PATCH_MARKER =
   requiredPatchMarker('/*codex-offline:workspace-dependencies-settings*/');
 const WORKTREE_HEAD_REF_PATCH_MARKER =
@@ -1436,14 +1426,6 @@ const sidebarActivityPatchedSurfaceRe = new RegExp(
 );
 const sidebarActivityUnpatchedSurfaceRe =
   /([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*)\),([A-Za-z_$][\w$]*)=[A-Za-z_$][\w$]*\([A-Za-z_$][\w$]*\);return \1&&\(\4\.status===`allowed`\|\|\4\.status===`loading`\)\}[^]*?\3=`4039078146`/;
-const legacyPluginsPageSelectionRe = new RegExp(
-  `([A-Za-z_$][\\w$]*)=!0${escapeRegExp(RENDERER_KNOWN_STATSIG_GATES_PATCH_MARKER)}` +
-    '&&([A-Za-z_$][\\w$]*)===`plugins`&&\\(' +
-    '([A-Za-z_$][\\w$]*)\\.initialTab===`plugins`\\|\\|\\3\\.initialTab===`skills`\\)'
-);
-const invalidUnifiedPluginsPageMarkerRe = new RegExp(
-  `!0${escapeRegExp(UNIFIED_PLUGINS_PAGE_PATCH_MARKER)}`
-);
 const offlineNetworkModePatchedSurfaceRe = new RegExp(
   `([A-Za-z_$][\\w$]*)=\\{defaultOptions:\\{` +
     'mutations:\\{networkMode:`always`' +
@@ -1591,7 +1573,6 @@ let nodeReplFeatureConfigPatched = false;
 let nodeReplDisableSandboxPatched = false;
 let nodeReplToolSearchFeaturePatched = false;
 let computerUsePluginRootFallbackPatched = false;
-let computerUseInputMentionPatched = false;
 let computerUseInputSkillPatched = false;
 let computerUseThreadStartToolSearchPatched = false;
 let computerUseNodeReplDynamicToolPatched = false;
@@ -1627,7 +1608,6 @@ const bundledPluginCacheLockFatalResiduals = [];
 const webviewBrokenBooleanPatchResiduals = [];
 const rendererKnownStatsigGateResiduals = [];
 const sidebarActivityViewResiduals = [];
-const legacyPluginsPagePatchResiduals = [];
 const offlineNetworkModeResiduals = [];
 const legacyPluginRendererPatchResiduals = [];
 const ultraReasoningEffortResiduals = [];
@@ -1655,13 +1635,6 @@ for (const entry of javaScriptEntries) {
     ) {
       sidebarActivityViewSurfaceSeen = true;
       sidebarActivityViewResiduals.push(entry);
-    }
-    if (
-      content.includes(LEGACY_PLUGINS_MANAGEMENT_IN_SKILLS_PATCH_MARKER) ||
-      legacyPluginsPageSelectionRe.test(content) ||
-      invalidUnifiedPluginsPageMarkerRe.test(content)
-    ) {
-      legacyPluginsPagePatchResiduals.push(entry);
     }
     if (hasWorkspaceDependenciesSettingsSurface(content)) {
       workspaceDependenciesSettingsSurfaceSeen = true;
@@ -1724,26 +1697,14 @@ for (const entry of javaScriptEntries) {
     throw new Error('Browser Use thread config has a malformed features.tool_search insertion.');
   }
   computerUsePluginRootFallbackPatched ||=
+    content.includes(COMPUTER_USE_RESOURCE_RUNTIME_PATHS_PATCH_MARKER) &&
     (
-      content.includes(COMPUTER_USE_PLUGIN_ROOT_FALLBACK_PATCH_MARKER) &&
-      content.includes('installedPluginRoot:f') &&
-      content.includes('source?.source===`local`')
-    ) ||
-    (
-      content.includes(COMPUTER_USE_RESOURCE_RUNTIME_PATHS_PATCH_MARKER) &&
       (
-        (
-          /nodeModuleDirs:[A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*\([A-Za-z_$][\w$]*\)/.test(content) &&
-          content.includes('serviceAppPath:l.platform===`darwin`?o.serviceAppPath:null')
-        ) ||
-        COMPUTER_USE_CANONICAL_RUNTIME_PATHS_PATCHED_RE.test(content)
-      )
+        /nodeModuleDirs:[A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*\([A-Za-z_$][\w$]*\)/.test(content) &&
+        content.includes('serviceAppPath:l.platform===`darwin`?o.serviceAppPath:null')
+      ) ||
+      COMPUTER_USE_CANONICAL_RUNTIME_PATHS_PATCHED_RE.test(content)
     );
-  computerUseInputMentionPatched ||=
-    content.includes(COMPUTER_USE_INPUT_MENTION_PATCH_MARKER) &&
-    content.includes(COMPUTER_USE_INPUT_MENTION_V2_PATCH_MARKER) &&
-    content.includes('name:i,path:r') &&
-    content.includes('plugin://computer-use@openai-bundled');
   computerUseInputSkillPatched ||=
     content.includes(COMPUTER_USE_INPUT_SKILL_PATCH_MARKER) &&
     content.includes('type:`skill`,name:`computer-use`') &&
@@ -1874,12 +1835,6 @@ if (!sidebarActivityViewSurfaceSeen) {
 }
 if (!sidebarActivityViewPatched) {
   throw new Error('Sidebar Activity priority surface is not statically enabled in app.asar.');
-}
-if (legacyPluginsPagePatchResiduals.length > 0) {
-  throw new Error(
-    'Legacy plugin-page gate patches remain in app.asar: ' +
-    legacyPluginsPagePatchResiduals.join(', ')
-  );
 }
 if (!workspaceDependenciesSettingsSurfaceSeen) {
   throw new Error('Workspace Dependencies settings surface is missing from app.asar.');
@@ -2020,9 +1975,6 @@ if (!allJavaScriptContent.some(content => /for\(let [A-Za-z_$][\w$]* of \[(["'`]
 }
 if (!computerUsePluginRootFallbackPatched) {
   throw new Error('Computer Use runtime path compatibility marker is missing; packaged computer-use runtime paths may be unavailable.');
-}
-if (!computerUseInputMentionPatched) {
-  info('Computer Use prompt input mention marker is not required for this app version; transport-level skill injection is verified separately.');
 }
 if (!computerUseInputSkillPatched) {
   throw new Error('Computer Use prompt input skill injection patch marker is missing.');

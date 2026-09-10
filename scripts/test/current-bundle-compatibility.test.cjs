@@ -217,11 +217,11 @@ test("26.814 package verification checks browser service markers when present", 
 
 test("26.814 Computer Use path resolver accepts the canonical bundled runtime", () => {
   const regexSource = sourceSlice(
-    "  const COMPUTER_USE_PLUGIN_ROOT_FALLBACK_CURRENT_RE_V3 =",
+    "  const COMPUTER_USE_RUNTIME_PATHS_CANONICAL_RE =",
     "  const COMPUTER_USE_RESOURCE_RUNTIME_PATHS_CURRENT_RE =",
   );
   const currentResolverRe = Function(
-    `"use strict";\n${regexSource}\nreturn COMPUTER_USE_PLUGIN_ROOT_FALLBACK_CURRENT_RE_V3;`,
+    `"use strict";\n${regexSource}\nreturn COMPUTER_USE_RUNTIME_PATHS_CANONICAL_RE;`,
   )();
   const fixture =
     "function ete({codexHome:e,env:t=process.env,marketplaceName:r=n.js(a.a.resolve())," +
@@ -236,7 +236,7 @@ test("26.814 Computer Use path resolver accepts the canonical bundled runtime", 
 test("26.814 package verification accepts the canonical Computer Use runtime marker", () => {
   const verifierRegexSource = verifierSourceSlice(
     "const COMPUTER_USE_CANONICAL_RUNTIME_PATHS_PATCHED_RE =",
-    "const COMPUTER_USE_INPUT_MENTION_PATCH_MARKER =",
+    "const COMPUTER_USE_INPUT_SKILL_PATCH_MARKER =",
   );
   const currentResolverRe = Function(
     `"use strict";\n${verifierRegexSource}\nreturn COMPUTER_USE_CANONICAL_RUNTIME_PATHS_PATCHED_RE;`,
@@ -1166,7 +1166,7 @@ test("26.810 dynamic tool bridge accepts ownership guards before execution claim
 test("26.730 node_repl config keeps env_vars when adding the sandbox bypass", () => {
   const helperSource = sourceSlice(
     "  const NODE_REPL_CONFIG_HELPER_RE =",
-    "\n  const COMPUTER_USE_PLUGIN_ROOT_FALLBACK_NEEDLE =",
+    "\n  const COMPUTER_USE_RUNTIME_PATHS_CANONICAL_RE =",
   );
   const [configHelperRe, replacement] = Function(
     "NODE_REPL_TOOL_SEARCH_FEATURE_PATCH_MARKER",
