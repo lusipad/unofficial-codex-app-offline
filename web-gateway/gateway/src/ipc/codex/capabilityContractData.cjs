@@ -230,15 +230,6 @@ const DESKTOP_ASAR_KNOWN_GATE_IDS = Object.freeze([
 // See docs/superpowers/specs/2026-09-11-desktop-patch-boundary-design.md.
 const DESKTOP_ASAR_PATCHES = Object.freeze([
   Object.freeze({
-    marker: "/* codex-offline:windowsStore-patch */",
-    kind: "patch",
-    tier: "required",
-    assert: "marker",
-    evidence:
-      "26.903.8094.0: process.windowsStore has a single reference, inside the Sentry build_type field, and an A/B launch test showed the offline package still starts without it.",
-    reverify: "offline-direct-launch-smoke.mjs against a variant built without the injection",
-  }),
-  Object.freeze({
     marker: "/*codex-offline:windows-browser-use-capability*/",
     kind: "patch",
     tier: "required",
@@ -266,15 +257,6 @@ const DESKTOP_ASAR_PATCHES = Object.freeze([
     reverify: "Full portable package including the primary runtime plugin, plus a Computer Use end-to-end run.",
   }),
   Object.freeze({
-    marker: "/*codex-offline:feature-enablement-preserve-unified-exec*/",
-    kind: "patch",
-    tier: "required",
-    assert: "marker",
-    evidence:
-      "26.903.8094.0: the anchor log string `Features enabled` does not occur anywhere in the bundle, so this patch no longer applies.",
-    reverify: "Search the pristine asar for the `Features enabled` anchor.",
-  }),
-  Object.freeze({
     marker: "/*codex-offline:bundled-plugin-cache-lock-nonfatal*/",
     kind: "patch",
     tier: "degraded",
@@ -282,15 +264,6 @@ const DESKTOP_ASAR_PATCHES = Object.freeze([
     evidence:
       "26.903.8094.0: upstream throws on a plugin_cache_windows_file_lock error; the patch makes it non-fatal. This guards a Windows file-lock race, so a run that happens to succeed proves nothing either way.",
     reverify: "Reproduce the lock under concurrent startup, or check whether upstream added its own retry.",
-  }),
-  Object.freeze({
-    marker: "/*codex-offline:node-repl-config-reconcile-finally*/",
-    kind: "patch",
-    tier: "required",
-    assert: "marker",
-    evidence:
-      "26.903.8094.0: the patcher reports this finalizer as not needed for this app version and never applies it.",
-    reverify: "Check whether the patcher still logs the not-needed branch for the current bundle.",
   }),
   Object.freeze({
     marker: "/*codex-offline:node-repl-disable-sandbox*/",
@@ -428,15 +401,6 @@ const DESKTOP_ASAR_PATCHES = Object.freeze([
     reverify: "Check whether the marketplace filter still excludes packaging-time plugins.",
   }),
   Object.freeze({
-    marker: "/*codex-offline:fast-mode-selector*/",
-    kind: "patch",
-    tier: "required",
-    assert: "marker",
-    evidence:
-      "26.903.8094.0: the anchors canUseFastMode and additionalSpeedTiers do not occur anywhere in the bundle, so this patch no longer applies.",
-    reverify: "Search the pristine asar for the canUseFastMode anchor.",
-  }),
-  Object.freeze({
     marker: "/*codex-offline:fast-mode-auth-method*/",
     kind: "patch",
     tier: "required",
@@ -444,24 +408,6 @@ const DESKTOP_ASAR_PATCHES = Object.freeze([
     evidence:
       "26.903.8094.0: upstream gates the Fast selector on ChatGPT auth plus a backend featureRequirements.fast_mode response, both unavailable to API-key and offline users.",
     reverify: "Check whether the fast_mode availability expression still requires backend agreement.",
-  }),
-  Object.freeze({
-    marker: "/*codex-offline:fast-mode-service-tier-options*/",
-    kind: "patch",
-    tier: "required",
-    assert: "marker",
-    evidence:
-      "26.903.8094.0: serviceTiers no longer occurs in the primary renderer bundle; only the fast_mode requirement check remains, and fast-mode-auth-method covers it.",
-    reverify: "Search the pristine asar for the serviceTiers anchor.",
-  }),
-  Object.freeze({
-    marker: "/*codex-offline:context-usage-visible*/",
-    kind: "patch",
-    tier: "required",
-    assert: "marker",
-    evidence:
-      "26.903.8094.0: the storage key local-conversation-status-section-visible does not occur anywhere in the bundle and no renamed equivalent was found.",
-    reverify: "Search the pristine asar for the status-section storage key.",
   }),
   Object.freeze({
     marker: "/*codex-offline:plugins-api-key-nav*/",
@@ -572,15 +518,6 @@ const DESKTOP_ASAR_PATCHES = Object.freeze([
     reverify: "It landing at all is the signal that a rewrite against the new seam is due.",
   }),
   Object.freeze({
-    marker: "/*codex-offline:electron-namespace-no-auto-updater*/",
-    kind: "patch",
-    tier: "required",
-    assert: "marker",
-    evidence:
-      "26.903.8094.0: not a patch at all — the surviving code only undoes a historical portable-startup guard when re-patching an already-affected build, so it never lands on a fresh payload.",
-    reverify: "Check whether any fresh-payload branch still writes this marker.",
-  }),
-  Object.freeze({
     marker: "/*codex-offline:default-on-gate-wrapper*/",
     kind: "patch",
     tier: "required",
@@ -618,15 +555,7 @@ function patchMarkersByKind(kind) {
 const FAST_MODE_CONTRACT = Object.freeze({
   statsigStoreKey: STATSIG_DEFAULT_FEATURES_CONFIG,
   featureKey: "fast_mode",
-  selectorPatchMarker: "/*codex-offline:fast-mode-selector*/",
   authMethodPatchMarker: "/*codex-offline:fast-mode-auth-method*/",
-  serviceTierOptionsPatchMarker: "/*codex-offline:fast-mode-service-tier-options*/",
-  availabilityMarkers: Object.freeze(["additionalSpeedTiers", "canUseFastMode"]),
-});
-
-const CONTEXT_USAGE_CONTRACT = Object.freeze({
-  localStatusSectionStorageKey: "local-conversation-status-section-visible",
-  visibilityPatchMarker: "/*codex-offline:context-usage-visible*/",
 });
 
 const REQUIRED_CAPABILITY_MARKERS = Object.freeze(
@@ -651,7 +580,6 @@ module.exports = {
   DESKTOP_BROWSER_USE_AVAILABILITY_MARKERS,
   DESKTOP_BROWSER_USE_CAPABILITY_KEYS,
   FAST_MODE_CONTRACT,
-  CONTEXT_USAGE_CONTRACT,
   FORCED_DESKTOP_FEATURE_STATE,
   REQUIRED_CAPABILITY_MARKERS,
   REQUIRED_DESKTOP_FEATURE_MARKERS,

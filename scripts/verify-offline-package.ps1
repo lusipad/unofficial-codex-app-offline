@@ -1352,7 +1352,6 @@ function secondArgumentStatsigGateCallRe(gateId) {
     `!?(?:\\(0,[$\\w]+\\)|[$\\w]+(?:\\.[$\\w]+)*)\\([A-Za-z_$][\\w$]*\\s*,\\s*\\\`${escapeRegExp(gateId)}\\\`\\)`
   );
 }
-const PATCH_MARKER = requiredPatchMarker('/* codex-offline:windowsStore-patch */');
 const STDIO_WRITE_ERROR_GUARD_MARKER = '/*codex-offline:stdio-write-error-guard-v2*/';
 const SETTINGS_ROUTE_BAD_PATTERN_RE =
   /searchParams\.set\("initialRoute","\/settings\/"\+\([A-Za-z_$][\w$]*\.section\|\|"agent"\)\);/;
@@ -1367,8 +1366,6 @@ const SLASH_UI_MARKER_GROUPS = [
 ];
 const CODEX_MOBILE_REMOTE_CONTROL_MFA_ENDPOINT = '/wham/remote/control/mfa_requirement';
 const CODEX_MOBILE_AUTH_RELOGIN_MARKER = requiredPatchMarker('/*codex-offline:codex-mobile-auth-relogin*/');
-const LEGACY_ELECTRON_NAMESPACE_PATCH_MARKER =
-  '/*codex-offline:electron-namespace-no-auto-updater*/';
 const BUNDLED_BROWSER_PLUGINS_PATCH_MARKER = requiredPatchMarker('/*codex-offline:bundled-browser-plugins-no-force-reload*/');
 const BROWSER_USE_DESCRIPTOR_CURRENT_PATCHED_RE =
   /\{\.\.\.[A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*\.browser,autoInstallOptOutKey:[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\),installWhenMissing:!0,isAvailable:\(\{features:[A-Za-z_$][\w$]*\}\)=>\/\*codex-offline:bundled-browser-plugins-no-force-reload\*\/!0,migrate:[A-Za-z_$][\w$]*\}/;
@@ -1378,8 +1375,6 @@ const APP_SERVER_SANDBOX_OVERRIDE = '`-c`,`windows.sandbox=\'unelevated\'`,`app-
 const NODE_REPL_FEATURE_ENABLED_PATCH_MARKER = requiredPatchMarker('/*codex-offline:node-repl-feature-enabled*/');
 const NODE_REPL_FEATURE_CONFIG_CURRENT_DISABLED_RE =
   /[A-Za-z_$][\w$]*=\{(?=[\s\S]{0,120}include_permissions_instructions:!1,)[\s\S]{0,800}?["']features\.js_repl["']:\s*!1[\s\S]{0,500}?web_search:`disabled`\}(?=[,;)\]])/;
-const NODE_REPL_CONFIG_RECONCILE_FINALLY_PATCH_MARKER =
-  requiredPatchMarker('/*codex-offline:node-repl-config-reconcile-finally*/');
 const NODE_REPL_DISABLE_SANDBOX_PATCH_MARKER =
   requiredPatchMarker('/*codex-offline:node-repl-disable-sandbox*/');
 const NODE_REPL_TOOL_SEARCH_FEATURE_PATCH_MARKER =
@@ -1410,8 +1405,6 @@ const ARCHIVED_SETTINGS_OFFLINE_LOCAL_VISIBILITY_PATCH_MARKER =
   requiredPatchMarker('/*codex-offline:archived-settings-offline-local-visibility*/');
 const FEATURE_OVERRIDES_PRESERVE_MCP_CONFIG_PATCH_MARKER =
   requiredPatchMarker('/*codex-offline:feature-overrides-preserve-mcp-config*/');
-const FEATURE_ENABLEMENT_PRESERVE_UNIFIED_EXEC_PATCH_MARKER =
-  requiredPatchMarker('/*codex-offline:feature-enablement-preserve-unified-exec*/');
 const BUNDLED_PLUGIN_CACHE_LOCK_NONFATAL_PATCH_MARKER =
   requiredPatchMarker('/*codex-offline:bundled-plugin-cache-lock-nonfatal*/');
 const SIDEBAR_ACTIVITY_VIEW_PATCH_MARKER =
@@ -1578,20 +1571,11 @@ if (!mainEntry) {
 }
 
 const mainContent = asar.extractFile(asarPath, entryMap.get(mainEntry)).toString('utf8');
-if (!mainContent.includes(PATCH_MARKER)) {
-  throw new Error('windowsStore patch marker is missing from the main entry.');
-}
 if (!mainContent.includes(STDIO_WRITE_ERROR_GUARD_MARKER)) {
   throw new Error('Asynchronous stdout/stderr write error guard is missing from the main entry.');
 }
 if (!mainContent.includes('CODEX_ELECTRON_ENABLE_WINDOWS_COMPUTER_USE')) {
   throw new Error('Computer Use environment default is missing from the main entry.');
-}
-if (!mainContent.includes('_codexOfflineMsixStub')) {
-  throw new Error('MSIX auto-updater binding stub is missing from the main entry.');
-}
-if (!mainContent.includes('electron_browser_msix_updater')) {
-  throw new Error('MSIX auto-updater binding stub does not target electron_browser_msix_updater.');
 }
 
 const javaScriptEntries = entries.filter(entry => entry.endsWith('.js'));
@@ -1604,7 +1588,6 @@ let bundledBrowserPluginDescriptorSeen = false;
 let windowsBrowserUseCapabilityPatched = false;
 let appServerSandboxOverridePatched = false;
 let nodeReplFeatureConfigPatched = false;
-let nodeReplConfigReconcileFinallyPatched = false;
 let nodeReplDisableSandboxPatched = false;
 let nodeReplToolSearchFeaturePatched = false;
 let computerUsePluginRootFallbackPatched = false;
@@ -1640,7 +1623,6 @@ let codexMobileAuthReloginPatched = false;
 const bundledBrowserPluginForceReloadResiduals = [];
 const settingsRouteResiduals = [];
 const localeSourceResiduals = [];
-const legacyElectronNamespacePatchResiduals = [];
 const bundledPluginCacheLockFatalResiduals = [];
 const webviewBrokenBooleanPatchResiduals = [];
 const rendererKnownStatsigGateResiduals = [];
@@ -1732,8 +1714,6 @@ for (const entry of javaScriptEntries) {
   windowsBrowserUseCapabilityPatched ||= content.includes(WINDOWS_BROWSER_USE_CAPABILITY_PATCH_MARKER);
   appServerSandboxOverridePatched ||= content.includes(APP_SERVER_SANDBOX_OVERRIDE);
   nodeReplFeatureConfigPatched ||= content.includes(NODE_REPL_FEATURE_ENABLED_PATCH_MARKER);
-  nodeReplConfigReconcileFinallyPatched ||=
-    content.includes(NODE_REPL_CONFIG_RECONCILE_FINALLY_PATCH_MARKER);
   nodeReplDisableSandboxPatched ||=
     content.includes(NODE_REPL_DISABLE_SANDBOX_PATCH_MARKER) &&
     content.includes('`--disable-sandbox`');
@@ -1823,15 +1803,9 @@ for (const entry of javaScriptEntries) {
     content.includes('`features.non_prefixed_mcp_tool_names`]=!0') &&
     content.includes('`features.unavailable_dummy_tools`]=!0');
   featureEnablementPreserveUnifiedExecPatched ||=
-    (
-      content.includes(FEATURE_ENABLEMENT_PRESERVE_UNIFIED_EXEC_PATCH_MARKER) &&
-      content.includes('unified_exec:!0')
-    ) ||
-    (
-      content.includes(FEATURE_OVERRIDES_PRESERVE_MCP_CONFIG_PATCH_MARKER) &&
-      content.includes('`features.unified_exec`]=!0') &&
-      content.includes('`features.tool_search`]=!0')
-    );
+    content.includes(FEATURE_OVERRIDES_PRESERVE_MCP_CONFIG_PATCH_MARKER) &&
+    content.includes('`features.unified_exec`]=!0') &&
+    content.includes('`features.tool_search`]=!0');
   if (content.includes('`tool_suggest`,`unified_exec`')) {
     throw new Error('Renderer sends unsupported unified_exec through app-server feature enablement.');
   }
@@ -1848,9 +1822,6 @@ for (const entry of javaScriptEntries) {
   pluginsApiKeyRoutePatched ||= content.includes(PLUGINS_API_KEY_ROUTE_PATCH_MARKER);
   codexMobileRemoteControlMfaEndpointSeen ||= content.includes(CODEX_MOBILE_REMOTE_CONTROL_MFA_ENDPOINT);
   codexMobileAuthReloginPatched ||= content.includes(CODEX_MOBILE_AUTH_RELOGIN_MARKER);
-  if (content.includes(LEGACY_ELECTRON_NAMESPACE_PATCH_MARKER)) {
-    legacyElectronNamespacePatchResiduals.push(entry);
-  }
   browserUseDescriptorPatched ||=
     /\{autoInstallOptOutKey:[A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*\([A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*\),installWhenMissing:!0,name:[A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*,isAvailable:\(\{features:[A-Za-z_$][\w$]*\}\)=>\/\*codex-offline:bundled-browser-plugins-no-force-reload\*\/!0,migrate:[A-Za-z_$][\w$]*\}/.test(content) ||
     BROWSER_USE_DESCRIPTOR_CURRENT_PATCHED_RE.test(content);
@@ -1955,12 +1926,6 @@ if (!ultraReasoningEffortSurfaceSeen) {
 if (!ultraReasoningEffortPatched) {
   throw new Error('Renderer Ultra reasoning effort availability patch is missing from app.asar.');
 }
-if (legacyElectronNamespacePatchResiduals.length > 0) {
-  throw new Error(
-    'Legacy Electron namespace patch breaks electron.default and must be removed: ' +
-    legacyElectronNamespacePatchResiduals.join(', ')
-  );
-}
 
 const webviewEntry = entries.find(entry => /(^|\/)webview\/assets\/index-[^/]+\.js$/.test(entry));
 if (!webviewEntry) {
@@ -1985,9 +1950,6 @@ if (!nodeReplFeatureConfigPatched) {
 }
 if (!appServerSandboxOverridePatched) {
   throw new Error('Desktop app-server launch does not force windows.sandbox=\'unelevated\'.');
-}
-if (!nodeReplConfigReconcileFinallyPatched) {
-  info('Current app version does not require the bundled plugin reconcile finalizer marker; required node_repl gates are verified separately.');
 }
 if (!nodeReplDisableSandboxPatched) {
   throw new Error('Browser Use thread config does not add node_repl --disable-sandbox for offline Windows Computer Use.');

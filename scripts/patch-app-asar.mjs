@@ -3,20 +3,23 @@
  * patch-app-asar.mjs
  *
  * Patches app/resources/app.asar after it has been extracted from the MSIX so
- * that features which are gated on "running as a Windows Store app" continue to
- * work when Codex is launched as a standalone exe.
+ * that Codex keeps working when it is launched as a standalone exe.
  *
  * Patches applied:
  *
- * 1. process.windowsStore = true
- *    Electron exposes this flag only inside MSIX containers.  Codex checks it
- *    for telemetry and build-type reporting.  We inject it at the top of the
- *    main-process entry point.  The same bootstrap patch also defaults the
- *    Windows Computer Use process environment gate so direct ChatGPT.exe
- *    launches get the same runtime features as the provided launchers, and
- *    stubs the electron_browser_msix_updater native binding so that reading
- *    electron.autoUpdater (which windowsStore=true routes to the MSIX updater)
- *    does not abort standalone startup with "No such binding was linked".
+ * 1. Main-entry bootstrap
+ *    Prepends three fragments to the main-process entry point: the Windows
+ *    Computer Use process environment default (so a direct ChatGPT.exe launch
+ *    gets the same runtime features as the provided launchers), a stdout/stderr
+ *    guard for closed pipes, and the require() that loads init.cjs for
+ *    IPC-level Statsig gate interception.
+ *
+ *    This used to also set process.windowsStore = true and stub the
+ *    electron_browser_msix_updater binding.  Against 26.903.8094.0 the flag has
+ *    a single reference, inside Sentry's build_type field, and setting it is
+ *    what routed electron.autoUpdater to the unlinked MSIX binding in the first
+ *    place; an A/B launch test showed the offline package starts fine without
+ *    either.  Both were removed.
  *
  * 2. Implement "show-settings" and "open-config-toml" IPC handlers
  *    The Electron build throws "not implemented" for these messages.  We
@@ -153,7 +156,6 @@ const {
   DESKTOP_ASAR_PATCH_MARKERS,
   DESKTOP_ASAR_KNOWN_GATE_IDS,
   DESKTOP_BROWSER_USE_CAPABILITY_KEYS,
-  CONTEXT_USAGE_CONTRACT,
   FAST_MODE_CONTRACT,
   DESKTOP_GATE_DENYLIST,
 } = require('../web-gateway/gateway/src/ipc/codex/capabilityContractData.cjs');
@@ -278,39 +280,10 @@ function resolveMainEntry(extractDir) {
   return candidates.find(fs.existsSync) ?? null;
 }
 
-const PATCH_MARKER = '/* codex-offline:windowsStore-patch */';
-const LEGACY_ELECTRON_NAMESPACE_PATCH_MARKER =
-  '/*codex-offline:electron-namespace-no-auto-updater*/';
 const COMPUTER_USE_ENV_DEFAULT =
   'if(process.env.CODEX_ELECTRON_ENABLE_WINDOWS_COMPUTER_USE==null){' +
     'process.env.CODEX_ELECTRON_ENABLE_WINDOWS_COMPUTER_USE="1"' +
   '}\n';
-// Neutralize the MSIX auto-updater native binding for portable launches.
-// process.windowsStore=true makes Electron route electron.autoUpdater through
-// the MSIX updater (lib/browser/api/auto-updater/auto-updater-msix.ts), whose
-// module load calls process._linkedBinding("electron_browser_msix_updater").
-// That binding is only linked inside a real MSIX container, so a standalone
-// ChatGPT.exe aborts at bootstrap with "No such binding was linked". Newer builds
-// (>= 26.609) read electron.autoUpdater during startup via a __toESM namespace
-// copy that the Sentry-breadcrumb needle patch does not cover, so we stub the
-// binding itself: any electron_browser_msix_updater lookup returns a chainable
-// no-op so the updater module loads (and stays inert) instead of crashing.
-const MSIX_UPDATER_BINDING_STUB =
-  '(function(){try{' +
-    'if(process._codexOfflineMsixStub)return;' +
-    'process._codexOfflineMsixStub=true;' +
-    'var _lb=process._linkedBinding;' +
-    'if(typeof _lb!=="function")return;' +
-    'var _stub=new Proxy(function(){return _stub},{' +
-      'get:function(_t,_p){return _p==="then"?undefined:_stub},' +
-      'apply:function(){return _stub},' +
-      'construct:function(){return _stub}' +
-    '});' +
-    'process._linkedBinding=function(_n){' +
-      'if(_n==="electron_browser_msix_updater")return _stub;' +
-      'return _lb.apply(this,arguments)' +
-    '}' +
-  '}catch(_e){}})();\n';
 // Suppress closed-pipe errors on stdout/stderr that surface as uncaught
 // exceptions when the Electron app writes to a console pipe that has
 // already been closed (e.g. the CMD window that launched Codex exits
@@ -355,12 +328,14 @@ const PATCH_BOOTSTRAP_REQUIRE =
     '}' +
   '}catch(_codexOfflineE){}' +
   '\n';
-const PATCH_SNIPPET = `${PATCH_MARKER}\nif(!process.windowsStore){process.windowsStore=true;}\n${MSIX_UPDATER_BINDING_STUB}${COMPUTER_USE_ENV_DEFAULT}${EPIPE_GUARD}${PATCH_BOOTSTRAP_REQUIRE}`;
+const PATCH_SNIPPET = `${COMPUTER_USE_ENV_DEFAULT}${EPIPE_GUARD}${PATCH_BOOTSTRAP_REQUIRE}`;
 
-/** Return true if the file already contains our patch marker. */
+/** Return true if this main entry already carries our bootstrap snippet. */
 function isAlreadyPatched(filePath) {
   const content = fs.readFileSync(filePath, 'utf8');
-  return content.includes(PATCH_MARKER);
+  return (
+    content.includes(STDIO_WRITE_ERROR_GUARD_MARKER) || content.includes(LEGACY_EPIPE_GUARD)
+  );
 }
 
 /** Prepend the patch snippet to a JS file. */
@@ -375,24 +350,7 @@ function refreshMainEntryPatch(filePath) {
 
   // Add Computer Use env default if missing from a prior build.
   if (!content.includes('CODEX_ELECTRON_ENABLE_WINDOWS_COMPUTER_USE')) {
-    const windowsStoreLine = 'if(!process.windowsStore){process.windowsStore=true;}\n';
-    if (content.includes(windowsStoreLine)) {
-      content = content.replace(windowsStoreLine, windowsStoreLine + COMPUTER_USE_ENV_DEFAULT);
-    } else {
-      content = content.replace(PATCH_MARKER, `${PATCH_MARKER}\n${COMPUTER_USE_ENV_DEFAULT}`);
-    }
-    changed = true;
-  }
-
-  // Add the MSIX auto-updater binding stub if missing from a prior build.
-  // Required for >= 26.609 portable startup (see MSIX_UPDATER_BINDING_STUB).
-  if (!content.includes('_codexOfflineMsixStub')) {
-    const windowsStoreLine = 'if(!process.windowsStore){process.windowsStore=true;}\n';
-    if (content.includes(windowsStoreLine)) {
-      content = content.replace(windowsStoreLine, windowsStoreLine + MSIX_UPDATER_BINDING_STUB);
-    } else {
-      content = content.replace(PATCH_MARKER, `${PATCH_MARKER}\n${MSIX_UPDATER_BINDING_STUB}`);
-    }
+    content = COMPUTER_USE_ENV_DEFAULT + content;
     changed = true;
   }
 
@@ -401,7 +359,7 @@ function refreshMainEntryPatch(filePath) {
     if (content.includes(LEGACY_EPIPE_GUARD)) {
       content = content.replace(LEGACY_EPIPE_GUARD, EPIPE_GUARD);
     } else {
-      content = content.replace(PATCH_MARKER, `${PATCH_MARKER}\n${EPIPE_GUARD}`);
+      content = EPIPE_GUARD + content;
     }
     changed = true;
   }
@@ -1963,11 +1921,10 @@ try {
 
   // Find main entry point.
   //
-  // The main-process entry carries the load-bearing bootstrap patches
-  // (process.windowsStore, the MSIX updater binding stub, the Computer Use
-  // env default and the init.cjs require). Without them a standalone
-  // ChatGPT.exe crashes at startup, so a missing entry must fail the build
-  // instead of silently shipping a broken package.
+  // The main-process entry carries the bootstrap fragments (the Computer Use
+  // env default, the stdio guard and the init.cjs require). Without the
+  // init.cjs require the package ships with every renderer gate closed, so a
+  // missing entry must fail the build instead of shipping silently.
   const mainEntry = resolveMainEntry(tmpDir);
   if (!mainEntry) {
     throw new Error(
@@ -1986,7 +1943,7 @@ try {
     }
   } else {
     patchFile(mainEntry);
-    log('windowsStore patch applied.');
+    log('Main entry bootstrap applied.');
   }
 
   const chromeBrowserClientHash = patchChromePluginScripts(path.resolve(appDir));
@@ -2082,8 +2039,6 @@ try {
     /([A-Za-z_$][\w$]*=\{(?=[\s\S]{0,120}include_permissions_instructions:!1,)[\s\S]{0,800}?["']features\.js_repl["']:\s*)(!0|!1)(?:\/\*codex-offline:node-repl-feature-enabled\*\/)?([\s\S]{0,500}?web_search:`disabled`\})(?=[,;)\]])/;
   const NODE_REPL_FEATURE_CONFIG_CURRENT_PATCHED_RE =
     /[A-Za-z_$][\w$]*=\{(?=[\s\S]{0,120}include_permissions_instructions:!1,)[\s\S]{0,800}?["']features\.js_repl["']:\s*!0\/\*codex-offline:node-repl-feature-enabled\*\/[\s\S]{0,500}?web_search:`disabled`\}(?=[,;)\]])/;
-  const NODE_REPL_CONFIG_RECONCILE_FINALLY_PATCH_MARKER =
-    contractPatchMarker('/*codex-offline:node-repl-config-reconcile-finally*/');
   const NODE_REPL_DISABLE_SANDBOX_PATCH_MARKER =
     contractPatchMarker('/*codex-offline:node-repl-disable-sandbox*/');
   const NODE_REPL_TOOL_SEARCH_FEATURE_PATCH_MARKER =
@@ -2194,33 +2149,6 @@ try {
     /catch\(([A-Za-z_$][\w$]*)\)\{if\(([A-Za-z_$][\w$]*)\.warning\(`bundled_plugins_marketplace_install_failed`,\{safe:\{errorCategory:([A-Za-z_$][\w$]*)\(\{error:\1,platformFamily:e\.platformFamily\}\),marketplaceName:t,platformFamily:e\.platformFamily\},sensitive:\{error:\1,marketplaceRoot:e\.materializedMarketplace\.marketplaceRoot\}\}\),n\)throw \1;return!1\}/g;
   const BUNDLED_PLUGIN_CACHE_LOCK_CURRENT_CATCH_THROW_RE =
     /catch\(([A-Za-z_$][\w$]*)\)\{if\(([A-Za-z_$][\w$]*)\.warning\(`bundled_plugins_marketplace_install_failed`,\{safe:\{errorCategory:([A-Za-z_$][\w$]*)\(\{error:\1,platformFamily:([A-Za-z_$][\w$]*)\.platformFamily\}\),marketplaceName:([A-Za-z_$][\w$]*),platformFamily:\4\.platformFamily\},sensitive:\{error:\1,marketplaceRoot:\4\.materializedMarketplace\.marketplaceRoot\}\}\),\4\.throwOnReconcileFailure\)throw \1;return\{/;
-  const NODE_REPL_CONFIG_RECONCILE_FINAL_STEP =
-    'await Ro({appServerConnection:r,chromeExtensionSyncManagedPluginStore:l,' +
-    'devRuntimeRepoRoot:s,marketplacePluginNames:e.marketplacePluginNames,' +
-    'forceInstallPluginNames:d,installWhenMissingPluginNames:f,' +
-    'syncInstallStateWithChromeExtensionPluginNames:m,marketplaceName:a,' +
-    'resourcesPath:i,runtimeMarketplaceRoot:o}),await Promise.all(' +
-    'e.marketplacePluginDescriptors.map(async e=>{e.migrate!=null&&' +
-    'await e.migrate({appServerConnection:r,codexHome:t.codexHome,' +
-    'marketplaceName:a,trashItem:t.trashItem})})),await ci({' +
-    'appServerConnection:r,desktopFeatureAvailability:e.desktopFeatureAvailability,' +
-    'isPackaged:t.isPackaged,platform:u,repoRoot:t.repoRoot,resourcesPath:i}),' +
-    'p=await b(e.marketplacePluginDescriptors),t.onReconcileComplete?.()';
-  const NODE_REPL_CONFIG_RECONCILE_FINAL_STEP_REPLACEMENT =
-    'try{await Ro({appServerConnection:r,chromeExtensionSyncManagedPluginStore:l,' +
-    'devRuntimeRepoRoot:s,marketplacePluginNames:e.marketplacePluginNames,' +
-    'forceInstallPluginNames:d,installWhenMissingPluginNames:f,' +
-    'syncInstallStateWithChromeExtensionPluginNames:m,marketplaceName:a,' +
-    'resourcesPath:i,runtimeMarketplaceRoot:o}),await Promise.all(' +
-    'e.marketplacePluginDescriptors.map(async e=>{e.migrate!=null&&' +
-    'await e.migrate({appServerConnection:r,codexHome:t.codexHome,' +
-    'marketplaceName:a,trashItem:t.trashItem})}))}finally{await ci({' +
-    'appServerConnection:r,desktopFeatureAvailability:e.desktopFeatureAvailability,' +
-    'isPackaged:t.isPackaged,platform:u,repoRoot:t.repoRoot,resourcesPath:i})}' +
-    NODE_REPL_CONFIG_RECONCILE_FINALLY_PATCH_MARKER +
-    ';p=await b(e.marketplacePluginDescriptors),t.onReconcileComplete?.()';
-  const NODE_REPL_CONFIG_RECONCILE_FINAL_STEP_CURRENT_RE =
-    /await ([A-Za-z_$][\w$]*)\(\{appServerConnection:([A-Za-z_$][\w$]*),browserSkillVariant:([A-Za-z_$][\w$]*),chromeExtensionSyncManagedPluginStore:([A-Za-z_$][\w$]*),devRuntimeRepoRoot:([A-Za-z_$][\w$]*),marketplacePluginNames:([A-Za-z_$][\w$]*)\.marketplacePluginNames,forceInstallPluginNames:([A-Za-z_$][\w$]*),installWhenMissingPluginNames:([A-Za-z_$][\w$]*),syncInstallStateWithChromeExtensionPluginNames:([A-Za-z_$][\w$]*),marketplaceName:([A-Za-z_$][\w$]*),resourcesPath:([A-Za-z_$][\w$]*),runtimeMarketplaceRoot:([A-Za-z_$][\w$]*)\}\),await Promise\.all\(\6\.marketplacePluginDescriptors\.map\(async ([A-Za-z_$][\w$]*)=>\{\13\.migrate!=null&&await \13\.migrate\(\{appServerConnection:\2,codexHome:e\.codexHome,marketplaceName:\10,trashItem:e\.trashItem\}\)\}\)\),await ([A-Za-z_$][\w$]*)\(\{appServerConnection:\2,desktopFeatureAvailability:\6\.desktopFeatureAvailability,isPackaged:e\.isPackaged,platform:([A-Za-z_$][\w$]*),repoRoot:e\.repoRoot,resourcesPath:\11\}\),/;
   const NODE_REPL_CONFIG_HELPER_RE =
     /\{\[`mcp_servers\.\$\{([A-Za-z_$][\w$]*)\}`\]:\{args:\[\],command:([A-Za-z_$][\w$]*),env:([A-Za-z_$][\w$]*)(,\.\.\.[A-Za-z_$][\w$]*\.length===0\?\{\}:\{env_vars:Array\.from\([A-Za-z_$][\w$]*\)\}),startup_timeout_sec:120\}\}/;
   const NODE_REPL_CONFIG_HELPER_REPLACEMENT =
@@ -3212,52 +3140,6 @@ try {
          'Settings patch skipped (the app version may have changed).');
   }
 
-  // A previous portable-startup guard removed the CommonJS namespace wrapper
-  // around the Electron module. That avoided autoUpdater reads, but it also
-  // removed the `.default` export shape used by newer main bundles
-  // (`electronNamespace.default.app`). Restore that wrapper when repatching an
-  // affected build; the actual autoUpdater read is disabled below in Sentry's
-  // breadcrumb setup.
-  const electronNamespaceRestoredFiles = [];
-  const electronNamespaceLegacyRe =
-    /let ([A-Za-z_$][\w$]*)=require\(`electron`\);\/\*codex-offline:electron-namespace-no-auto-updater\*\//g;
-
-  for (const filePath of mainBundleFiles) {
-    let content = fs.readFileSync(filePath, 'utf8');
-    if (!electronNamespaceLegacyRe.test(content)) {
-      electronNamespaceLegacyRe.lastIndex = 0;
-      continue;
-    }
-
-    const helperMatch = content.match(
-      /(?:const|let|var) ([A-Za-z_$][\w$]*)=require\(`\.\/src-[^`]+\.js`\)/,
-    );
-    if (!helperMatch) {
-      electronNamespaceLegacyRe.lastIndex = 0;
-      warn(
-        'Found legacy Electron namespace patch but could not resolve the ' +
-        `namespace helper in ${path.relative(tmpDir, filePath)}.`,
-      );
-      continue;
-    }
-
-    const helperVar = helperMatch[1];
-    electronNamespaceLegacyRe.lastIndex = 0;
-    content = content.replaceAll(
-      electronNamespaceLegacyRe,
-      `let $1=require(\`electron\`);$1=${helperVar}.Hi($1);`,
-    );
-    electronNamespaceLegacyRe.lastIndex = 0;
-    fs.writeFileSync(filePath, content, 'utf8');
-    electronNamespaceRestoredFiles.push(path.relative(tmpDir, filePath));
-  }
-
-  if (electronNamespaceRestoredFiles.length > 0) {
-    log(
-      'Legacy Electron namespace startup guard restored in ' +
-      `${electronNamespaceRestoredFiles.join(', ')}.`,
-    );
-  }
 
   // Note: the former "autoUpdater breadcrumb" needle patch (which rewrote
   // Sentry's `autoUpdater:()=>!0` so it would not read electron.autoUpdater at
@@ -4019,83 +3901,6 @@ try {
     );
   }
 
-  const nodeReplConfigReconcilePatchedFiles = [];
-  let nodeReplConfigReconcilePatched = false;
-  let nodeReplConfigReconcileAlreadyCorrect = false;
-
-  for (const filePath of mainBundleFiles) {
-    let content = fs.readFileSync(filePath, 'utf8');
-    if (content.includes(NODE_REPL_CONFIG_RECONCILE_FINALLY_PATCH_MARKER)) {
-      nodeReplConfigReconcileAlreadyCorrect = true;
-      nodeReplConfigReconcilePatchedFiles.push(path.relative(tmpDir, filePath));
-      continue;
-    }
-
-    if (content.includes(NODE_REPL_CONFIG_RECONCILE_FINAL_STEP)) {
-      content = content.replace(
-        NODE_REPL_CONFIG_RECONCILE_FINAL_STEP,
-        NODE_REPL_CONFIG_RECONCILE_FINAL_STEP_REPLACEMENT,
-      );
-    } else if (NODE_REPL_CONFIG_RECONCILE_FINAL_STEP_CURRENT_RE.test(content)) {
-      content = content.replace(
-        NODE_REPL_CONFIG_RECONCILE_FINAL_STEP_CURRENT_RE,
-        (
-          _match,
-          reconcileFn,
-          appServerConnection,
-          browserSkillVariant,
-          chromeExtensionSyncManagedPluginStore,
-          devRuntimeRepoRoot,
-          marketplaceDescriptorSource,
-          forceInstallPluginNames,
-          installWhenMissingPluginNames,
-          syncInstallStateWithChromeExtensionPluginNames,
-          marketplaceName,
-          resourcesPath,
-          runtimeMarketplaceRoot,
-          descriptorVar,
-          refreshNodeReplConfigFn,
-          platform,
-        ) =>
-          `try{await ${reconcileFn}({appServerConnection:${appServerConnection},` +
-          `browserSkillVariant:${browserSkillVariant},` +
-          `chromeExtensionSyncManagedPluginStore:${chromeExtensionSyncManagedPluginStore},` +
-          `devRuntimeRepoRoot:${devRuntimeRepoRoot},` +
-          `marketplacePluginNames:${marketplaceDescriptorSource}.marketplacePluginNames,` +
-          `forceInstallPluginNames:${forceInstallPluginNames},` +
-          `installWhenMissingPluginNames:${installWhenMissingPluginNames},` +
-          `syncInstallStateWithChromeExtensionPluginNames:${syncInstallStateWithChromeExtensionPluginNames},` +
-          `marketplaceName:${marketplaceName},resourcesPath:${resourcesPath},` +
-          `runtimeMarketplaceRoot:${runtimeMarketplaceRoot}}),await Promise.all(` +
-          `${marketplaceDescriptorSource}.marketplacePluginDescriptors.map(async ${descriptorVar}=>{` +
-          `${descriptorVar}.migrate!=null&&await ${descriptorVar}.migrate({` +
-          `appServerConnection:${appServerConnection},codexHome:e.codexHome,` +
-          `marketplaceName:${marketplaceName},trashItem:e.trashItem})}))}finally{` +
-          `await ${refreshNodeReplConfigFn}({appServerConnection:${appServerConnection},` +
-          `desktopFeatureAvailability:${marketplaceDescriptorSource}.desktopFeatureAvailability,` +
-          `isPackaged:e.isPackaged,platform:${platform},repoRoot:e.repoRoot,` +
-          `resourcesPath:${resourcesPath}})}` +
-          NODE_REPL_CONFIG_RECONCILE_FINALLY_PATCH_MARKER +
-          ';',
-      );
-    } else {
-      continue;
-    }
-    fs.writeFileSync(filePath, content, 'utf8');
-    nodeReplConfigReconcilePatched = true;
-    nodeReplConfigReconcilePatchedFiles.push(path.relative(tmpDir, filePath));
-  }
-
-  if (nodeReplConfigReconcilePatched) {
-    log('Node REPL config reconcile finalizer patched in ' +
-        `${nodeReplConfigReconcilePatchedFiles.join(', ')}.`);
-  } else if (nodeReplConfigReconcileAlreadyCorrect) {
-    log('Node REPL config reconcile finalizer already patched.');
-  } else {
-    log(
-      'Node REPL config reconcile finalizer not needed for this app version; verifier keeps required runtime gates.',
-    );
-  }
 
   const bundledBrowserPluginsPatch = patchBundledBrowserPlugins(mainBundleFiles, {
     chromeDescriptorCurrentPatchedRe: CHROME_DESCRIPTOR_CURRENT_PATCHED_RE,
@@ -4198,69 +4003,19 @@ try {
   // per-gate asar needles were removed. See
   // docs/plan-b-patch-migration-inventory.md.
 
-  // ── Patch 35: Enable Fast mode speed selector for offline builds ────────
+  // ── Enable the Fast mode speed selector for offline builds ─────────────
   //
-  // Older builds used a Statsig fast_mode gate:
-  //   X?.fast_mode===!0&&authCheck(arg)
-  // Newer builds route the composer/settings Speed selector through a helper:
-  //   function F(e){return I(e).canUseFastMode}
-  // In offline packages the model metadata can fail that availability test
-  // after Fast is selected, hiding the only UI that can switch back to
-  // Standard.  Patch only the selector visibility helper; the service-tier
-  // setter still writes null/"fast" exactly as upstream does.
-  const FAST_MODE_SELECTOR_PATCH_MARKER =
-    contractPatchMarker(FAST_MODE_CONTRACT.selectorPatchMarker);
+  // Upstream gates the selector on ChatGPT auth AND a backend response
+  // (featureRequirements.fast_mode), which excludes API-key and offline users,
+  // so the only UI that can switch back to Standard disappears once Fast is
+  // selected. The service-tier setter still writes null/"fast" as upstream does.
+  //
+  // The older canUseFastMode / serviceTiers shapes this patch used to also
+  // handle no longer occur anywhere in 26.903.8094.0 and were removed.
   const FAST_MODE_AUTH_METHOD_PATCH_MARKER =
     contractPatchMarker(FAST_MODE_CONTRACT.authMethodPatchMarker);
-  const FAST_MODE_SERVICE_TIER_OPTIONS_PATCH_MARKER =
-    contractPatchMarker(FAST_MODE_CONTRACT.serviceTierOptionsPatchMarker);
-  // Matches: X?.fast_mode===!0&&Y(Z)  or  X.fast_mode===!0&&Y(Z)
-  const FAST_MODE_GATE_RE =
-    /[$\w]+(?:\?\.|\.)fast_mode===!0&&[$\w]+\([$\w]+\)/;
-  const FAST_MODE_AVAILABILITY_MARKERS = Array.from(FAST_MODE_CONTRACT.availabilityMarkers);
-  const FAST_MODE_AVAILABILITY_RE =
-    /function\s+([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*)\)\{return\s+[A-Za-z_$][\w$]*\(\2\)\.canUseFastMode\}/;
-  // v26.608+: fast mode availability is gated on ChatGPT auth AND a backend API response
-  // (featureRequirements.fast_mode). API-key users are always excluded. Patch the
-  // isServiceTierAllowed computation to remove the chatgpt-auth requirement and treat a
-  // null backend response as "allowed" (same intent as the old canUseFastMode:!0 patch).
-  const FAST_MODE_SERVICE_TIER_GET_RE =
-    /function\s+([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*),([A-Za-z_$][\w$]*)\)\{return \3==null\?null:\3===`fast`\?([A-Za-z_$][\w$]*)\(\2\):\2\?\.serviceTiers\?\.find\(([A-Za-z_$][\w$]*)=>\5\.id===\3\)\?\?null\}/;
-  const FAST_MODE_SERVICE_TIER_OPTIONS_RE =
-    /function\s+([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*)\)\{return\[\{description:([A-Za-z_$][\w$]*)\.standardDescription,iconKind:null,label:[A-Za-z_$][\w$]*\.standardLabel,tier:null,value:null\},\.\.\.\([A-Za-z_$][\w$]*\?\.serviceTiers\?\?\[\]\)\.map\(([A-Za-z_$][\w$]*)=>\(\{description:([A-Za-z_$][\w$]*)\([A-Za-z_$][\w$]*\),iconKind:([A-Za-z_$][\w$]*)\([A-Za-z_$][\w$]*\.id,[A-Za-z_$][\w$]*\.name\),label:([A-Za-z_$][\w$]*)\([A-Za-z_$][\w$]*\),tier:[A-Za-z_$][\w$]*,value:[A-Za-z_$][\w$]*\.id\}\)\)\]\}/;
-  const FAST_MODE_FAST_TIER_RE =
-    /function\s+([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*)\)\{return \2\?\.serviceTiers\?\.find\(([A-Za-z_$][\w$]*)=>([A-Za-z_$][\w$]*)\(\3\.id,\3\.name\)===`fast`\|\|\3\.name\.trim\(\)\.toLowerCase\(\)===`priority`\)\?\?null\}/;
-  const CONTEXT_USAGE_STATUS_SECTION_KEY =
-    CONTEXT_USAGE_CONTRACT.localStatusSectionStorageKey;
-  const CONTEXT_USAGE_STATUS_SECTION_PATCH_MARKER =
-    contractPatchMarker(CONTEXT_USAGE_CONTRACT.visibilityPatchMarker);
-  const CONTEXT_USAGE_STATUS_SECTION_PATCHED_RE = new RegExp(
-    String.raw`[A-Za-z_$][\w$]*=[$\w]+\(` +
-      '`' +
-      escapeRegExp(CONTEXT_USAGE_STATUS_SECTION_KEY) +
-      '`' +
-      String.raw`,!0${escapeRegExp(CONTEXT_USAGE_STATUS_SECTION_PATCH_MARKER)}\)`,
-  );
-  const CONTEXT_USAGE_STATUS_SECTION_FALSE_RE = new RegExp(
-    String.raw`([A-Za-z_$][\w$]*=[$\w]+\(` +
-      '`' +
-      escapeRegExp(CONTEXT_USAGE_STATUS_SECTION_KEY) +
-      '`' +
-      String.raw`,)!1(\))`,
-  );
-  const CONTEXT_USAGE_STATUS_SECTION_TRUE_RE = new RegExp(
-    String.raw`([A-Za-z_$][\w$]*=[$\w]+\(` +
-      '`' +
-      escapeRegExp(CONTEXT_USAGE_STATUS_SECTION_KEY) +
-      '`' +
-      String.raw`,)!0(\))`,
-  );
   const WORKSPACE_DEPENDENCIES_SETTINGS_PATCH_MARKER =
     contractPatchMarker('/*codex-offline:workspace-dependencies-settings*/');
-  const FEATURE_ENABLEMENT_PRESERVE_UNIFIED_EXEC_PATCH_MARKER =
-    contractPatchMarker('/*codex-offline:feature-enablement-preserve-unified-exec*/');
-  const FEATURE_ENABLEMENT_LOCAL_STATE_RE =
-    /if\(([A-Za-z_$][\w$]*)&&\(0,([A-Za-z_$][\w$]*)\.default\)\(\1,([A-Za-z_$][\w$]*)\)\)return \1;let ([A-Za-z_$][\w$]*)=Object\.entries\(\3\)\.filter\(([A-Za-z_$][\w$]*)\)\.map\(([A-Za-z_$][\w$]*)\);return \4\.length>0&&([A-Za-z_$][\w$]*)\.info\(`Features enabled`,\{safe:\{enabledFeatures:\4\.join\(`, `\)\},sensitive:\{\}\}\),\3/;
 
   const AUTOMATION_DIALOG_CWD_PATCHES = [
     {
@@ -4310,7 +4065,6 @@ try {
     let patchedCount = 0;
     let localeSourcePatched = false;
     let fastModeAuthPatched = false;
-    let fastModeServiceTierPatched = false;
     let rendererKnownStatsigGatePatchCount = 0;
     var defaultOnStatsigGatePatched = false;
     var defaultOnStatsigGateSeen = false;
@@ -4509,7 +4263,6 @@ try {
       log(`Webview assets patched in ${patchedCount} files` +
         (localeSourcePatched ? ' (locale_source)' : '') +
         (fastModeAuthPatched ? ' (fast-mode auth)' : '') +
-        (fastModeServiceTierPatched ? ' (fast-mode service-tier)' : '') +
         (rendererKnownStatsigGatePatchCount > 0 ? ` (renderer gates: ${rendererKnownStatsigGatePatchCount})` : '') +
         '.');
     } else {

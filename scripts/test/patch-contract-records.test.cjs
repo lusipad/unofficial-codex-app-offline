@@ -56,6 +56,45 @@ test("patches never assert absence", () => {
   }
 });
 
+const REMOVED_MARKERS = [
+  "/* codex-offline:windowsStore-patch */",
+  "/*codex-offline:electron-namespace-no-auto-updater*/",
+  "/*codex-offline:fast-mode-selector*/",
+  "/*codex-offline:fast-mode-service-tier-options*/",
+  "/*codex-offline:context-usage-visible*/",
+  "/*codex-offline:node-repl-config-reconcile-finally*/",
+  "/*codex-offline:feature-enablement-preserve-unified-exec*/",
+];
+
+test("retired patches are gone from the contract", () => {
+  for (const marker of REMOVED_MARKERS) {
+    assert.equal(contract.getPatchRecord(marker), undefined, `still present: ${marker}`);
+    assert.ok(!contract.DESKTOP_ASAR_PATCH_MARKERS.includes(marker), marker);
+  }
+});
+
+test("retired patches leave no residue in the patcher or verifier", () => {
+  const fs = require("node:fs");
+  const patcher = fs.readFileSync(path.join(repoRoot, "scripts", "patch-app-asar.mjs"), "utf8");
+  const verifier = fs.readFileSync(
+    path.join(repoRoot, "scripts", "verify-offline-package.ps1"),
+    "utf8",
+  );
+  for (const marker of REMOVED_MARKERS) {
+    const slug = marker.replace(/\/\*\s?|\s?\*\//g, "");
+    assert.ok(!patcher.includes(slug), `patch-app-asar.mjs still references ${slug}`);
+    assert.ok(!verifier.includes(slug), `verify-offline-package.ps1 still references ${slug}`);
+  }
+  assert.ok(
+    !patcher.includes("MSIX_UPDATER_BINDING_STUB"),
+    "MSIX updater stub should be gone with the windowsStore patch",
+  );
+  assert.ok(
+    !patcher.includes("process.windowsStore=true"),
+    "windowsStore injection should be gone",
+  );
+});
+
 test("lookup helpers agree with the records", () => {
   const first = contract.DESKTOP_ASAR_PATCHES[0];
   assert.equal(contract.getPatchRecord(first.marker).kind, first.kind);

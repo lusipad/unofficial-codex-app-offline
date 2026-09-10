@@ -632,7 +632,7 @@ test("26.721 automation runtime normalizes cwd before creating legacy targets", 
 test("26.721 plugin cache lock failures remain nonfatal in both reconcile branches", () => {
   const constantsSource = sourceSlice(
     "  const BUNDLED_PLUGIN_CACHE_LOCK_NONFATAL_PATCH_MARKER =",
-    "\n  const NODE_REPL_CONFIG_RECONCILE_FINAL_STEP =",
+    "\n  const NODE_REPL_CONFIG_HELPER_RE =",
   );
   const constants = Function(
     "contractPatchMarker",
@@ -876,7 +876,7 @@ test("26.825 worktree resolver keeps the upstream HEAD fast-path explicit", () =
 test("26.825 node_repl config enables quoted features.js_repl without touching js_repl_tools_only", () => {
   const nodeReplFeatureConfigSource = sourceSlice(
     "  const NODE_REPL_FEATURE_CONFIG_CURRENT_RE =",
-    "  const NODE_REPL_CONFIG_RECONCILE_FINALLY_PATCH_MARKER =",
+    "  const NODE_REPL_DISABLE_SANDBOX_PATCH_MARKER =",
   );
   const [currentRe, currentPatchedRe] = Function(
     `"use strict";\n${nodeReplFeatureConfigSource}\nreturn [NODE_REPL_FEATURE_CONFIG_CURRENT_RE, NODE_REPL_FEATURE_CONFIG_CURRENT_PATCHED_RE];`,
@@ -1015,7 +1015,7 @@ test("rg_adguard app-source cache requires the current resolver target", {
 test("26.825 verifier rejects a disabled quoted shared node_repl config", () => {
   const verifierBlock = verifierSourceSlice(
     "const NODE_REPL_FEATURE_CONFIG_CURRENT_DISABLED_RE =",
-    "const NODE_REPL_CONFIG_RECONCILE_FINALLY_PATCH_MARKER =",
+    "const NODE_REPL_DISABLE_SANDBOX_PATCH_MARKER =",
   );
   const currentDisabledRe = Function(
     `"use strict";\n${verifierBlock}\nreturn NODE_REPL_FEATURE_CONFIG_CURRENT_DISABLED_RE;`,
