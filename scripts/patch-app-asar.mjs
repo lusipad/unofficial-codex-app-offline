@@ -3215,7 +3215,9 @@ try {
   // so the old !1 pattern no longer exists and no patch is needed.
 
   const I18N_NEEDLE = '.get(`enable_i18n`,!1)';
-  const I18N_REPLACEMENT = '.get(`enable_i18n`,!0)';
+  const I18N_PATCH_MARKER =
+    contractPatchMarker('/*codex-offline:i18n-default-enabled*/');
+  const I18N_REPLACEMENT = '.get(`enable_i18n`,!0)' + I18N_PATCH_MARKER;
   // Marker present when the upstream code already has the correct default.
   const I18N_ALREADY_CORRECT_MARKER = '.get(`enable_i18n`,!0)';
   const LOCALE_SOURCE_NEEDLE = '.get(`locale_source`,`IDE`)';

@@ -79,7 +79,7 @@ test("offline builds force the supported product and navigation UI gates", () =>
   assert.ok(contract.DESKTOP_ASAR_PATCH_MARKERS.includes(workspaceMarker));
   assert.match(
     verifyScriptSource,
-    /requiredPatchMarker\('\/\*codex-offline:workspace-dependencies-settings\*\/'\)/,
+    /patchMarker\('\/\*codex-offline:workspace-dependencies-settings\*\/'\)/,
   );
 });
 
@@ -319,7 +319,7 @@ test("renderer defaults run local queries and mutations while the OS is offline"
 
   for (const marker of [queryMarker, mutationMarker]) {
     assert.ok(contract.DESKTOP_ASAR_PATCH_MARKERS.includes(marker), marker);
-    assert.ok(verifyScriptSource.includes(`requiredPatchMarker('${marker}')`), marker);
+    assert.ok(verifyScriptSource.includes(`patchMarker('${marker}')`), marker);
   }
 });
 
@@ -330,7 +330,7 @@ test("plugin-service fallback no longer patches renderer query functions", () =>
   ]) {
     assert.equal(contract.DESKTOP_ASAR_PATCH_MARKERS.includes(marker), false, marker);
     assert.equal(
-      verifyScriptSource.includes(`requiredPatchMarker('${marker}')`),
+      verifyScriptSource.includes(`patchMarker('${marker}')`),
       false,
       marker,
     );
@@ -436,7 +436,7 @@ test("priority surface carries its dedicated static gate marker", () => {
   assert.equal(latestSecondPass.sidebarCorrect, true);
 
   assert.ok(contract.DESKTOP_ASAR_PATCH_MARKERS.includes(sidebarMarker), sidebarMarker);
-  assert.ok(verifyScriptSource.includes(`requiredPatchMarker('${sidebarMarker}')`));
+  assert.ok(verifyScriptSource.includes(`patchMarker('${sidebarMarker}')`));
 });
 
 test("renderer gate verifier covers method-style gate reads and scoped alias surfaces", () => {
@@ -612,7 +612,7 @@ test("ultra reasoning effort stays available for models that already support max
   assert.ok(contract.DESKTOP_ASAR_PATCH_MARKERS.includes(marker));
   assert.match(
     verifyScriptSource,
-    /requiredPatchMarker\('\/\*codex-offline:ultra-reasoning-effort\*\/'\)/,
+    /patchMarker\('\/\*codex-offline:ultra-reasoning-effort\*\/'\)/,
   );
   assert.match(verifyScriptSource, /ultraReasoningEffortResiduals/);
 });

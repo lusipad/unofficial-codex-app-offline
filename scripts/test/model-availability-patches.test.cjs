@@ -176,7 +176,7 @@ test("package verification requires both model availability patches", () => {
   const verifier = fs.readFileSync(verifyScriptPath, "utf8");
 
   assert.ok(contract.DESKTOP_ASAR_PATCH_MARKERS.includes(marker));
-  assert.match(verifier, /requiredPatchMarker\('\/\*codex-offline:model-id-display-name-fallback\*\/'\)/);
+  assert.match(verifier, /patchMarker\('\/\*codex-offline:model-id-display-name-fallback\*\/'\)/);
   assert.match(verifier, /desktopModelAvailabilityMarkers/);
   assert.match(verifier, /STATSIG_MODEL_AVAILABILITY_CONFIG = '107580212'/);
   assert.match(verifier, /result\.key === STATSIG_MODEL_AVAILABILITY_CONFIG/);

@@ -490,6 +490,42 @@ const DESKTOP_ASAR_PATCHES = Object.freeze([
       "26.903.8094.0: opens unknown renderer gates read through the Statsig client's checkGate, which covers 21 direct call sites. Gates read through the jotai atom path are not covered; see section 8 of the design.",
     reverify: "Check that the checkGate seam still matches and count the call sites on each path.",
   }),
+  Object.freeze({
+    marker: "/*codex-offline:settings-route-map*/",
+    kind: "patch",
+    tier: "required",
+    assert: "negative",
+    evidence:
+      "26.903.8094.0: the Electron build throws \"not implemented\" for show-settings and open-config-toml, so those menu entries do nothing without this.",
+    reverify: "The upstream throw no longer matching means upstream implemented the handlers.",
+  }),
+  Object.freeze({
+    marker: "/*codex-offline:locale-source-default*/",
+    kind: "patch",
+    tier: "required",
+    assert: "negative",
+    evidence:
+      "26.903.8094.0: upstream defaults locale_source to IDE, which is wrong for a standalone desktop build with no IDE to read a locale from.",
+    reverify: "Check whether the IDE default is still there.",
+  }),
+  Object.freeze({
+    marker: "/*codex-offline:stdio-write-error-guard-v2*/",
+    kind: "patch",
+    tier: "required",
+    assert: "marker",
+    evidence:
+      "26.903.8094.0: closed-pipe writes surface as uncaught exceptions when the console that launched Codex exits first. There is no upstream shape to assert against, so this is marker-asserted.",
+    reverify: "Check whether upstream added its own EPIPE/EOF handling on stdout and stderr.",
+  }),
+  Object.freeze({
+    marker: "/*codex-offline:i18n-default-enabled*/",
+    kind: "patch",
+    tier: "required",
+    assert: "negative",
+    evidence:
+      "26.903.8094.0: the settings page offers the language selector while the i18n provider defaults enable_i18n to false, so translations never load. This patch had no marker and no assertion at all until the boundary redesign.",
+    reverify: "Check whether the provider still defaults enable_i18n to false.",
+  }),
 ]);
 
 const DESKTOP_ASAR_PATCH_MARKERS = Object.freeze(

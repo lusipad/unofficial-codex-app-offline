@@ -759,7 +759,7 @@ test("26.825 worktree resolver rejects the retired pre-HEAD shape", () => {
     "capabilityContractData.cjs",
   ));
   assert.ok(contract.DESKTOP_ASAR_PATCH_MARKERS.includes(marker));
-  assert.ok(verifierScriptSource.includes(`requiredPatchMarker('${marker}')`));
+  assert.ok(verifierScriptSource.includes(`patchMarker('${marker}')`));
 });
 
 test("26.825 worktree resolver keeps the upstream HEAD fast-path explicit", () => {
