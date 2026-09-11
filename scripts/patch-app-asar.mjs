@@ -2161,10 +2161,11 @@ try {
   // inner tools array: that array deserializes as function-only on the
   // app-server, so a namespace entry there fails thread/start with
   // "unknown variant `namespace`, expected `function`".
+  // 26.908 moved the app-namespace description into a shared binding and
+  // builds the function tools from a destructured `tools` parameter, so the
+  // collection is an identifier rather than an inline array literal.
   const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOLS_TOP_LEVEL_RE =
-    /\]\.map\((?<item>[A-Za-z_$][\w$]*)=>\(\{type:`function`,\.\.\.\k<item>,\.\.\.(?<eager>[A-Za-z_$][\w$]*)\.has\(\k<item>\.name\)\?\{\}:\{deferLoading:!0\}\}\)\);return (?<supportsNamespaces>[A-Za-z_$][\w$]*)\?\[\{type:`namespace`,name:(?<appNamespace>[A-Za-z_$][\w$]*),description:`Tools provided by the Codex app\.`,tools:(?<functionTools>[A-Za-z_$][\w$]*)\},\.\.\.(?<namespaceGroups>[A-Za-z_$][\w$]*)\]:\k<functionTools>/;
-  const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOLS_TOP_LEVEL_CURRENT_RE =
-    /\]\.map\((?<item>[A-Za-z_$][\w$]*)=>\(\{type:`function`,\.\.\.\k<item>,\.\.\.(?<deferLoadingGuard>(?<supportsNamespaces>[A-Za-z_$][\w$]*)&&[^?]+)\?\{deferLoading:!0\}:\{\}\}\)\);return \k<supportsNamespaces>\?\[\{type:`namespace`,name:(?<appNamespace>[A-Za-z_$][\w$]*),description:(?<appDescription>`Tools provided by the Codex app\.`|[A-Za-z_$][\w$]*),tools:(?<functionTools>[A-Za-z_$][\w$]*)\},\.\.\.(?<namespaceGroups>[A-Za-z_$][\w$]*)\]:(?<fallbackTools>[A-Za-z_$][\w$]*)/;
+    /(?<collection>[A-Za-z_$][\w$]*)\.map\((?<item>[A-Za-z_$][\w$]*)=>\(\{type:`function`,\.\.\.\k<item>,\.\.\.(?<deferLoadingGuard>(?<supportsNamespaces>[A-Za-z_$][\w$]*)&&[^?]+)\?\{deferLoading:!0\}:\{\}\}\)\);return \k<supportsNamespaces>\?\[\{type:`namespace`,name:(?<appNamespace>[A-Za-z_$][\w$]*),description:(?<appDescription>[A-Za-z_$][\w$]*),tools:(?<functionTools>[A-Za-z_$][\w$]*)\},\.\.\.(?<namespaceGroups>[A-Za-z_$][\w$]*)\]:(?<fallbackTools>[A-Za-z_$][\w$]*)/;
   const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_COMPAT_MISSING_RE =
     /(\(\{namespace:`node_repl`,name:`js`,description:`Execute JavaScript in the persistent Node REPL used by Computer Use\.`,inputSchema:\{[\s\S]{0,700}?required:\[`code`\]\}\}\),)(?!\(\{name:`js`,description:`Execute JavaScript in the persistent Node REPL used by Computer Use\. This forwards to node_repl\.js\.`)/;
   const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_RE =
@@ -2249,25 +2250,7 @@ try {
     `tools:[${COMPUTER_USE_NODE_REPL_NAMESPACE_TOOL_SPEC}]}`;
   function computerUseNodeReplDynamicToolsTopLevelReplacement(...args) {
     const {
-      item,
-      eager,
-      supportsNamespaces,
-      appNamespace,
-      functionTools,
-      namespaceGroups,
-    } = args.at(-1);
-    return (
-      `].map(${item}=>({type:\`function\`,...${item},` +
-      `...${eager}.has(${item}.name)?{}:{deferLoading:!0}}));` +
-      `return ${supportsNamespaces}?[{type:\`namespace\`,name:${appNamespace},` +
-      `description:\`Tools provided by the Codex app.\`,tools:${functionTools}},` +
-      `...${namespaceGroups},${COMPUTER_USE_NODE_REPL_NAMESPACE_GROUP_SPEC}]` +
-      `:${functionTools}.concat([${COMPUTER_USE_NODE_REPL_NAMESPACE_TOOL_SPEC}])` +
-      COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_PATCH_MARKER
-    );
-  }
-  function computerUseNodeReplDynamicToolsTopLevelCurrentReplacement(...args) {
-    const {
+      collection,
       item,
       deferLoadingGuard,
       supportsNamespaces,
@@ -2278,7 +2261,7 @@ try {
       fallbackTools,
     } = args.at(-1);
     return (
-      `].map(${item}=>({type:\`function\`,...${item},` +
+      `${collection}.map(${item}=>({type:\`function\`,...${item},` +
       `...${deferLoadingGuard}?{deferLoading:!0}:{}}));` +
       `return ${supportsNamespaces}?[{type:\`namespace\`,name:${appNamespace},` +
       `description:${appDescription},tools:${functionTools}},` +
@@ -2307,14 +2290,6 @@ try {
     next = content.replace(
       COMPUTER_USE_NODE_REPL_DYNAMIC_TOOLS_TOP_LEVEL_RE,
       computerUseNodeReplDynamicToolsTopLevelReplacement,
-    );
-    if (next !== content) {
-      return { content: next, alreadyCorrect: false, patched: true };
-    }
-
-    next = content.replace(
-      COMPUTER_USE_NODE_REPL_DYNAMIC_TOOLS_TOP_LEVEL_CURRENT_RE,
-      computerUseNodeReplDynamicToolsTopLevelCurrentReplacement,
     );
     return { content: next, alreadyCorrect: false, patched: next !== content };
   }

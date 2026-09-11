@@ -630,104 +630,44 @@ test("26.727 browser-use descriptor accepts external browser availability", () =
   assert.match(fixture, currentRegex);
 });
 
-test("26.727 dynamic tools keep node_repl at the top-level namespace boundary", () => {
+
+
+
+test("26.908 dynamic tools keep node_repl at the top-level namespace boundary", () => {
   const regexSource = sourceSlice(
-    "  const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOLS_TOP_LEVEL_CURRENT_RE =",
+    "  const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOLS_TOP_LEVEL_RE =",
     "\n  const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_RE =",
   );
   const currentRegex = Function(
-    `"use strict";\n${regexSource}\nreturn COMPUTER_USE_NODE_REPL_DYNAMIC_TOOLS_TOP_LEVEL_CURRENT_RE;`,
+    `"use strict";\n${regexSource}\nreturn COMPUTER_USE_NODE_REPL_DYNAMIC_TOOLS_TOP_LEVEL_RE;`,
   )();
   const replacementSource = sourceSlice(
-    "  function computerUseNodeReplDynamicToolsTopLevelCurrentReplacement(",
+    "  function computerUseNodeReplDynamicToolsTopLevelReplacement(",
     "\n  function patchComputerUseNodeReplDynamicTools(",
   );
   const replacement = Function(
     "COMPUTER_USE_NODE_REPL_NAMESPACE_GROUP_SPEC",
     "COMPUTER_USE_NODE_REPL_NAMESPACE_TOOL_SPEC",
     "COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_PATCH_MARKER",
-    `"use strict";\n${replacementSource}\nreturn computerUseNodeReplDynamicToolsTopLevelCurrentReplacement;`,
+    `"use strict";\n${replacementSource}\nreturn computerUseNodeReplDynamicToolsTopLevelReplacement;`,
   )(
-    "{type:`namespace`,name:`node_repl`,description:`Node REPL tools for Computer Use.`,tools:[{type:`function`,name:`js`}]}",
-    "{type:`function`,name:`js`}",
+    "{type:\`namespace\`,name:\`node_repl\`,description:\`Node REPL tools for Computer Use.\`,tools:[{type:\`function\`,name:\`js\`}]}",
+    "{type:\`function\`,name:\`js\`}",
     "/*codex-offline:computer-use-node-repl-dynamic-tool*/",
   );
+  // 26.908 builds the function tools from a destructured `tools` parameter, so
+  // the collection is a binding rather than an inline array literal, and the
+  // app-namespace description comes from a shared binding.
   const fixture =
-    "const tools=[...C];" +
-    "].map(e=>({type:`function`,...e,...x&&!jtl.has(e.name)?{deferLoading:!0}:{}}));" +
-    "return x?[{type:`namespace`,name:L2,description:`Tools provided by the Codex app.`,tools:A},...D]:A";
-
-  const patched = fixture.replace(currentRegex, replacement);
-  assert.ok(patched.includes("/*codex-offline:computer-use-node-repl-dynamic-tool*/"));
-  assert.match(patched, /\.\.\.D,\{type:`namespace`,name:`node_repl`/);
-  assert.match(patched, /:A\.concat\(\[\{type:`function`,name:`js`/);
-});
-
-test("26.810 dynamic tools keep node_repl at the top-level namespace boundary with guarded deferLoading", () => {
-  const regexSource = sourceSlice(
-    "  const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOLS_TOP_LEVEL_CURRENT_RE =",
-    "\n  const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_RE =",
-  );
-  const currentRegex = Function(
-    `"use strict";\n${regexSource}\nreturn COMPUTER_USE_NODE_REPL_DYNAMIC_TOOLS_TOP_LEVEL_CURRENT_RE;`,
-  )();
-  const replacementSource = sourceSlice(
-    "  function computerUseNodeReplDynamicToolsTopLevelCurrentReplacement(",
-    "\n  function patchComputerUseNodeReplDynamicTools(",
-  );
-  const replacement = Function(
-    "COMPUTER_USE_NODE_REPL_NAMESPACE_GROUP_SPEC",
-    "COMPUTER_USE_NODE_REPL_NAMESPACE_TOOL_SPEC",
-    "COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_PATCH_MARKER",
-    `"use strict";\n${replacementSource}\nreturn computerUseNodeReplDynamicToolsTopLevelCurrentReplacement;`,
-  )(
-    "{type:`namespace`,name:`node_repl`,description:`Node REPL tools for Computer Use.`,tools:[{type:`function`,name:`js`}]}",
-    "{type:`function`,name:`js`}",
-    "/*codex-offline:computer-use-node-repl-dynamic-tool*/",
-  );
-  const fixture =
-    "].map(e=>({type:`function`,...e,...E&&(!zzl.has(e.name)||o&&Azl.includes(e.name))?{deferLoading:!0}:{}}));" +
-    "return E?[{type:`namespace`,name:Rzl,description:`Tools provided by the Codex app.`,tools:I},...M]:I";
+    "e.map(e=>({type:\`function\`,...e,...r&&(!t.has(e.name)||n.includes(e.name))?{deferLoading:!0}:{}}));" +
+    "return r?[{type:\`namespace\`,name:A5n,description:bre,tools:a},...i]:a";
 
   const patched = fixture.replace(currentRegex, replacement);
   assert.notEqual(patched, fixture);
   assert.ok(patched.includes("/*codex-offline:computer-use-node-repl-dynamic-tool*/"));
-  assert.match(patched, /\.\.\.M,\{type:`namespace`,name:`node_repl`/);
-  assert.match(patched, /:I\.concat\(\[\{type:`function`,name:`js`/);
-});
-
-test("26.820 dynamic tools accept a shared description binding", () => {
-  const regexSource = sourceSlice(
-    "  const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOLS_TOP_LEVEL_CURRENT_RE =",
-    "\n  const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_RE =",
-  );
-  const currentRegex = Function(
-    `"use strict";\n${regexSource}\nreturn COMPUTER_USE_NODE_REPL_DYNAMIC_TOOLS_TOP_LEVEL_CURRENT_RE;`,
-  )();
-  const replacementSource = sourceSlice(
-    "  function computerUseNodeReplDynamicToolsTopLevelCurrentReplacement(",
-    "\n  function patchComputerUseNodeReplDynamicTools(",
-  );
-  const replacement = Function(
-    "COMPUTER_USE_NODE_REPL_NAMESPACE_GROUP_SPEC",
-    "COMPUTER_USE_NODE_REPL_NAMESPACE_TOOL_SPEC",
-    "COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_PATCH_MARKER",
-    `"use strict";\n${replacementSource}\nreturn computerUseNodeReplDynamicToolsTopLevelCurrentReplacement;`,
-  )(
-    "{type:`namespace`,name:`node_repl`,description:`Node REPL tools for Computer Use.`,tools:[{type:`function`,name:`js`}]}",
-    "{type:`function`,name:`js`}",
-    "/*codex-offline:computer-use-node-repl-dynamic-tool*/",
-  );
-  const fixture =
-    "].map(e=>({type:`function`,...e,...O&&(!Urs.has(e.name)||o&&Ves.includes(e.name))?{deferLoading:!0}:{}}));" +
-    "return O?[{type:`namespace`,name:Hrs,description:uwe,tools:B},...I]:B";
-
-  const patched = fixture.replace(currentRegex, replacement);
-  assert.notEqual(patched, fixture);
-  assert.ok(patched.includes("/*codex-offline:computer-use-node-repl-dynamic-tool*/"));
-  assert.match(patched, /description:uwe,tools:B/);
-  assert.match(patched, /\.\.\.I,\{type:`namespace`,name:`node_repl`/);
-  assert.match(patched, /:B\.concat\(\[\{type:`function`,name:`js`/);
+  assert.match(patched, /description:bre,tools:a/);
+  assert.match(patched, /\.\.\.i,\{type:`namespace`,name:`node_repl`/);
+  assert.match(patched, /:a\.concat\(\[\{type:`function`,name:`js`/);
 });
 
 test("26.825 worktree resolver rejects the retired pre-HEAD shape", () => {
