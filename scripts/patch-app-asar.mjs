@@ -291,15 +291,6 @@ const COMPUTER_USE_ENV_DEFAULT =
 // these either synchronously from write() or asynchronously via "error".
 const STDIO_WRITE_ERROR_GUARD_MARKER =
   '/*codex-offline:stdio-write-error-guard-v2*/';
-const LEGACY_EPIPE_GUARD =
-  'function _epipeGuard(s){' +
-    'var ow=s.write;' +
-    's.write=function(){' +
-      'try{return ow.apply(s,arguments)}' +
-      'catch(e){if(e.code!=="EPIPE")throw e}' +
-    '}' +
-  '}' +
-  '_epipeGuard(process.stdout);_epipeGuard(process.stderr);\n';
 const EPIPE_GUARD =
   STDIO_WRITE_ERROR_GUARD_MARKER +
   'function _epipeGuard(s){' +
@@ -330,51 +321,27 @@ const PATCH_BOOTSTRAP_REQUIRE =
   '\n';
 const PATCH_SNIPPET = `${COMPUTER_USE_ENV_DEFAULT}${EPIPE_GUARD}${PATCH_BOOTSTRAP_REQUIRE}`;
 
-/** Return true if this main entry already carries our bootstrap snippet. */
-function isAlreadyPatched(filePath) {
-  const content = fs.readFileSync(filePath, 'utf8');
-  return (
-    content.includes(STDIO_WRITE_ERROR_GUARD_MARKER) || content.includes(LEGACY_EPIPE_GUARD)
-  );
+/**
+ * Refuse to run against an asar that this script has patched before.
+ *
+ * Every patch keeps exactly one shape and has no re-patch path, so a second
+ * pass would either double-apply a prepended snippet or silently skip work.
+ * Failing here turns a confusing downstream symptom into a named cause.
+ */
+function assertPristineAsar(asarPath) {
+  const contents = fs.readFileSync(asarPath);
+  if (contents.includes('codex-offline:', 0, 'utf8')) {
+    throw new Error(
+      `${asarPath} already contains codex-offline patch markers. This patcher ` +
+      'only accepts an unpatched Store payload; re-extract the source bundle.',
+    );
+  }
 }
 
 /** Prepend the patch snippet to a JS file. */
 function patchFile(filePath) {
   const original = fs.readFileSync(filePath, 'utf8');
   fs.writeFileSync(filePath, PATCH_SNIPPET + original, 'utf8');
-}
-
-function refreshMainEntryPatch(filePath) {
-  let content = fs.readFileSync(filePath, 'utf8');
-  let changed = false;
-
-  // Add Computer Use env default if missing from a prior build.
-  if (!content.includes('CODEX_ELECTRON_ENABLE_WINDOWS_COMPUTER_USE')) {
-    content = COMPUTER_USE_ENV_DEFAULT + content;
-    changed = true;
-  }
-
-  // Upgrade the synchronous-only stdout/stderr guard used by prior builds.
-  if (!content.includes(STDIO_WRITE_ERROR_GUARD_MARKER)) {
-    if (content.includes(LEGACY_EPIPE_GUARD)) {
-      content = content.replace(LEGACY_EPIPE_GUARD, EPIPE_GUARD);
-    } else {
-      content = EPIPE_GUARD + content;
-    }
-    changed = true;
-  }
-
-  // Add init.cjs require() for IPC-level Statsig gate interception.
-  if (!content.includes('_codexOfflineD')) {
-    const epipeEnd = '_epipeGuard(process.stdout);_epipeGuard(process.stderr);';
-    content = content.replace(epipeEnd, epipeEnd + '\n' + PATCH_BOOTSTRAP_REQUIRE);
-    changed = true;
-  }
-
-  if (changed) {
-    fs.writeFileSync(filePath, content, 'utf8');
-  }
-  return changed;
 }
 
 function patchWorktreeHeadRefResolver(content, patchMarker) {
@@ -1215,9 +1182,7 @@ function patchChromeBrowserClient(filePath) {
     nativePipeHelpersWithoutTimeout,
     'Removed stale Chrome browser client native pipe timeout helpers.',
   );
-  if (content.includes(nativePipeDirectPatchMarker)) {
-    log('Chrome browser client native pipe direct path already patched.');
-  } else if (content.includes(nativePipeFallbackPatchMarker)) {
+  if (content.includes(nativePipeFallbackPatchMarker)) {
     const fallbackFirstCreateNeedles = [
       'static async create(e){let r=Wf();if(r!=null)try{let n=await _codexOfflineBridgeCreateConnection(r,e);return new t(n)}catch(n){if(!_codexOfflineShouldUseNativePipeFallback(e))throw n}if(_codexOfflineShouldUseNativePipeFallback(e)){let n=await _codexOfflineCreateNativePipeConnection(e);return new t(n)}throw new Error(Vf())}',
       'static async create(e){if(_codexOfflineShouldUseNativePipeFallback(e)){let r=await _codexOfflineCreateNativePipeConnection(e);return new t(r)}let r=Wf();if(r!=null){let n=await _codexOfflineBridgeCreateConnection(r,e);return new t(n)}throw new Error(Vf())}',
@@ -1329,9 +1294,7 @@ function patchChromeBrowserClient(filePath) {
 
   const diagnosticsPatchMarker =
     '/*codex-offline:browser-use-discovery-diagnostics*/';
-  if (content.includes(diagnosticsPatchMarker)) {
-    log('Chrome browser client discovery diagnostics already patched.');
-  } else {
+  {
     const legacyDiagnosticsNeedle =
       'let e=t,r=new Ac,n=p=>new Rc(p,r,Gr),{browsers:o,diagnostics:i}=await US(n),s=await HO(o),a=s.map(p=>new Tc(p.api,p.id,p.info));';
     const legacyDiagnosticsReplacement =
@@ -1393,9 +1356,7 @@ function patchChromeBrowserClient(filePath) {
 
   const chromePipeFilterPatchMarker =
     '/*codex-offline:browser-use-chrome-pipe-filter*/';
-  if (content.includes(chromePipeFilterPatchMarker)) {
-    log('Chrome browser client Windows Chrome pipe filter already patched.');
-  } else {
+  {
     const legacyPipeListMatch = content.match(
       /([A-Za-z_$][\w$]*)=async\(\)=>\{let ([A-Za-z_$][\w$]*)="\\\\\\\\\.\\\\pipe\\\\";return\(await ([A-Za-z_$][\w$]*)\(\2\)\)\.map\(([A-Za-z_$][\w$]*)=>([A-Za-z_$][\w$]*)\.resolve\(\2,\4\)\)\.filter\(([A-Za-z_$][\w$]*)=>\6\.startsWith\(([A-Za-z_$][\w$]*)\)\)\}/,
     );
@@ -1457,9 +1418,7 @@ function patchChromeBrowserClient(filePath) {
 
   const directSetupPatchMarker =
     '/*codex-offline:browser-use-direct-setup*/';
-  if (content.includes(directSetupPatchMarker)) {
-    log('Chrome browser client direct Windows pipe setup already patched.');
-  } else {
+  {
     const shouldUseFallbackMatch = content.match(
       /function _codexOfflineShouldUseNativePipeFallback\(([A-Za-z_$][\w$]*)\)\{return ([A-Za-z_$][\w$]*)\(\)==="win32"&&typeof \1=="string"&&\1\.startsWith\(([^{}]+)\)\}/,
     );
@@ -1533,20 +1492,7 @@ function patchChromeBrowserClient(filePath) {
 
   const ambientNetworkPatchMarker =
     '/*codex-offline:browser-use-disable-ambient-network-default*/';
-  const staleScopedAmbientNetworkPatchRe =
-    /function ([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*)\)\{let \2=([A-Za-z_$][\w$]*)\(\2,([A-Za-z_$][\w$]*)\);return \2==="0"\|\|\2==="false"\?!1:!0\}\/\*codex-offline:browser-use-disable-ambient-network-default\*\//;
-  if (staleScopedAmbientNetworkPatchRe.test(content)) {
-    content = content.replace(
-      staleScopedAmbientNetworkPatchRe,
-      (_match, functionName, parameterName, rawReader, ambientEnvVar) =>
-        `function ${functionName}(${parameterName}){let _codexOfflineAmbientNetworkValue=${rawReader}(${parameterName},${ambientEnvVar});return _codexOfflineAmbientNetworkValue==="0"||_codexOfflineAmbientNetworkValue==="false"?!1:!0}${ambientNetworkPatchMarker}`,
-    );
-    changed = true;
-    log('Repaired cached Chrome browser client ambient network patch.');
-  }
-  if (content.includes(ambientNetworkPatchMarker)) {
-    log('Chrome browser client ambient network default already patched.');
-  } else {
+  {
     const requestMetaAmbientNetworkMatch = content.match(
       /function ([A-Za-z_$][\w$]*)\(\)\{return globalThis\.nodeRepl\?\.requestMeta\?\.\[([A-Za-z_$][\w$]*)\]===!0\}/,
     );
@@ -1634,10 +1580,6 @@ function patchChromeNativeHostCheck(filePath) {
 
   let content = fs.readFileSync(filePath, 'utf8');
   const patchMarker = '/*codex-offline:localized-registry-default*/';
-  if (content.includes(patchMarker)) {
-    log('Chrome native host registry parser already patched.');
-    return;
-  }
 
   const needle = 'return readRegistryValue(output, "(Default)");';
   const replacement =
@@ -1701,10 +1643,6 @@ function patchChromeSkillInstructions(chromePluginRoot) {
 
   let content = fs.readFileSync(filePath, 'utf8');
   const patchMarker = '<!-- codex-offline:trusted-marketplace-browser-client -->';
-  if (content.includes(patchMarker)) {
-    log('Chrome skill trusted marketplace bootstrap already patched.');
-    return;
-  }
 
   const needle =
     /The `browser-client` module is the core entry point for browser use, and is available under `scripts\/browser-client\.mjs` in this plugin's root directory\. ALWAYS import it using an absolute path\.\s+IMPORTANT: If this path cannot be found, stop and report that this plugin is missing `scripts\/browser-client\.mjs`\. NEVER use the built in `browser-client` library\./;
@@ -1860,6 +1798,7 @@ if (!fs.existsSync(asarPath)) {
 }
 
 log(`Patching: ${asarPath}`);
+assertPristineAsar(asarPath);
 
 // Extract to a temp directory.
 const tmpDir = path.join(os.tmpdir(), `codex-asar-patch-${crypto.randomBytes(6).toString('hex')}`);
@@ -1891,16 +1830,8 @@ try {
 
   log(`Main entry: ${path.relative(tmpDir, mainEntry)}`);
 
-  if (isAlreadyPatched(mainEntry)) {
-    if (refreshMainEntryPatch(mainEntry)) {
-      log(`Main entry patch refreshed for direct ${MAIN_EXECUTABLE_NAME} Computer Use launch.`);
-    } else {
-      log('Main entry already patched.');
-    }
-  } else {
-    patchFile(mainEntry);
-    log('Main entry bootstrap applied.');
-  }
+  patchFile(mainEntry);
+  log('Main entry bootstrap applied.');
 
   const chromeBrowserClientHash = patchChromePluginScripts(path.resolve(appDir));
 
@@ -2931,8 +2862,6 @@ try {
       'Permanent worktree HEAD resolution patched in ' +
       `${worktreeHeadRefPatchedFiles.join(', ')}.`,
     );
-  } else if (worktreeHeadRefAlreadyCorrect) {
-    log('Permanent worktree HEAD resolution already patched.');
   } else {
     failRequiredPatch(
       'Could not locate the Git starting-ref resolver used by permanent worktrees.',
@@ -2941,7 +2870,6 @@ try {
 
   const settingsPatchedFiles = [];
   const settingsRoutePatchedFiles = [];
-  const settingsRouteAlreadyCorrectFiles = [];
   let settingsHandlerSeen = false;
 
   const trustedBrowserClientHashesPatch =
@@ -2951,8 +2879,6 @@ try {
       'Chrome browser-client trusted hash patched in ' +
       `${trustedBrowserClientHashesPatch.patchedFiles.map(filePath => path.relative(tmpDir, filePath)).join(', ')}.`,
     );
-  } else if (trustedBrowserClientHashesPatch.alreadyCorrect) {
-    log('Chrome browser-client trusted hash already patched.');
   } else if (trustedBrowserClientHashesPatch.usesBrowserServiceTrustPath) {
     log('Chrome browser-service trusted path is used; browser-client hash patch is not required.');
   } else {
@@ -2988,11 +2914,6 @@ try {
       );
       modified = true;
       settingsRoutePatchedFiles.push(path.relative(tmpDir, filePath));
-    } else if (
-      originalContent.includes(SETTINGS_ROUTE_PATCH_MARKER) ||
-      content.includes(SETTINGS_ROUTE_PATCH_MARKER)
-    ) {
-      settingsRouteAlreadyCorrectFiles.push(path.relative(tmpDir, filePath));
     }
 
     settingsHandlerSeen ||= content.includes('case`show-settings`:{');
@@ -3009,16 +2930,6 @@ try {
     log(
       `Settings route mapping fixed in ` +
       `${settingsRoutePatchedFiles.join(', ')}.`,
-    );
-  }
-  if (
-    settingsPatchedFiles.length === 0 &&
-    settingsRoutePatchedFiles.length === 0 &&
-    settingsRouteAlreadyCorrectFiles.length > 0
-  ) {
-    log(
-      `Settings IPC handlers already patched in ` +
-      `${settingsRouteAlreadyCorrectFiles.join(', ')}.`,
     );
   }
   if (!settingsHandlerSeen) {
@@ -3142,7 +3053,9 @@ try {
     log('Desktop app-server sandbox override patched in ' +
         `${appServerSandboxOverridePatchedFiles.join(', ')}.`);
   } else {
-    log('Desktop app-server sandbox override already patched.');
+    failRequiredPatch(
+      'Could not force the packaged app-server onto the unelevated sandbox backend.',
+    );
   }
 
   // ── Patch 38: Enable Browser Use native pipe config for offline Windows ─
@@ -3195,8 +3108,6 @@ try {
   if (windowsBrowserUseCapabilityPatched) {
     log('Windows Browser Use capability override patched in ' +
         `${windowsBrowserUseCapabilityPatchedFiles.join(', ')}.`);
-  } else if (windowsBrowserUseCapabilityAlreadyCorrect) {
-    log('Windows Browser Use capability override already patched.');
   } else {
     throw new Error(
       'Could not locate the Windows desktop feature override that enables ' +
@@ -3349,8 +3260,6 @@ try {
   if (featureOverridesConfigNamespacePatched) {
     log('Feature override config namespace preservation patched in ' +
         `${featureOverridesConfigNamespacePatchedFiles.join(', ')}.`);
-  } else if (featureOverridesConfigNamespaceAlreadyCorrect) {
-    log('Feature override config namespace preservation already patched.');
   } else {
     failRequiredPatch(
       'Could not locate feature override config merge function (app version may have changed). ' +
@@ -3442,8 +3351,6 @@ try {
   if (bundledPluginCacheLockNonfatalPatched) {
     log('Bundled plugin cache lock failures are nonfatal on Windows in ' +
         `${bundledPluginCacheLockNonfatalPatchedFiles.join(', ')}.`);
-  } else if (bundledPluginCacheLockNonfatalAlreadyCorrect) {
-    log('Bundled plugin cache lock failure handling already patched.');
   } else {
     warn(
       'Could not locate bundled plugin cache lock failure handling (app version may have changed). ' +
@@ -3479,8 +3386,6 @@ try {
   if (nodeReplDisableSandboxPatched) {
     log('Node REPL sandbox bypass argument patched in ' +
         `${nodeReplDisableSandboxPatchedFiles.join(', ')}.`);
-  } else if (nodeReplDisableSandboxAlreadyCorrect) {
-    log('Node REPL sandbox bypass argument already patched.');
   } else {
     failRequiredPatch(
       'Could not locate Browser Use thread config generation to add ' +
@@ -3525,8 +3430,6 @@ try {
   if (computerUsePluginRootFallbackPatched) {
     log('Computer Use runtime path compatibility patched in ' +
         `${computerUsePluginRootFallbackPatchedFiles.join(', ')}.`);
-  } else if (computerUsePluginRootFallbackAlreadyCorrect) {
-    log('Computer Use plugin root fallback already patched.');
   } else {
     failRequiredPatch(
       'Could not locate Computer Use installed plugin path resolver (app version may have changed). ' +
@@ -3671,8 +3574,6 @@ try {
   if (computerUseForwardThreadStartDiagnosticsPatched) {
     log('Computer Use thread/start forwarding compatibility patched in ' +
         `${computerUseForwardThreadStartDiagnosticsPatchedFiles.join(', ')}.`);
-  } else if (computerUseForwardThreadStartDiagnosticsAlreadyCorrect) {
-    log('Computer Use thread/start forwarding compatibility already patched.');
   } else {
     warn(
       'Could not locate thread/start forwarding code for Computer Use diagnostics. ' +
@@ -3705,8 +3606,6 @@ try {
   if (computerUseMcpStatusDiagnosticsPatched) {
     log('Computer Use MCP status diagnostics patched in ' +
         `${computerUseMcpStatusDiagnosticsPatchedFiles.join(', ')}.`);
-  } else if (computerUseMcpStatusDiagnosticsAlreadyCorrect) {
-    log('Computer Use MCP status diagnostics already patched.');
   } else {
     log(
       'Computer Use MCP status diagnostics not needed for current verifier gates; required Computer Use gates remain enforced.',
@@ -3735,8 +3634,6 @@ try {
       'Bundled browser plugins kept in runtime marketplace for offline mode in ' +
       `${bundledBrowserPluginsPatch.patchedFiles.map(filePath => path.relative(tmpDir, filePath)).join(', ')}.`,
     );
-  } else if (bundledBrowserPluginsPatch.alreadyCorrect) {
-    log('Bundled browser plugins runtime marketplace already patched.');
   } else if (!bundledBrowserPluginsPatch.seen) {
     failRequiredPatch(
       'Bundled browser plugin descriptors were not found in main bundles. ' +
@@ -3765,8 +3662,6 @@ try {
       'Bundled runtime plugin materialization preserved for offline mode in ' +
       `${bundledRuntimeMarketplaceFilterPatch.patchedFiles.map(filePath => path.relative(tmpDir, filePath)).join(', ')}.`,
     );
-  } else if (bundledRuntimeMarketplaceFilterPatch.alreadyCorrect) {
-    log('Bundled runtime plugin materialization already patched.');
   } else if (!bundledRuntimeMarketplaceFilterPatch.seen) {
     warn(
       'Bundled runtime marketplace filter was not found. ' +
@@ -4069,8 +3964,6 @@ try {
     if (computerUseNodeReplDynamicToolPatchedFiles.length > 0) {
       log('Computer Use node_repl.js dynamic tool exposed in ' +
         `${computerUseNodeReplDynamicToolPatchedFiles.join(', ')}.`);
-    } else if (computerUseNodeReplDynamicToolAlreadyCorrect) {
-      log('Computer Use node_repl.js dynamic tool exposure already patched.');
     } else {
       throw new Error(
         'Could not locate renderer dynamic tools list to expose Computer Use node_repl.js.',
@@ -4079,8 +3972,6 @@ try {
     if (computerUseNodeReplDynamicToolCallPatchedFiles.length > 0) {
       log('Computer Use node_repl.js dynamic tool call bridge patched in ' +
         `${computerUseNodeReplDynamicToolCallPatchedFiles.join(', ')}.`);
-    } else if (computerUseNodeReplDynamicToolCallAlreadyCorrect) {
-      log('Computer Use node_repl.js dynamic tool call bridge already patched.');
     } else {
       throw new Error(
         'Could not locate renderer dynamic tool call handler for Computer Use node_repl.js.',
@@ -4089,8 +3980,6 @@ try {
     if (archivedThreadsPartialListPatchedFiles.length > 0) {
       log('Archived threads partial list fallback patched in ' +
         `${archivedThreadsPartialListPatchedFiles.join(', ')}.`);
-    } else if (archivedThreadsPartialListAlreadyCorrect) {
-      log('Archived threads partial list fallback already patched.');
     } else {
       throw new Error(
         'Could not locate renderer archived thread list pagination to patch.',
@@ -4099,8 +3988,6 @@ try {
     if (archivedSettingsOfflineVisibilityPatchedFiles.length > 0) {
       log('Archived settings offline local visibility patched in ' +
         `${archivedSettingsOfflineVisibilityPatchedFiles.join(', ')}.`);
-    } else if (archivedSettingsOfflineVisibilityAlreadyCorrect) {
-      log('Archived settings offline local visibility already patched.');
     } else {
       throw new Error(
         'Could not locate archived settings panel isError to keep local ' +
@@ -4110,8 +3997,6 @@ try {
     if (workspaceDependenciesSettingsPatchedFiles.length > 0) {
       log('Workspace Dependencies settings gate patched in ' +
         `${workspaceDependenciesSettingsPatchedFiles.join(', ')}.`);
-    } else if (workspaceDependenciesSettingsAlreadyCorrect) {
-      log('Workspace Dependencies settings gate already patched.');
     } else if (workspaceDependenciesSettingsSeen) {
       failRequiredPatch(
         'Could not locate the imported Workspace Dependencies settings gate.',
@@ -4149,8 +4034,6 @@ try {
     if (modelDisplayNamePatchedFiles.length > 0) {
       log('Missing model display names now fall back to formatted model IDs in ' +
         `${modelDisplayNamePatchedFiles.join(', ')}.`);
-    } else if (modelDisplayNameAlreadyCorrect) {
-      log('Missing model display-name fallback already patched.');
     } else {
       failRequiredPatch(
         'Could not locate the renderer Custom model-label fallback to show the model ID.',
@@ -4159,8 +4042,6 @@ try {
     if (ultraReasoningEffortPatchedFiles.length > 0) {
       log('Ultra reasoning effort enabled for Max-capable models in ' +
         `${ultraReasoningEffortPatchedFiles.join(', ')}.`);
-    } else if (ultraReasoningEffortAlreadyCorrect) {
-      log('Ultra reasoning effort availability already patched.');
     } else if (ultraReasoningEffortSurfaceSeen) {
       failRequiredPatch(
         'Could not patch the renderer model filter to expose Ultra for Max-capable models.',

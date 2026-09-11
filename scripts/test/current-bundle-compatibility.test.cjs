@@ -472,34 +472,6 @@ test("26.810 Chrome ambient network patch avoids minified parameter collisions",
   assert.match(patchedFixture, /function zn\(t\)\{let _codexOfflineAmbientNetworkValue=/);
 });
 
-test("26.810 Chrome ambient network patch repairs cached invalid output", () => {
-  const migrationSource = sourceSlice(
-    "  const staleScopedAmbientNetworkPatchRe =",
-    "\n  if (content.includes(ambientNetworkPatchMarker))",
-  );
-  const migrateAmbientNetwork = Function(
-    "content",
-    "ambientNetworkPatchMarker",
-    "log",
-    `"use strict";\nlet changed = false;\n${migrationSource}\nreturn { content, changed };`,
-  );
-  const fixture =
-    'var fw="BROWSER_USE_DISABLE_AMBIENT_NETWORK";' +
-    'function Ts(e,t){return process.env[t]}' +
-    'function zn(t){let t=Ts(t,fw);return t==="0"||t==="false"?!1:!0}' +
-    "/*codex-offline:browser-use-disable-ambient-network-default*/";
-
-  const result = migrateAmbientNetwork(
-    fixture,
-    "/*codex-offline:browser-use-disable-ambient-network-default*/",
-    () => {},
-  );
-
-  assert.equal(result.changed, true);
-  assert.doesNotThrow(() => Function(result.content));
-  assert.match(result.content, /function zn\(t\)\{let _codexOfflineAmbientNetworkValue=/);
-});
-
 test("P1 release guard rejects Sky tslib cache roots that contain junctions before recursive deletion", () => {
   const functionStart = buildScriptSource.indexOf("function Shorten-SkyTslibDependencyPath {");
   const functionEnd = buildScriptSource.indexOf("\n\n$scriptRoot =", functionStart);
