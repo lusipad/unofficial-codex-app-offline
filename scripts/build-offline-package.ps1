@@ -937,6 +937,39 @@ function Repair-EncodedNodeModuleEntries {
     return $repaired
 }
 
+function Assert-PristineAppSource {
+    # patch-app-asar.mjs only accepts an unpatched Store payload: it keeps a
+    # single shape per patch and has no re-patch path. A source-app left over
+    # from an earlier local build can still carry codex-offline markers, which
+    # would otherwise be staged and patched a second time.
+    param([Parameter(Mandatory = $true)][string]$AppDir)
+
+    $asarPath = Join-Path $AppDir 'resources/app.asar'
+    if (-not (Test-Path -LiteralPath $asarPath)) {
+        throw "Pristine source check: app.asar was not found at $asarPath."
+    }
+
+    $marker = 'codex-offline:'
+    $markerLength = $marker.Length
+    $stream = [System.IO.File]::OpenRead($asarPath)
+    try {
+        $buffer = New-Object byte[] (1MB)
+        $carry = ''
+        while (($read = $stream.Read($buffer, 0, $buffer.Length)) -gt 0) {
+            $window = $carry + [System.Text.Encoding]::ASCII.GetString($buffer, 0, $read)
+            if ($window.Contains($marker)) {
+                throw "Pristine source check failed: $asarPath already contains codex-offline patch markers. The patcher only accepts an unpatched Store payload; delete the cached source export and re-extract the Store bundle."
+            }
+            # Keep the tail so a marker split across two reads is still seen.
+            $keep = [Math]::Min($window.Length, $markerLength)
+            $carry = $window.Substring($window.Length - $keep)
+        }
+    }
+    finally {
+        $stream.Dispose()
+    }
+}
+
 function Shorten-SkyTslibDependencyPath {
     param([Parameter(Mandatory = $true)][string]$CuaNodeRoot)
 
@@ -1103,6 +1136,9 @@ New-Item -ItemType Directory -Force -Path $packageRoot | Out-Null
 # need for daily use. Setup creates the daily Codex shortcut after first run.
 $internalRoot = Join-Path $packageRoot '_internal'
 New-Item -ItemType Directory -Force -Path $internalRoot | Out-Null
+
+Assert-PristineAppSource -AppDir (Join-Path $sourceExportRoot 'app')
+Write-BuildTrace 'Source payload verified unpatched.'
 
 Write-BuildTrace 'App payload copied to _internal.'
 Copy-Item -Path (Join-Path $sourceExportRoot 'app') -Destination (Join-Path $internalRoot 'app') -Recurse -Force
