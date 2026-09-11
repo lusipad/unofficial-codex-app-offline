@@ -38,6 +38,24 @@ test("the guard runs before the source payload is staged", () => {
   assert.ok(guardCall < patchInvocation, "guard must run before the patcher");
 });
 
+test("the Store bundle importer does not patch what it imports", () => {
+  // The importer used to run patch-app-asar.mjs on the export root, so the
+  // "source" was never pristine and the build patched it a second time in the
+  // staging copy. That only worked because the patcher was idempotent.
+  const importer = fs.readFileSync(
+    path.join(repoRoot, "scripts", "import-store-bundle-from-url.ps1"),
+    "utf8",
+  );
+  assert.ok(
+    !/\$patchScript\s*=/.test(importer),
+    "importing a Store bundle must not resolve the patcher",
+  );
+  assert.ok(
+    !/node\s+\$patchScript/.test(importer),
+    "importing a Store bundle must not patch it; the build patches the staged copy",
+  );
+});
+
 test("a reused source cache is only accepted when it is still pristine", () => {
   // The cache short-circuit must not skip the guard: a locally patched
   // source-app is exactly the case the guard exists for.
