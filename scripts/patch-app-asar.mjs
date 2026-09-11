@@ -121,9 +121,13 @@
  *     compiled tokens, which churn on every upstream build. This is the single
  *     most effective way to reduce per-release patch breakage.
  *   - When a needle is unavoidable, anchor on stable text (API names, error
- *     strings, gate IDs) rather than minified variable names. Keep only the
- *     variants used by the current Store payload; release builds regenerate
- *     from that payload instead of carrying historical bundle shapes.
+ *     strings, gate IDs) rather than minified variable names.
+ *   - Single shape. Keep only the shape used by the current Store payload. When
+ *     an upstream bundle changes, the patch fails closed and is rewritten
+ *     against the new shape — never extended with an additional variant. Each
+ *     extra variant is one more chance to match the wrong site silently, and
+ *     the names rot: against 26.903.8094.0 the constants called CURRENT were
+ *     dead while the ones called LEGACY were live.
  *   - Every required patch needs a matching assertion in
  *     verify-offline-package.ps1 (marker or behaviour) so a silent miss in this
  *     script is still caught downstream.
@@ -1889,13 +1893,9 @@ try {
     'throw Error(`"${t.type}" is not implemented in Electron.`)';
   const AUTOMATION_CWD_NORMALIZER_INLINE =
     'e=>typeof e==`string`&&e.startsWith(`\\\\\\\\?\\\\`)&&/^[A-Za-z]:/.test(e.slice(4))?e.slice(4):e';
-  const AUTOMATION_RUNTIME_CWD_RE =
-    /let (\w+)=(\w+)\.cwds;if\(\1\.length===0\)/;
-  const AUTOMATION_RUNTIME_CWD_REPLACEMENT =
-    `let $1=$2.cwds.map(${AUTOMATION_CWD_NORMALIZER_INLINE});if($1.length===0)`;
-  const AUTOMATION_RUNTIME_LEGACY_TARGET_CWD_RE =
+  const AUTOMATION_RUNTIME_TARGET_CWD_RE =
     /if\(([A-Za-z_$][\w$]*)\.target==null\)([A-Za-z_$][\w$]*)=\1\.cwds\.map\(([A-Za-z_$][\w$]*)=>\(\{type:`legacy`,cwd:\3\}\)\)/;
-  const AUTOMATION_RUNTIME_LEGACY_TARGET_CWD_REPLACEMENT =
+  const AUTOMATION_RUNTIME_TARGET_CWD_REPLACEMENT =
     `if($1.target==null)$2=$1.cwds.map(${AUTOMATION_CWD_NORMALIZER_INLINE}).map($3=>({type:\`legacy\`,cwd:$3}))`;
   const AUTOMATION_RUNTIME_CWD_PATCH_MARKER =
     `.cwds.map(${AUTOMATION_CWD_NORMALIZER_INLINE})`;
@@ -1911,14 +1911,10 @@ try {
   ];
   const WINDOWS_BROWSER_USE_CAPABILITY_PATCH_MARKER =
     contractPatchMarker('/*codex-offline:windows-browser-use-capability*/');
-  const WINDOWS_BROWSER_USE_CAPABILITY_LEGACY_RE =
-    /function\s+([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*),\{env:([A-Za-z_$][\w$]*)=process\.env,platform:([A-Za-z_$][\w$]*)=process\.platform\}=\{\}\)\{return\s+\4!==`win32`\|\|\3\.CODEX_ELECTRON_ENABLE_WINDOWS_COMPUTER_USE!==`1`\?\2:\{\.\.\.\2,computerUse:!0,computerUseNodeRepl:!0\}\}/;
-  const WINDOWS_BROWSER_USE_CAPABILITY_CURRENT_RE =
-    /function\s+([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*),\{((?:buildFlavor:[A-Za-z_$][\w$]*=[^,}]+,)?env:([A-Za-z_$][\w$]*)=[^,}]+,platform:([A-Za-z_$][\w$]*)=[^,}]+)\}=\{\}\)\{let ([A-Za-z_$][\w$]*)=\5===`win32`&&\4\.CODEX_ELECTRON_ENABLE_WINDOWS_COMPUTER_USE===`1`\?\{\.\.\.\2,computerUse:!0,computerUseNodeRepl:!0\}:\2,/;
   // v26.608+ introduced a multi-step let chain: darwin/win32-cu checks precede the CODEX env check.
   // The CODEX_ELECTRON_ENABLE_WINDOWS_COMPUTER_USE assignment is no longer the first let; it is
   // preceded by a comma rather than being immediately after the opening brace.
-  const WINDOWS_BROWSER_USE_CAPABILITY_V3_RE =
+  const WINDOWS_BROWSER_USE_CAPABILITY_CANONICAL_RE =
     /,([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)===`win32`&&([A-Za-z_$][\w$]*)\.CODEX_ELECTRON_ENABLE_WINDOWS_COMPUTER_USE===`1`\?\{\.\.\.([A-Za-z_$][\w$]*),computerUse:!0,computerUseNodeRepl:!0\}:\4(?=,)/;
   const NODE_REPL_FEATURE_ENABLED_PATCH_MARKER =
     contractPatchMarker('/*codex-offline:node-repl-feature-enabled*/');
@@ -2014,16 +2010,6 @@ try {
     'transportKind:this.options.transport.kind,pendingCount:this.pendingRequests.size},' +
     'sensitive:{}}),this.sendMessage(t),t.method===`turn/start`&&i!=null&&' +
     'this.prewarmedThreads.publishThreadStarted(i)}catch(n){';
-  const COMPUTER_USE_FORWARD_INPUT_DIAGNOSTICS_LEGACY_SAFE_FIELDS =
-    'inputItemCount:_codexOfflineItems.length,' +
-    'inputItemTypes:_codexOfflineItems.map(e=>e?.type).join(`,`),' +
-    'mentionCount:_codexOfflineItems.filter(e=>e?.type===`mention`).length,' +
-    'skillCount:_codexOfflineItems.filter(e=>e?.type===`skill`).length,' +
-    'hasComputerUseMention:_codexOfflineItems.some(e=>typeof e?.path===`string`&&' +
-    'e.path.includes(`plugin://computer-use`)),' +
-    'hasComputerUseText:_codexOfflineItems.some(e=>typeof e?.text===`string`&&' +
-    'e.text.includes(`plugin://computer-use`)),' +
-    'textPrefix:String(_codexOfflineItems.find(e=>e?.type===`text`)?.text??``).slice(0,160)';
   const COMPUTER_USE_FORWARD_INPUT_DIAGNOSTICS_V2_SAFE_FIELDS =
     'inputItemCount:_codexOfflineItems.length,' +
     'inputItemTypes:_codexOfflineItems.map(e=>e?.type).join(`,`),' +
@@ -2079,10 +2065,6 @@ try {
     'if(t.method===`thread/start`&&t.params?.config?.[`mcp_servers.node_repl`]!=null)' +
     '{t.params.config={...t.params.config,[`features.tool_search`]:!0,' +
     '[`features.js_repl_tools_only`]:!0,[`features.tool_suggest`]:!0}}' +
-    COMPUTER_USE_THREAD_START_TOOL_SEARCH_PATCH_MARKER;
-  const COMPUTER_USE_THREAD_START_TOOL_SEARCH_LEGACY_CODE =
-    'if(t.method===`thread/start`&&t.params?.config?.[`mcp_servers.node_repl`]!=null)' +
-    '{t.params.config={...t.params.config,[`features.tool_search`]:!0}}' +
     COMPUTER_USE_THREAD_START_TOOL_SEARCH_PATCH_MARKER;
   const COMPUTER_USE_THREAD_START_TOOL_SEARCH_JS_REPL_ONLY_CODE =
     'if(t.method===`thread/start`&&t.params?.config?.[`mcp_servers.node_repl`]!=null)' +
@@ -2147,25 +2129,6 @@ try {
     'transportKind:this.options.transport.kind,pendingCount:this.pendingRequests.size},' +
     'sensitive:{}}),this.sendMessage(t),t.method===`turn/start`&&i!=null&&' +
     'this.prewarmedThreads.publishThreadStarted(i)}catch(n){';
-  const COMPUTER_USE_FORWARD_INPUT_DIAGNOSTICS_LEGACY_NEEDLE =
-    COMPUTER_USE_FORWARD_THREAD_START_DIAGNOSTICS_PATCH_MARKER +
-    'this.logger.debug(`bridge_forwarded_to_transport`,{safe:{requestId:r,';
-  const COMPUTER_USE_FORWARD_INPUT_DIAGNOSTICS_LEGACY_REPLACEMENT =
-    COMPUTER_USE_FORWARD_THREAD_START_DIAGNOSTICS_PATCH_MARKER +
-    COMPUTER_USE_THREAD_START_TOOL_SEARCH_CODE +
-    COMPUTER_USE_INPUT_SKILL_INJECTION_CODE +
-    COMPUTER_USE_THREAD_START_TOOL_CONTEXT_DIAGNOSTICS_CODE +
-    'if(t.method===`thread/start`||t.method===`turn/start`){let ' +
-    '_codexOfflineInput=t.params?.input??t.params?.params?.input??null,' +
-    '_codexOfflineItems=Array.isArray(_codexOfflineInput)?_codexOfflineInput:[];' +
-    'this.logger.info(`computer_use_forward_input`,{safe:{method:t.method,' +
-    COMPUTER_USE_FORWARD_INPUT_DIAGNOSTICS_SAFE_FIELDS +
-    '},' +
-    'sensitive:{}})}' +
-    COMPUTER_USE_FORWARD_INPUT_DIAGNOSTICS_PATCH_MARKER +
-    COMPUTER_USE_FORWARD_INPUT_DIAGNOSTICS_V2_PATCH_MARKER +
-    COMPUTER_USE_FORWARD_INPUT_DIAGNOSTICS_V3_PATCH_MARKER +
-    'this.logger.debug(`bridge_forwarded_to_transport`,{safe:{requestId:r,';
   const COMPUTER_USE_MCP_STATUS_RESPONSE_NEEDLE =
     'this.logger.info(`response_routed`,{safe:{requestId:n,method:r?.method??null,' +
     'conversationId:r?.conversationId??null,originWebcontentsId:r?.originWebContentsId??null,' +
@@ -2206,18 +2169,8 @@ try {
     /(\(\{namespace:`node_repl`,name:`js`,description:`Execute JavaScript in the persistent Node REPL used by Computer Use\.`,inputSchema:\{[\s\S]{0,700}?required:\[`code`\]\}\}\),)(?!\(\{name:`js`,description:`Execute JavaScript in the persistent Node REPL used by Computer Use\. This forwards to node_repl\.js\.`)/;
   const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_RE =
     /(let [A-Za-z_$][\w$]*=[A-Za-z_$][\w$]*\.get\([A-Za-z_$][\w$]*\),\{id:([A-Za-z_$][\w$]*),params:([A-Za-z_$][\w$]*)\}=[A-Za-z_$][\w$]*,\{threadId:([A-Za-z_$][\w$]*),tool:([A-Za-z_$][\w$]*)\}=\3;if\(!\4\)\{[\s\S]{0,260}?return\})/;
-  const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_CURRENT_RE =
-    /(async function [A-Za-z_$][\w$]*\(\{scope:([A-Za-z_$][\w$]*),serverRequest:([A-Za-z_$][\w$]*),hostId:([A-Za-z_$][\w$]*),queryClient:([A-Za-z_$][\w$]*)\}\)\{let [A-Za-z_$][\w$]*=\2\.get\([A-Za-z_$][\w$]*\),\{id:([A-Za-z_$][\w$]*),params:([A-Za-z_$][\w$]*)\}=\3,\{threadId:([A-Za-z_$][\w$]*),tool:([A-Za-z_$][\w$]*)\}=\7;if\(!\8\)\{[\s\S]{0,260}?return\})/;
-  const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_CURRENT_V2_RE =
-    /(?<prefix>async function [A-Za-z_$][\w$]*\(\{scope:(?<scope>[A-Za-z_$][\w$]*),serverRequest:(?<serverRequest>[A-Za-z_$][\w$]*),hostId:(?<hostId>[A-Za-z_$][\w$]*),queryClient:(?<queryClient>[A-Za-z_$][\w$]*)\}\)\{(?:let [^;{}]+;)?let\{id:(?<requestId>[A-Za-z_$][\w$]*),params:(?<params>[A-Za-z_$][\w$]*)\}=\k<serverRequest>,\{threadId:(?<threadId>[A-Za-z_$][\w$]*),tool:(?<tool>[A-Za-z_$][\w$]*)\}=\k<params>;if\(!\k<threadId>\)\{(?<logger>[A-Za-z_$][\w$]*)\.error\(`Missing threadId for dynamic tool call request`,\{safe:\{\},sensitive:\{id:\k<requestId>,params:\k<params>\}\}\);return\}let (?<result>[A-Za-z_$][\w$]*),(?<namespaceOk>[A-Za-z_$][\w$]*)=\k<params>\.namespace===[^,;]+,(?<compatOk>[A-Za-z_$][\w$]*)=\k<params>\.namespace==null&&[^;]+;)(?<gate>if\(!\k<namespaceOk>&&!\k<compatOk>\)\k<result>=(?<failureFn>[A-Za-z_$][\w$]*)\(`Unsupported dynamic tool namespace: \$\{\k<params>\.namespace\}`\);else)/;
-  const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_CURRENT_V3_RE =
-    /(?<prefix>async function [A-Za-z_$][\w$]*\(\{scope:(?<scope>[A-Za-z_$][\w$]*),serverRequest:(?<serverRequest>[A-Za-z_$][\w$]*),hostId:(?<hostId>[A-Za-z_$][\w$]*),queryClient:(?<queryClient>[A-Za-z_$][\w$]*)\}\)\{let\{id:(?<requestId>[A-Za-z_$][\w$]*),params:(?<params>[A-Za-z_$][\w$]*)\}=\k<serverRequest>,\{threadId:(?<threadId>[A-Za-z_$][\w$]*),tool:(?<tool>[A-Za-z_$][\w$]*)\}=\k<params>;if\(!\k<threadId>\)\{(?<logger>[A-Za-z_$][\w$]*)\.error\(`Missing threadId for dynamic tool call request`,\{safe:\{\},sensitive:\{id:\k<requestId>,params:\k<params>\}\}\);return\}let (?<result>[A-Za-z_$][\w$]*),(?<namespaceOk>[A-Za-z_$][\w$]*)=\k<params>\.namespace===[^,;]+,(?<compatOk>[A-Za-z_$][\w$]*)=\k<params>\.namespace==null&&[^;]+;)(?<gate>if\([A-Za-z_$][\w$]*!=null\)\k<result>=[A-Za-z_$][\w$]*;else if\(!\k<namespaceOk>&&!\k<compatOk>\)\k<result>=(?<failureFn>[A-Za-z_$][\w$]*)\(`Unsupported dynamic tool namespace: \$\{\k<params>\.namespace\}`\);else)/;
-  const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_CURRENT_V5_RE =
-    /(?<prefix>async function [A-Za-z_$][\w$]*\(\{scope:(?<scope>[A-Za-z_$][\w$]*),serverRequest:(?<serverRequest>[A-Za-z_$][\w$]*),hostId:(?<hostId>[A-Za-z_$][\w$]*),queryClient:(?<queryClient>[A-Za-z_$][\w$]*),signal:(?<signal>[A-Za-z_$][\w$]*)\}\)\{let\{id:(?<requestId>[A-Za-z_$][\w$]*),params:(?<params>[A-Za-z_$][\w$]*)\}=\k<serverRequest>,\{threadId:(?<threadId>[A-Za-z_$][\w$]*),tool:(?<tool>[A-Za-z_$][\w$]*)\}=\k<params>;if\(!\k<threadId>\)(?:\{[\s\S]{0,260}?return\}|return[\s\S]{0,260}?;)[\s\S]{0,2000}?if\(\k<signal>\?\.aborted\|\|[A-Za-z_$][\w$]*\.dynamicToolCalls!=null&&!await [A-Za-z_$][\w$]*\.dynamicToolCalls\.tryClaimExecution\(\{callId:\k<params>\.callId,hostId:\k<hostId>,threadId:\k<threadId>,turnId:\k<params>\.turnId\}\)\|\|\k<signal>\?\.aborted\)return!1;)/;
-  const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_CURRENT_V6_RE =
+  const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_CANONICAL_RE =
     /(?<prefix>async function [A-Za-z_$][\w$]*\(\{scope:(?<scope>[A-Za-z_$][\w$]*),serverRequest:(?<serverRequest>[A-Za-z_$][\w$]*),hostId:(?<hostId>[A-Za-z_$][\w$]*),queryClient:(?<queryClient>[A-Za-z_$][\w$]*),signal:(?<signal>[A-Za-z_$][\w$]*)(?:,transport:[A-Za-z_$][\w$]*)?\}\)\{let\{id:(?<requestId>[A-Za-z_$][\w$]*),params:(?<params>[A-Za-z_$][\w$]*)\}=\k<serverRequest>,\{threadId:(?<threadId>[A-Za-z_$][\w$]*),tool:(?<tool>[A-Za-z_$][\w$]*)\}=\k<params>[\s\S]{0,4000}?if\(\k<signal>\?\.aborted\|\|[A-Za-z_$][\w$]*\.dynamicToolCalls!=null&&!await [A-Za-z_$][\w$]*\.dynamicToolCalls\.tryClaimExecution\(\{callId:\k<params>\.callId,hostId:\k<hostId>,threadId:\k<threadId>,turnId:\k<params>\.turnId\}\)\|\|\k<signal>\?\.aborted\)return!1;)/;
-  const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_CURRENT_V4_RE =
-    /(?<prefix>async function [A-Za-z_$][\w$]*\(\{scope:(?<scope>[A-Za-z_$][\w$]*),serverRequest:(?<serverRequest>[A-Za-z_$][\w$]*),hostId:(?<hostId>[A-Za-z_$][\w$]*),queryClient:(?<queryClient>[A-Za-z_$][\w$]*)\}\)\{let\{id:(?<requestId>[A-Za-z_$][\w$]*),params:(?<params>[A-Za-z_$][\w$]*)\}=\k<serverRequest>,\{threadId:(?<threadId>[A-Za-z_$][\w$]*),tool:(?<tool>[A-Za-z_$][\w$]*)\}=\k<params>;if\(!\k<threadId>\)\{(?<logger>[A-Za-z_$][\w$]*)\.error\(`Missing threadId for dynamic tool call request`,\{safe:\{\},sensitive:\{id:\k<requestId>,params:\k<params>\}\}\);return\}(?<preClaimGuards>[\s\S]{0,900}?)if\([A-Za-z_$][\w$]*\.dynamicToolCalls!=null&&!await [A-Za-z_$][\w$]*\.dynamicToolCalls\.tryClaimExecution\(\{callId:\k<params>\.callId,hostId:\k<hostId>,threadId:\k<threadId>,turnId:\k<params>\.turnId\}\)\)return;let (?<result>[A-Za-z_$][\w$]*),(?<namespaceOk>[A-Za-z_$][\w$]*)=\k<params>\.namespace===[^,;]+,(?<compatOk>[A-Za-z_$][\w$]*)=\k<params>\.namespace==null&&[^,;]+,(?<dynamicResult>[A-Za-z_$][\w$]*)=[^,;]+\?await [^;]+:null,(?<pluginResult>[A-Za-z_$][\w$]*)=(?:\k<params>\.namespace===`plugin_management`(?:\|\|\k<params>\.namespace===`openai_settings\`)?)\?await [^;]+:null;)(?<gate>if\(\k<pluginResult>!=null\)\k<result>=\k<pluginResult>;else if\(!\k<namespaceOk>&&!\k<compatOk>\)\k<result>=(?<failureFn>[A-Za-z_$][\w$]*)\(`Unsupported dynamic tool namespace: \$\{\k<params>\.namespace\}`\);else if\(\k<dynamicResult>!=null\)\k<result>=\k<dynamicResult>;else)/;
   const COMPUTER_USE_NODE_REPL_RESULT_TEXT_CODE =
     'let _codexOfflineNodeReplStringify=e=>{try{return JSON.stringify(e)}catch{return String(e)}};' +
     'let _codexOfflineNodeReplContentText=e=>Array.isArray(e)?e.map(e=>(e?.type===`text`||e?.type===`inputText`)?String(e.text??``):e?.text!=null?String(e.text):_codexOfflineNodeReplStringify(e)).join(`\\n`):``;' +
@@ -2259,42 +2212,7 @@ try {
     '}catch(_codexOfflineNodeReplError){_codexOfflineNodeReplResponse=Ge(String(_codexOfflineNodeReplError?.message??_codexOfflineNodeReplError))}' +
     COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_PATCH_MARKER +
     'X.dispatchMessage(`mcp-response`,{hostId:$4,response:{id:a($6),result:_codexOfflineNodeReplResponse}});return}';
-  function computerUseNodeReplDynamicToolCallCurrentV2Replacement(...args) {
-    const groups = args.at(-1);
-    const source = args.at(-2);
-    const appServerRequestFn = typeof source === 'string'
-      ? findAppServerRequestBusName(source)
-      : null;
-    if (!appServerRequestFn) {
-      throw new Error(
-        'Could not locate app-server request bus for Computer Use node_repl.js bridge.',
-      );
-    }
-    return (
-      groups.prefix +
-      `if((${groups.params}.namespace===\`node_repl\`&&${groups.tool}===\`js\`)||` +
-      `(${groups.params}.namespace==null&&${groups.tool}===\`js\`)){` +
-      'let _codexOfflineNodeReplResult;try{' +
-      `_codexOfflineNodeReplResult=await ${appServerRequestFn}(\`call-mcp-tool\`,{` +
-      `hostId:${groups.hostId},threadId:${groups.threadId},server:\`node_repl\`,` +
-      `tool:\`js\`,arguments:${groups.params}.arguments});` +
-      COMPUTER_USE_NODE_REPL_RESULT_TEXT_CODE +
-      `${groups.logger}.info(\`computer_use_node_repl_js_call\`,{safe:{` +
-      `namespace:${groups.params}.namespace??null,tool:${groups.tool},` +
-      `codePrefix:String(${groups.params}.arguments?.code??\`\`).slice(0,500),` +
-      `hasDirectSkyImport:String(${groups.params}.arguments?.code??\`\`).includes(\`@oai/sky\`),` +
-      `hasListApps:String(${groups.params}.arguments?.code??\`\`).includes(\`list_apps\`),` +
-      'resultPrefix:_codexOfflineNodeReplText.slice(0,500),' +
-      'isError:_codexOfflineNodeReplResult?.isError===!0},sensitive:{}});' +
-      `${groups.result}={contentItems:[{type:\`inputText\`,text:_codexOfflineNodeReplText}],` +
-      'success:_codexOfflineNodeReplResult?.isError!==!0}' +
-      `}catch(_codexOfflineNodeReplError){${groups.result}=${groups.failureFn}(` +
-      'String(_codexOfflineNodeReplError?.message??_codexOfflineNodeReplError))}' +
-      COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_PATCH_MARKER +
-      `}else ${groups.gate}`
-    );
-  }
-  function computerUseNodeReplDynamicToolCallCurrentV5Replacement(...args) {
+  function computerUseNodeReplDynamicToolCallReplacement(...args) {
     const groups = args.at(-1);
     const source = args.at(-2);
     const appServerRequestFn = typeof source === 'string'
@@ -2401,52 +2319,12 @@ try {
     return { content: next, alreadyCorrect: false, patched: next !== content };
   }
   function patchComputerUseNodeReplDynamicToolCall(content) {
-    if (content.includes(COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_PATCH_MARKER)) {
-      return { content, alreadyCorrect: true, patched: false };
-    }
-
-    let next = content.replace(
-      COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_CURRENT_V6_RE,
-      computerUseNodeReplDynamicToolCallCurrentV5Replacement,
+    const next = content.replace(
+      COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_CANONICAL_RE,
+      computerUseNodeReplDynamicToolCallReplacement,
     );
-    if (next === content) {
-      next = content.replace(
-        COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_CURRENT_V5_RE,
-        computerUseNodeReplDynamicToolCallCurrentV5Replacement,
-      );
-    }
-    if (next === content) {
-      next = content.replace(
-        COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_CURRENT_V2_RE,
-        computerUseNodeReplDynamicToolCallCurrentV2Replacement,
-      );
-    }
-    if (next === content) {
-      next = content.replace(
-        COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_CURRENT_V3_RE,
-        computerUseNodeReplDynamicToolCallCurrentV2Replacement,
-      );
-    }
-    if (next === content) {
-      next = content.replace(
-        COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_CURRENT_V4_RE,
-        computerUseNodeReplDynamicToolCallCurrentV2Replacement,
-      );
-    }
     return { content: next, alreadyCorrect: false, patched: next !== content };
   }
-  const ARCHIVED_THREADS_LIST_ALL_DIRECT_RE =
-    /async function ([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*),\{modelProviders:([A-Za-z_$][\w$]*),archived:([A-Za-z_$][\w$]*)=!1,sourceKinds:([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*),useStateDbOnly:([A-Za-z_$][\w$]*)=!1\}\)\{let ([A-Za-z_$][\w$]*)=\[\],([A-Za-z_$][\w$]*)=async ([A-Za-z_$][\w$]*)=>\{let ([A-Za-z_$][\w$]*)=await \2\.sendRequest\(`thread\/list`,\{limit:200,cursor:\10,sortKey:\2\.recentConversationsSortKey,modelProviders:\3,sourceKinds:\5,archived:\4,useStateDbOnly:\7\}\);\8\.push\(\.\.\.\11\.data\),\11\.nextCursor&&await \9\(\11\.nextCursor\)\};return await \9\(null\),\8\}/;
-  const ARCHIVED_THREADS_LIST_ALL_QUERY_RE =
-    /async function ([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*),\{modelProviders:([A-Za-z_$][\w$]*),archived:([A-Za-z_$][\w$]*)=!1,sourceKinds:([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*),useStateDbOnly:([A-Za-z_$][\w$]*)=!1\}\)\{let ([A-Za-z_$][\w$]*)=\[\],([A-Za-z_$][\w$]*)=async ([A-Za-z_$][\w$]*)=>\{let ([A-Za-z_$][\w$]*)=\{limit:200,cursor:\10,sortKey:\2\.recentConversationsSortKey,modelProviders:\3,sourceKinds:\5,archived:\4,useStateDbOnly:\7\},([A-Za-z_$][\w$]*)=await \2\.sendRequest\(`thread\/list`,\11\);\8\.push\(\.\.\.\12\.data\),\12\.nextCursor&&await \9\(\12\.nextCursor\)\};return await \9\(null\),\8\}/;
-  const ARCHIVED_THREADS_LIST_ALL_PATCHED_DIRECT_RE =
-    /async function ([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*),\{modelProviders:([A-Za-z_$][\w$]*),archived:([A-Za-z_$][\w$]*)=!1,sourceKinds:([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*),useStateDbOnly:([A-Za-z_$][\w$]*)=!1\}\)\{let ([A-Za-z_$][\w$]*)=\[\],([A-Za-z_$][\w$]*)=async ([A-Za-z_$][\w$]*)=>\{let ([A-Za-z_$][\w$]*);try\{\11=await \2\.sendRequest\(`thread\/list`,\{limit:200,cursor:\10,sortKey:\2\.recentConversationsSortKey,modelProviders:\3,sourceKinds:\5,archived:\4,useStateDbOnly:\7\}\)\}catch\(_codexOfflineArchiveListError\)\{if\(\4\)return;throw _codexOfflineArchiveListError\}\8\.push\(\.\.\.\(\11\.data\?\?\[\]\)\),\11\.nextCursor&&await \9\(\11\.nextCursor\)\};return await \9\(null\),\8\}\/\*codex-offline:archived-threads-partial-list\*\//;
-  const ARCHIVED_THREADS_LIST_ALL_PATCHED_QUERY_RE =
-    /async function ([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*),\{modelProviders:([A-Za-z_$][\w$]*),archived:([A-Za-z_$][\w$]*)=!1,sourceKinds:([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*),useStateDbOnly:([A-Za-z_$][\w$]*)=!1\}\)\{let ([A-Za-z_$][\w$]*)=\[\],([A-Za-z_$][\w$]*)=async ([A-Za-z_$][\w$]*)=>\{let ([A-Za-z_$][\w$]*)=\{limit:200,cursor:\10,sortKey:\2\.recentConversationsSortKey,modelProviders:\3,sourceKinds:\5,archived:\4,useStateDbOnly:\7\},([A-Za-z_$][\w$]*);try\{\12=await \2\.sendRequest\(`thread\/list`,\11\)\}catch\(_codexOfflineArchiveListError\)\{if\(\4\)return;throw _codexOfflineArchiveListError\}\8\.push\(\.\.\.\(\12\.data\?\?\[\]\)\),\12\.nextCursor&&await \9\(\12\.nextCursor\)\};return await \9\(null\),\8\}\/\*codex-offline:archived-threads-partial-list\*\//;
-  const ARCHIVED_THREADS_LIST_ALL_CURRENT_RE =
-    /function (?<functionName>[A-Za-z_$][\w$]*)\((?<requestClient>[A-Za-z_$][\w$]*),\{modelProviders:(?<modelProviders>[A-Za-z_$][\w$]*),archived:(?<archived>[A-Za-z_$][\w$]*)=!1,sourceKinds:(?<sourceKinds>[A-Za-z_$][\w$]*)=(?<defaultSourceKinds>[A-Za-z_$][\w$]*),useStateDbOnly:(?<useStateDbOnly>[A-Za-z_$][\w$]*)=!1\}\)\{let (?<threads>[A-Za-z_$][\w$]*)=\[\],(?<loadPage>[A-Za-z_$][\w$]*)=async (?<cursor>[A-Za-z_$][\w$]*)=>\{let (?<query>[A-Za-z_$][\w$]*)=\{limit:100,cursor:\k<cursor>,sortKey:\k<requestClient>\.recentConversationsSortKey,modelProviders:\k<modelProviders>,sourceKinds:\k<sourceKinds>,archived:\k<archived>,useStateDbOnly:\k<useStateDbOnly>\},(?<page>[A-Za-z_$][\w$]*)=await \k<requestClient>\.sendRequest\(`thread\/list`,\k<query>,\{priority:`background`,source:`thread_list`\}\);\k<threads>\.push\(\.\.\.\k<page>\.data\),\k<page>\.nextCursor&&await \k<loadPage>\(\k<page>\.nextCursor\)\};return await \k<loadPage>\(null\),\k<threads>\}/;
-  const ARCHIVED_THREADS_LIST_ALL_CURRENT_V2_RE =
-    /function (?<functionName>[A-Za-z_$][\w$]*)\((?<requestClient>[A-Za-z_$][\w$]*),\{modelProviders:(?<modelProviders>[A-Za-z_$][\w$]*),archived:(?<archived>[A-Za-z_$][\w$]*)=!1,sourceKinds:(?<sourceKinds>[A-Za-z_$][\w$]*)=(?<defaultSourceKinds>[A-Za-z_$][\w$]*)\}\)\{let (?<threads>[A-Za-z_$][\w$]*)=\[\],(?<loadPage>[A-Za-z_$][\w$]*)=async (?<cursor>[A-Za-z_$][\w$]*)=>\{let (?<query>[A-Za-z_$][\w$]*)=\{limit:100,cursor:\k<cursor>,sortKey:\k<requestClient>\.recentConversationsSortKey,modelProviders:\k<modelProviders>,sourceKinds:\k<sourceKinds>,archived:\k<archived>,useStateDbOnly:!0\},(?<page>[A-Za-z_$][\w$]*)=await \k<requestClient>\.sendRequest\(`thread\/list`,\k<query>,\{priority:`background`,source:`thread_list`\}\);\k<threads>\.push\(\.\.\.\k<page>\.data\),\k<page>\.nextCursor&&await \k<loadPage>\(\k<page>\.nextCursor\)\};return await \k<loadPage>\(null\),\k<threads>\}/;
   // 26.831 moved archived-thread loading into the data-controls component.
   // Keep this exact shape narrow so an upstream rewrite still fails closed.
   const ARCHIVED_THREADS_DATA_CONTROLS_CURRENT_RE =
@@ -2457,223 +2335,7 @@ try {
       `(globalThis.__codexOfflineArchivedThreadsCache=${threads},${threads})):${threads}`;
   }
   function patchArchivedThreadsPartialList(content) {
-    if (content.includes(ARCHIVED_THREADS_CACHE_FALLBACK_PATCH_MARKER)) {
-      return { content, alreadyCorrect: true, patched: false };
-    }
-
     let next = content.replace(
-      ARCHIVED_THREADS_LIST_ALL_DIRECT_RE,
-      (
-        _match,
-        functionName,
-        requestClient,
-        modelProviders,
-        archived,
-        sourceKinds,
-        defaultSourceKinds,
-        useStateDbOnly,
-        threads,
-        loadPage,
-        cursor,
-        page,
-      ) => {
-        const failed = '_codexOfflineArchiveListFailed';
-        return (
-        `async function ${functionName}(${requestClient},{modelProviders:${modelProviders},` +
-        `archived:${archived}=!1,sourceKinds:${sourceKinds}=${defaultSourceKinds},` +
-        `useStateDbOnly:${useStateDbOnly}=!1}){let ${threads}=[],${failed}=!1,${loadPage}=async ${cursor}=>{` +
-        `let ${page};try{${page}=await ${requestClient}.sendRequest(\`thread/list\`,{limit:200,` +
-          `cursor:${cursor},sortKey:${requestClient}.recentConversationsSortKey,` +
-          `modelProviders:${modelProviders},sourceKinds:${sourceKinds},archived:${archived},` +
-          `useStateDbOnly:${archived}?!0:${useStateDbOnly}})}catch(_codexOfflineArchiveListError){` +
-        `if(${archived}){${failed}=!0;return}throw _codexOfflineArchiveListError}` +
-        `${threads}.push(...(${page}.data??[])),${page}.nextCursor&&await ${loadPage}(${page}.nextCursor)` +
-        `};return await ${loadPage}(null),${archivedThreadsReturnExpression(archived, failed, threads)}}` +
-        ARCHIVED_THREADS_PARTIAL_LIST_PATCH_MARKER +
-        ARCHIVED_THREADS_CACHE_FALLBACK_PATCH_MARKER
-        );
-      },
-    );
-    if (next === content) {
-      next = content.replace(
-        ARCHIVED_THREADS_LIST_ALL_QUERY_RE,
-        (
-          _match,
-          functionName,
-          requestClient,
-          modelProviders,
-          archived,
-          sourceKinds,
-          defaultSourceKinds,
-          useStateDbOnly,
-          threads,
-          loadPage,
-          cursor,
-          query,
-          page,
-        ) => {
-          const failed = '_codexOfflineArchiveListFailed';
-          return (
-          `async function ${functionName}(${requestClient},{modelProviders:${modelProviders},` +
-          `archived:${archived}=!1,sourceKinds:${sourceKinds}=${defaultSourceKinds},` +
-          `useStateDbOnly:${useStateDbOnly}=!1}){let ${threads}=[],${failed}=!1,${loadPage}=async ${cursor}=>{` +
-          `let ${query}={limit:200,cursor:${cursor},sortKey:${requestClient}.recentConversationsSortKey,` +
-          `modelProviders:${modelProviders},sourceKinds:${sourceKinds},archived:${archived},` +
-          `useStateDbOnly:${archived}?!0:${useStateDbOnly}},${page};try{${page}=await ${requestClient}.sendRequest(\`thread/list\`,${query})` +
-          `}catch(_codexOfflineArchiveListError){if(${archived}){${failed}=!0;return}throw _codexOfflineArchiveListError}` +
-          `${threads}.push(...(${page}.data??[])),${page}.nextCursor&&await ${loadPage}(${page}.nextCursor)` +
-          `};return await ${loadPage}(null),${archivedThreadsReturnExpression(archived, failed, threads)}}` +
-          ARCHIVED_THREADS_PARTIAL_LIST_PATCH_MARKER +
-          ARCHIVED_THREADS_CACHE_FALLBACK_PATCH_MARKER
-          );
-        },
-      );
-    }
-    if (next === content) {
-      next = content.replace(
-        ARCHIVED_THREADS_LIST_ALL_PATCHED_DIRECT_RE,
-        (
-          _match,
-          functionName,
-          requestClient,
-          modelProviders,
-          archived,
-          sourceKinds,
-          defaultSourceKinds,
-          useStateDbOnly,
-          threads,
-          loadPage,
-          cursor,
-          page,
-        ) => {
-          const failed = '_codexOfflineArchiveListFailed';
-          return (
-          `async function ${functionName}(${requestClient},{modelProviders:${modelProviders},` +
-          `archived:${archived}=!1,sourceKinds:${sourceKinds}=${defaultSourceKinds},` +
-          `useStateDbOnly:${useStateDbOnly}=!1}){let ${threads}=[],${failed}=!1,${loadPage}=async ${cursor}=>{` +
-          `let ${page};try{${page}=await ${requestClient}.sendRequest(\`thread/list\`,{limit:200,` +
-        `cursor:${cursor},sortKey:${requestClient}.recentConversationsSortKey,` +
-        `modelProviders:${modelProviders},sourceKinds:${sourceKinds},archived:${archived},` +
-        `useStateDbOnly:${archived}?!0:${useStateDbOnly}})}catch(_codexOfflineArchiveListError){` +
-          `if(${archived}){${failed}=!0;return}throw _codexOfflineArchiveListError}` +
-          `${threads}.push(...(${page}.data??[])),${page}.nextCursor&&await ${loadPage}(${page}.nextCursor)` +
-          `};return await ${loadPage}(null),${archivedThreadsReturnExpression(archived, failed, threads)}}` +
-          ARCHIVED_THREADS_PARTIAL_LIST_PATCH_MARKER +
-          ARCHIVED_THREADS_CACHE_FALLBACK_PATCH_MARKER
-          );
-        },
-      );
-    }
-    if (next === content) {
-      next = content.replace(
-        ARCHIVED_THREADS_LIST_ALL_PATCHED_QUERY_RE,
-        (
-          _match,
-          functionName,
-          requestClient,
-          modelProviders,
-          archived,
-          sourceKinds,
-          defaultSourceKinds,
-          useStateDbOnly,
-          threads,
-          loadPage,
-          cursor,
-          query,
-          page,
-        ) => {
-          const failed = '_codexOfflineArchiveListFailed';
-          return (
-          `async function ${functionName}(${requestClient},{modelProviders:${modelProviders},` +
-          `archived:${archived}=!1,sourceKinds:${sourceKinds}=${defaultSourceKinds},` +
-          `useStateDbOnly:${useStateDbOnly}=!1}){let ${threads}=[],${failed}=!1,${loadPage}=async ${cursor}=>{` +
-          `let ${query}={limit:200,cursor:${cursor},sortKey:${requestClient}.recentConversationsSortKey,` +
-          `modelProviders:${modelProviders},sourceKinds:${sourceKinds},archived:${archived},` +
-          `useStateDbOnly:${archived}?!0:${useStateDbOnly}},${page};try{${page}=await ${requestClient}.sendRequest(\`thread/list\`,${query})` +
-          `}catch(_codexOfflineArchiveListError){if(${archived}){${failed}=!0;return}throw _codexOfflineArchiveListError}` +
-          `${threads}.push(...(${page}.data??[])),${page}.nextCursor&&await ${loadPage}(${page}.nextCursor)` +
-          `};return await ${loadPage}(null),${archivedThreadsReturnExpression(archived, failed, threads)}}` +
-          ARCHIVED_THREADS_PARTIAL_LIST_PATCH_MARKER +
-          ARCHIVED_THREADS_CACHE_FALLBACK_PATCH_MARKER
-          );
-        },
-      );
-    }
-    if (next === content) {
-      next = content.replace(
-        ARCHIVED_THREADS_LIST_ALL_CURRENT_RE,
-        (
-          _match,
-          functionName,
-          requestClient,
-          modelProviders,
-          archived,
-          sourceKinds,
-          defaultSourceKinds,
-          useStateDbOnly,
-          threads,
-          loadPage,
-          cursor,
-          query,
-          page,
-        ) => {
-          const failed = '_codexOfflineArchiveListFailed';
-          return (
-          `function ${functionName}(${requestClient},{modelProviders:${modelProviders},` +
-          `archived:${archived}=!1,sourceKinds:${sourceKinds}=${defaultSourceKinds},` +
-          `useStateDbOnly:${useStateDbOnly}=!1}){let ${threads}=[],${failed}=!1,${loadPage}=async ${cursor}=>{` +
-          `let ${query}={limit:100,cursor:${cursor},sortKey:${requestClient}.recentConversationsSortKey,` +
-          `modelProviders:${modelProviders},sourceKinds:${sourceKinds},archived:${archived},` +
-          `useStateDbOnly:${archived}?!0:${useStateDbOnly}},${page};try{${page}=await ${requestClient}.sendRequest(` +
-          `\`thread/list\`,${query},{priority:\`background\`,source:\`thread_list\`})` +
-          `}catch(_codexOfflineArchiveListError){if(${archived}){${failed}=!0;return}` +
-          `throw _codexOfflineArchiveListError}${threads}.push(...(${page}.data??[])),` +
-          `${page}.nextCursor&&await ${loadPage}(${page}.nextCursor)};return await ${loadPage}(null),` +
-          `${archivedThreadsReturnExpression(archived, failed, threads)}}` +
-          ARCHIVED_THREADS_PARTIAL_LIST_PATCH_MARKER +
-          ARCHIVED_THREADS_CACHE_FALLBACK_PATCH_MARKER
-          );
-        },
-      );
-    }
-    if (next === content) {
-      next = content.replace(
-        ARCHIVED_THREADS_LIST_ALL_CURRENT_V2_RE,
-        (...args) => {
-          const {
-            functionName,
-            requestClient,
-            modelProviders,
-            archived,
-            sourceKinds,
-            defaultSourceKinds,
-            threads,
-            loadPage,
-            cursor,
-            query,
-            page,
-          } = args.at(-1);
-          const failed = '_codexOfflineArchiveListFailed';
-          return (
-            `function ${functionName}(${requestClient},{modelProviders:${modelProviders},` +
-            `archived:${archived}=!1,sourceKinds:${sourceKinds}=${defaultSourceKinds}}){` +
-            `let ${threads}=[],${failed}=!1,${loadPage}=async ${cursor}=>{` +
-            `let ${query}={limit:100,cursor:${cursor},sortKey:${requestClient}.recentConversationsSortKey,` +
-            `modelProviders:${modelProviders},sourceKinds:${sourceKinds},archived:${archived},` +
-            `useStateDbOnly:!0},${page};try{${page}=await ${requestClient}.sendRequest(` +
-            `\`thread/list\`,${query},{priority:\`background\`,source:\`thread_list\`})` +
-            `}catch(_codexOfflineArchiveListError){if(${archived}){${failed}=!0;return}` +
-            `throw _codexOfflineArchiveListError}${threads}.push(...(${page}.data??[])),` +
-            `${page}.nextCursor&&await ${loadPage}(${page}.nextCursor)};return await ${loadPage}(null),` +
-            `${archivedThreadsReturnExpression(archived, failed, threads)}}` +
-            ARCHIVED_THREADS_PARTIAL_LIST_PATCH_MARKER +
-            ARCHIVED_THREADS_CACHE_FALLBACK_PATCH_MARKER
-          );
-        },
-      );
-    }
-    if (next === content) {
-      next = content.replace(
         ARCHIVED_THREADS_DATA_CONTROLS_CURRENT_RE,
         (_match, ...args) => {
           const { loader, threads, seen, cursor, page, send, scope, host, sourceKinds } =
@@ -2697,8 +2359,7 @@ try {
             ARCHIVED_THREADS_CACHE_FALLBACK_PATCH_MARKER
           );
         },
-      );
-    }
+    );
     return { content: next, alreadyCorrect: false, patched: next !== content };
   }
   // The archived settings panel (Settings → Data controls → Archived) combines
@@ -2784,18 +2445,6 @@ try {
       patched: true,
     };
   }
-  const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_LEGACY_RE =
-    /if\(([A-Za-z_$][\w$]*)\.namespace===`node_repl`&&([A-Za-z_$][\w$]*)===`js`\)\{let _codexOfflineNodeReplResult;try\{_codexOfflineNodeReplResult=await Pi\(`mcpServer\/tool\/call`,\{params:\{threadId:([A-Za-z_$][\w$]*),server:`node_repl`,tool:`js`,arguments:\1\.arguments\}\}\);let _codexOfflineNodeReplText=Array\.isArray\(_codexOfflineNodeReplResult\?\.content\)\?_codexOfflineNodeReplResult\.content\.map\(e=>e\?\.type===`text`\?String\(e\.text\?\?``\):JSON\.stringify\(e\)\)\.join\(`\\n`\):JSON\.stringify\(_codexOfflineNodeReplResult\);u=\{contentItems:\[\{type:`inputText`,text:_codexOfflineNodeReplText\}\],success:_codexOfflineNodeReplResult\?\.isError!==!0\}\}catch\(_codexOfflineNodeReplError\)\{u=Ge\(String\(_codexOfflineNodeReplError\?\.message\?\?_codexOfflineNodeReplError\)\)\}\/\*codex-offline:computer-use-node-repl-dynamic-tool-call\*\/X\.dispatchMessage\(`mcp-response`,\{hostId:([A-Za-z_$][\w$]*),response:\{id:a\(([A-Za-z_$][\w$]*)\),result:u\}\}\);return\}/;
-  const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_LEGACY_REPLACEMENT =
-    'if(($1.namespace===`node_repl`&&$2===`js`)||($1.namespace==null&&$2===`js`)){let _codexOfflineNodeReplResult,_codexOfflineNodeReplResponse;try{' +
-    '_codexOfflineNodeReplResult=await ln(`call-mcp-tool`,{hostId:$4,threadId:$3,server:`node_repl`,tool:`js`,arguments:$1.arguments});' +
-    COMPUTER_USE_NODE_REPL_RESULT_TEXT_CODE +
-    'G.info(`computer_use_node_repl_js_call`,{safe:{namespace:$1.namespace??null,tool:$2,codePrefix:String($1.arguments?.code??``).slice(0,500),hasDirectSkyImport:String($1.arguments?.code??``).includes(`@oai/sky`),hasListApps:String($1.arguments?.code??``).includes(`list_apps`),resultPrefix:_codexOfflineNodeReplText.slice(0,500),isError:_codexOfflineNodeReplResult?.isError===!0},sensitive:{}});' +
-    '_codexOfflineNodeReplResponse={contentItems:[{type:`inputText`,text:_codexOfflineNodeReplText}],success:_codexOfflineNodeReplResult?.isError!==!0}' +
-    '}catch(_codexOfflineNodeReplError){_codexOfflineNodeReplResponse=Ge(String(_codexOfflineNodeReplError?.message??_codexOfflineNodeReplError))}' +
-    COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_PATCH_MARKER +
-    'X.dispatchMessage(`mcp-response`,{hostId:$4,response:{id:a($5),result:_codexOfflineNodeReplResponse}});return}';
-  // ── Patch 36: Keep bundled browser plugins in runtime marketplace ─────
   const BUNDLED_BROWSER_PLUGINS_PATCH_MARKER =
     contractPatchMarker('/*codex-offline:bundled-browser-plugins-no-force-reload*/');
   const CHROME_DESCRIPTOR_RE =
@@ -2959,20 +2608,10 @@ try {
     let content = fs.readFileSync(filePath, 'utf8');
     if (content.includes(AUTOMATION_RUNTIME_CWD_PATCH_MARKER)) {
       automationRuntimePatchedFiles.push(path.relative(tmpDir, filePath));
-    } else if (AUTOMATION_RUNTIME_CWD_RE.test(content)) {
+    } else if (AUTOMATION_RUNTIME_TARGET_CWD_RE.test(content)) {
       const patchedContent = content.replace(
-        AUTOMATION_RUNTIME_CWD_RE,
-        AUTOMATION_RUNTIME_CWD_REPLACEMENT,
-      );
-      if (patchedContent !== content) {
-        content = patchedContent;
-        fs.writeFileSync(filePath, content, 'utf8');
-        automationRuntimePatchedFiles.push(path.relative(tmpDir, filePath));
-      }
-    } else if (AUTOMATION_RUNTIME_LEGACY_TARGET_CWD_RE.test(content)) {
-      const patchedContent = content.replace(
-        AUTOMATION_RUNTIME_LEGACY_TARGET_CWD_RE,
-        AUTOMATION_RUNTIME_LEGACY_TARGET_CWD_REPLACEMENT,
+        AUTOMATION_RUNTIME_TARGET_CWD_RE,
+        AUTOMATION_RUNTIME_TARGET_CWD_REPLACEMENT,
       );
       if (patchedContent !== content) {
         content = patchedContent;
@@ -2982,8 +2621,7 @@ try {
     }
 
     if (!content.includes(AUTOMATION_RUNTIME_CWD_PATCH_MARKER) &&
-        (AUTOMATION_RUNTIME_CWD_RE.test(content) ||
-         AUTOMATION_RUNTIME_LEGACY_TARGET_CWD_RE.test(content))) {
+        AUTOMATION_RUNTIME_TARGET_CWD_RE.test(content)) {
       automationRuntimeUnpatchedFiles.push(path.relative(tmpDir, filePath));
     }
   }
@@ -3076,23 +2714,9 @@ try {
       continue;
     }
 
-    if (WINDOWS_BROWSER_USE_CAPABILITY_LEGACY_RE.test(content)) {
+    if (WINDOWS_BROWSER_USE_CAPABILITY_CANONICAL_RE.test(content)) {
       content = content.replace(
-        WINDOWS_BROWSER_USE_CAPABILITY_LEGACY_RE,
-        'function $1($2,{env:$3=process.env,platform:$4=process.platform}={}){' +
-          'return $4!==`win32`||$3.CODEX_ELECTRON_ENABLE_WINDOWS_COMPUTER_USE!==`1`?$2:' +
-          `{...$2,${DESKTOP_BROWSER_USE_CAPABILITY_PATCH_FIELDS}${WINDOWS_BROWSER_USE_CAPABILITY_PATCH_MARKER}}}`,
-      );
-    } else if (WINDOWS_BROWSER_USE_CAPABILITY_CURRENT_RE.test(content)) {
-      content = content.replace(
-        WINDOWS_BROWSER_USE_CAPABILITY_CURRENT_RE,
-        'function $1($2,{$3}={}){' +
-          'let $6=$5===`win32`&&$4.CODEX_ELECTRON_ENABLE_WINDOWS_COMPUTER_USE===`1`?' +
-          `{...$2,${DESKTOP_BROWSER_USE_CAPABILITY_PATCH_FIELDS}${WINDOWS_BROWSER_USE_CAPABILITY_PATCH_MARKER}}:$2,`,
-      );
-    } else if (WINDOWS_BROWSER_USE_CAPABILITY_V3_RE.test(content)) {
-      content = content.replace(
-        WINDOWS_BROWSER_USE_CAPABILITY_V3_RE,
+        WINDOWS_BROWSER_USE_CAPABILITY_CANONICAL_RE,
         ',$1=$2===`win32`&&$3.CODEX_ELECTRON_ENABLE_WINDOWS_COMPUTER_USE===`1`?' +
           `{...$4,computerUse:!0,computerUseNodeRepl:!0,${DESKTOP_BROWSER_USE_CAPABILITY_PATCH_FIELDS}${WINDOWS_BROWSER_USE_CAPABILITY_PATCH_MARKER}}:$4`,
       );
@@ -3464,102 +3088,6 @@ try {
       computerUseForwardThreadStartDiagnosticsPatchedFiles.push(path.relative(tmpDir, filePath));
       continue;
     }
-    if (content.includes(COMPUTER_USE_FORWARD_THREAD_START_DIAGNOSTICS_PATCH_MARKER)) {
-      let patchedContent = content;
-      if (patchedContent.includes(COMPUTER_USE_THREAD_START_TOOL_SEARCH_LEGACY_CODE)) {
-        patchedContent = patchedContent.replace(
-          COMPUTER_USE_THREAD_START_TOOL_SEARCH_LEGACY_CODE,
-          COMPUTER_USE_THREAD_START_TOOL_SEARCH_CODE,
-        );
-      }
-      if (patchedContent.includes(COMPUTER_USE_THREAD_START_TOOL_SEARCH_JS_REPL_ONLY_CODE)) {
-        patchedContent = patchedContent.replace(
-          COMPUTER_USE_THREAD_START_TOOL_SEARCH_JS_REPL_ONLY_CODE,
-          COMPUTER_USE_THREAD_START_TOOL_SEARCH_CODE,
-        );
-      }
-      if (patchedContent.includes(COMPUTER_USE_THREAD_START_TOOL_SEARCH_TOOL_SUGGEST_ONLY_CODE)) {
-        patchedContent = patchedContent.replace(
-          COMPUTER_USE_THREAD_START_TOOL_SEARCH_TOOL_SUGGEST_ONLY_CODE,
-          COMPUTER_USE_THREAD_START_TOOL_SEARCH_CODE,
-        );
-      }
-      if (patchedContent.includes(COMPUTER_USE_THREAD_START_TOOL_SEARCH_FULL_FLAGS_ONLY_CODE)) {
-        patchedContent = patchedContent.replace(
-          COMPUTER_USE_THREAD_START_TOOL_SEARCH_FULL_FLAGS_ONLY_CODE,
-          COMPUTER_USE_THREAD_START_TOOL_SEARCH_CODE,
-        );
-      }
-      if (!patchedContent.includes(COMPUTER_USE_THREAD_START_TOOL_SEARCH_PATCH_MARKER)) {
-        patchedContent = patchedContent.replace(
-          COMPUTER_USE_FORWARD_THREAD_START_DIAGNOSTICS_PATCH_MARKER,
-          COMPUTER_USE_FORWARD_THREAD_START_DIAGNOSTICS_PATCH_MARKER +
-            COMPUTER_USE_THREAD_START_TOOL_SEARCH_CODE,
-        );
-      }
-      if (!patchedContent.includes(COMPUTER_USE_INPUT_SKILL_PATCH_MARKER)) {
-        patchedContent = patchedContent.replace(
-          COMPUTER_USE_FORWARD_THREAD_START_DIAGNOSTICS_PATCH_MARKER,
-          COMPUTER_USE_FORWARD_THREAD_START_DIAGNOSTICS_PATCH_MARKER +
-            COMPUTER_USE_INPUT_SKILL_INJECTION_CODE,
-        );
-      }
-      if (!patchedContent.includes(
-        COMPUTER_USE_THREAD_START_TOOL_CONTEXT_DIAGNOSTICS_PATCH_MARKER,
-      )) {
-        patchedContent = patchedContent.replace(
-          COMPUTER_USE_INPUT_SKILL_PATCH_MARKER,
-          COMPUTER_USE_INPUT_SKILL_PATCH_MARKER +
-            COMPUTER_USE_THREAD_START_TOOL_CONTEXT_DIAGNOSTICS_CODE,
-        );
-      }
-      if (
-        patchedContent.includes(COMPUTER_USE_FORWARD_INPUT_DIAGNOSTICS_V3_PATCH_MARKER)
-      ) {
-        // Already has the current diagnostics shape. The optional mutations
-        // above upgrade older builds so Computer Use context is observable.
-      } else if (
-        patchedContent.includes(COMPUTER_USE_FORWARD_INPUT_DIAGNOSTICS_V2_PATCH_MARKER)
-      ) {
-        patchedContent = patchedContent.replace(
-          COMPUTER_USE_FORWARD_INPUT_DIAGNOSTICS_V2_SAFE_FIELDS,
-          COMPUTER_USE_FORWARD_INPUT_DIAGNOSTICS_SAFE_FIELDS,
-        );
-        patchedContent = patchedContent.replace(
-          COMPUTER_USE_FORWARD_INPUT_DIAGNOSTICS_V2_PATCH_MARKER,
-          COMPUTER_USE_FORWARD_INPUT_DIAGNOSTICS_V2_PATCH_MARKER +
-            COMPUTER_USE_FORWARD_INPUT_DIAGNOSTICS_V3_PATCH_MARKER,
-        );
-      } else if (patchedContent.includes(COMPUTER_USE_FORWARD_INPUT_DIAGNOSTICS_PATCH_MARKER)) {
-        patchedContent = patchedContent.replace(
-          COMPUTER_USE_FORWARD_INPUT_DIAGNOSTICS_LEGACY_SAFE_FIELDS,
-          COMPUTER_USE_FORWARD_INPUT_DIAGNOSTICS_SAFE_FIELDS,
-        );
-        patchedContent = patchedContent.replace(
-          COMPUTER_USE_FORWARD_INPUT_DIAGNOSTICS_PATCH_MARKER,
-          COMPUTER_USE_FORWARD_INPUT_DIAGNOSTICS_PATCH_MARKER +
-            COMPUTER_USE_FORWARD_INPUT_DIAGNOSTICS_V2_PATCH_MARKER +
-            COMPUTER_USE_FORWARD_INPUT_DIAGNOSTICS_V3_PATCH_MARKER,
-        );
-      } else if (
-        patchedContent.includes(COMPUTER_USE_FORWARD_INPUT_DIAGNOSTICS_LEGACY_NEEDLE)
-      ) {
-        patchedContent = patchedContent.replace(
-          COMPUTER_USE_FORWARD_INPUT_DIAGNOSTICS_LEGACY_NEEDLE,
-          COMPUTER_USE_FORWARD_INPUT_DIAGNOSTICS_LEGACY_REPLACEMENT,
-        );
-      }
-      if (patchedContent !== content) {
-        content = patchedContent;
-        fs.writeFileSync(filePath, content, 'utf8');
-        computerUseForwardThreadStartDiagnosticsPatched = true;
-      } else {
-        computerUseForwardThreadStartDiagnosticsAlreadyCorrect = true;
-      }
-      computerUseForwardThreadStartDiagnosticsPatchedFiles.push(path.relative(tmpDir, filePath));
-      continue;
-    }
-
     if (!content.includes(COMPUTER_USE_FORWARD_THREAD_START_DIAGNOSTICS_NEEDLE)) continue;
 
     content = content.replace(
