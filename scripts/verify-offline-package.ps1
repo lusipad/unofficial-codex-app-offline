@@ -319,15 +319,27 @@ foreach ($slug in @('gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna
     }
 }
 
-foreach ($slug in @('deepseek-v4-flash', 'deepseek-v4-pro')) {
+# Upstream folded the vision variant into deepseek-flash and turned the search
+# tool off for v4-pro, so capabilities are asserted per model.
+$deepSeekExpected = @{
+    'deepseek-flash'  = @{ SupportsSearchTool = $true;  RequiresImageInput = $true }
+    'deepseek-v4-pro' = @{ SupportsSearchTool = $false; RequiresImageInput = $false }
+}
+foreach ($slug in $deepSeekExpected.Keys) {
+    $expected = $deepSeekExpected[$slug]
     $model = @($modelCatalogModels | Where-Object { $_.slug -eq $slug })
     if ($model.Count -ne 1) {
         throw "API model catalog must contain exactly one $slug entry."
     }
-    if ($model[0].supports_search_tool -ne $true -or
+    if ($model[0].supports_search_tool -ne $expected.SupportsSearchTool -or
         $model[0].web_search_tool_type -ne 'text' -or
         $model[0].use_responses_lite -ne $false) {
         throw "API model catalog has unexpected DeepSeek fields for $slug."
+    }
+    if ($expected.RequiresImageInput -and
+        (@($model[0].input_modalities) -notcontains 'image' -or
+         $model[0].supports_image_detail_original -ne $true)) {
+        throw "API model catalog lost image input for $slug."
     }
 }
 
@@ -432,13 +444,23 @@ try {
     try {
         $env:CODEX_HOME = Join-Path $tempRoot 'model-catalog-codex-home'
         New-Item -ItemType Directory -Force -Path $env:CODEX_HOME | Out-Null
-        $catalogDebugOutput = & $portableCodexBinary -c $catalogOverride debug models
+        # debug models emits UTF-8 JSON. PowerShell decodes a native command's
+        # output with the host code page, which mangles the non-ASCII characters
+        # in the model instruction templates and leaves the JSON unparseable, so
+        # force UTF-8 for the duration of the call.
+        $previousOutputEncoding = [Console]::OutputEncoding
+        try {
+            [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+            $catalogDebugOutput = & $portableCodexBinary -c $catalogOverride debug models
+        } finally {
+            [Console]::OutputEncoding = $previousOutputEncoding
+        }
         if ($LASTEXITCODE -ne 0) {
             throw "Bundled Codex rejected models-api.json with exit code $LASTEXITCODE."
         }
         $loadedCatalog = $catalogDebugOutput -join [Environment]::NewLine | ConvertFrom-Json
         $loadedSlugs = @($loadedCatalog.models | ForEach-Object { [string]$_.slug })
-        foreach ($slug in @('gpt-6-astra', 'gpt-5.6-sol', 'deepseek-v4-flash', 'deepseek-v4-pro')) {
+        foreach ($slug in @('gpt-6-astra', 'gpt-5.6-sol', 'deepseek-flash', 'deepseek-v4-pro')) {
             if ($loadedSlugs -notcontains $slug) {
                 throw "Bundled Codex did not load expected model from models-api.json: $slug"
             }

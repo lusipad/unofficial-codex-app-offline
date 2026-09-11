@@ -23,7 +23,7 @@ const DEEPSEEK_SETUP_URL =
 const ASTRA_CATALOG_SHA256 =
   "d1d24c2cbcf0c5d489b27eb622d6487a4731dc6909cd9af30e9321f7b8a51f54";
 const DEEPSEEK_CATALOG_SHA256 =
-  "b78e9ba4df6be1457d7c610989fed9b4b3ff19e634d947708b443e360ec9ae11";
+  "738ac1b92a557273ab0c128b286967e54cd993c9e901f93869f7e73581d591fa";
 
 const GPT_56_SLUGS = ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"];
 const GPT_56_UPSTREAM_MULTI_AGENT_VERSIONS = Object.freeze({
@@ -35,11 +35,25 @@ const CUSTOM_PROVIDER_MODEL_VERSIONS = Object.freeze({
   [ASTRA_MODEL_SLUG]: "v2",
   ...GPT_56_UPSTREAM_MULTI_AGENT_VERSIONS,
 });
-const DEEPSEEK_SLUGS = [
-  "deepseek-v4-flash",
-  "deepseek-v4-pro",
-  "deepseek-v4-flash-vision-exp",
-];
+// DeepSeek folded the separate vision variant into deepseek-flash: upstream
+// renamed deepseek-v4-flash and dropped deepseek-v4-flash-vision-exp, and its
+// setup script cleans the old slugs out of existing configs.
+const DEEPSEEK_SLUGS = ["deepseek-flash", "deepseek-v4-pro"];
+const DEEPSEEK_VISION_SLUG = "deepseek-flash";
+// Reviewed upstream capabilities, asserted per model so a later flip is caught
+// instead of being averaged away by a blanket "must be true".
+const DEEPSEEK_EXPECTED_CAPABILITIES = Object.freeze({
+  "deepseek-flash": Object.freeze({
+    supports_search_tool: true,
+    web_search_tool_type: "text",
+    use_responses_lite: false,
+  }),
+  "deepseek-v4-pro": Object.freeze({
+    supports_search_tool: false,
+    web_search_tool_type: "text",
+    use_responses_lite: false,
+  }),
+});
 const OPENAI_CUSTOM_PROVIDER_PATCH = Object.freeze({
   tool_mode: null,
   multi_agent_version: null,
@@ -229,14 +243,16 @@ export function mergeModelCatalogs(openAiCatalog, deepSeekCatalog, astraModel = 
     if (!model) {
       throw new Error(`DeepSeek model catalog is missing required model: ${slug}`);
     }
+    const expected = DEEPSEEK_EXPECTED_CAPABILITIES[slug];
     if (
-      model.supports_search_tool !== true ||
-      model.web_search_tool_type !== "text" ||
-      model.use_responses_lite !== false
+      !expected ||
+      model.supports_search_tool !== expected.supports_search_tool ||
+      model.web_search_tool_type !== expected.web_search_tool_type ||
+      model.use_responses_lite !== expected.use_responses_lite
     ) {
       throw new Error(`${slug} capability fields changed upstream; review before publishing`);
     }
-    if (slug === "deepseek-v4-flash-vision-exp") {
+    if (slug === DEEPSEEK_VISION_SLUG) {
       if (
         !Array.isArray(model.input_modalities) ||
         !model.input_modalities.includes("image") ||
