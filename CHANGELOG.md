@@ -1,5 +1,23 @@
 # Changelog
 
+## 2026-09-12
+
+### 中文
+
+- 重划桌面补丁边界。补丁清单升级为记录，每条带 `kind`（活补丁 / 零改动哨兵）、`tier`（必需 / 陛落）、`assert`（marker / 缺席 / 反向）以及证据和重验条件；补丁器和验证脚本都从这份契约读取，不再各自硬编码。基线为官方 `26.903.8094.0`。
+- 删除对当前 Store bundle 无作用的补丁：`windowsStore-patch` 及其 MSIX updater 打桩（该标志全包仅 1 处引用且在 Sentry 遥测里，注入它本身才是把 autoUpdater 指向未链接 MSIX 绑定的原因，A/B 实测移除后离线直启正常）、`electron-namespace-no-auto-updater`、`fast-mode-selector`、`fast-mode-service-tier-options`、`context-usage-visible`、`node-repl-config-reconcile-finally`、`feature-enablement-preserve-unified-exec`、`computer-use-input-mention`(+v2)、`unified-plugins-page`，并把 `computer-use-plugin-root-fallback` 合并进 `computer-use-resource-runtime-paths`。
+- 每个补丁只保留与当前 Store bundle 匹配的一个形态；未识别的上游改动失败关闭，由重写补丁解决而不是再加变体。所有变体均对原始包实测后再取舍——`automation cwd` 名为 `LEGACY` 的形态才是生效的那个。
+- 补丁器只接受未打补丁的 asar，构建在 staging 前校验源载荷，`import-store-bundle-from-url.ps1` 不再对导入的载荷打补丁（此前源与 stage 会被打两遍，靠补丁器幂等掩盖）。
+- 契约成为单一事实源：`settings-route-map`、`locale-source-default`、`stdio-write-error-guard-v2` 不再绕过契约；`enable_i18n` 补丁此前既无 marker 也无任何断言，现已补齐身份与反向断言。必要性无法确定的 9 个补丁降级为告警并登记重验条件，不再造成硬性构建中断。
+
+### English
+
+- Redrew the desktop patch boundary. The patch list is now a record set: each entry carries `kind` (live patch or zero-change sentinel), `tier` (required or degraded), `assert` (marker, absence, or the upstream bad shape), plus the evidence behind it and what would settle it again. The patcher and the package verifier both read that contract instead of hardcoding their own answers. Established against the official `26.903.8094.0` bundle.
+- Dropped patches that no longer affect the current Store bundle: `windowsStore-patch` and its MSIX updater stub (the flag has a single reference, inside Sentry's `build_type`, and setting it was itself what routed `autoUpdater` to the unlinked MSIX binding; an A/B launch test confirmed the offline package starts without either), `electron-namespace-no-auto-updater`, `fast-mode-selector`, `fast-mode-service-tier-options`, `context-usage-visible`, `node-repl-config-reconcile-finally`, `feature-enablement-preserve-unified-exec`, `computer-use-input-mention` (+v2) and `unified-plugins-page`, and merged `computer-use-plugin-root-fallback` into `computer-use-resource-runtime-paths`.
+- Each patch keeps a single shape matching the current Store bundle; unrecognized upstream changes fail closed and are answered by rewriting the patch rather than adding another variant. Every variant was tested against the pristine bundle before being dropped — for automation cwd normalization the shape named `LEGACY` turned out to be the live one.
+- The patcher accepts only an unpatched asar, the build verifies the source payload before staging, and `import-store-bundle-from-url.ps1` no longer patches what it imports. Previously the source and the staged copy were both patched, which only worked because the patcher was idempotent.
+- The contract is now authoritative: `settings-route-map`, `locale-source-default` and `stdio-write-error-guard-v2` no longer assert themselves outside it, and the `enable_i18n` patch — which had neither a marker nor any assertion — gained both. Nine patches whose necessity could not be established are degraded to warnings that name their re-verification condition instead of failing the build.
+
 ## 2026-09-04
 
 ### 中文
