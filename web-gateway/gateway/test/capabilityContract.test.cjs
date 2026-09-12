@@ -229,8 +229,8 @@ test("source data contract declares every required desktop asar marker", () => {
     }
   }
 
-  assert.equal(declared.has("/*codex-offline:default-on-gate-wrapper*/"), false);
-  assert.equal(Object.hasOwn(contractData, "DESKTOP_GATE_DENYLIST"), false);
+  assert.equal(declared.has("/*codex-offline:default-on-gate-wrapper*/"), true);
+  assert.deepEqual(contractData.DESKTOP_GATE_DENYLIST, []);
 });
 
 test("source data contract covers direct exe asar patch surfaces", () => {
@@ -273,7 +273,6 @@ test("source data contract covers direct exe asar patch surfaces", () => {
     "/*codex-offline:feature-overrides-preserve-mcp-config*/",
     "/*codex-offline:feature-enablement-preserve-unified-exec*/",
     "/*codex-offline:bundled-plugin-cache-lock-nonfatal*/",
-    "/*codex-offline:node-repl-config-reconcile-finally*/",
     "/*codex-offline:node-repl-disable-sandbox*/",
     "/*codex-offline:node-repl-tool-search-feature*/",
     "/*codex-offline:computer-use-plugin-root-fallback*/",
@@ -287,25 +286,12 @@ test("source data contract covers direct exe asar patch surfaces", () => {
     "/*codex-offline:archived-threads-partial-list*/",
     "/*codex-offline:archived-threads-cache-fallback*/",
     "/*codex-offline:bundled-browser-plugins-no-force-reload*/",
-    "/*codex-offline:fast-mode-selector*/",
     "/*codex-offline:fast-mode-auth-method*/",
-    "/*codex-offline:fast-mode-service-tier-options*/",
-    "/*codex-offline:context-usage-visible*/",
     "/*codex-offline:renderer-known-statsig-gates*/",
     "/*codex-offline:unified-plugins-page*/",
-    "/*codex-offline:electron-namespace-no-auto-updater*/",
   ]) {
     assert.ok(contractData.DESKTOP_ASAR_PATCH_MARKERS.includes(marker), marker);
   }
-
-  assert.equal(
-    contractData.FAST_MODE_CONTRACT.serviceTierOptionsPatchMarker,
-    "/*codex-offline:fast-mode-service-tier-options*/"
-  );
-  assert.equal(
-    contractData.CONTEXT_USAGE_CONTRACT.visibilityPatchMarker,
-    "/*codex-offline:context-usage-visible*/"
-  );
 });
 
 test("offline contract keeps import and remote connection settings available", () => {

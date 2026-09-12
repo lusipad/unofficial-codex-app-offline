@@ -25,13 +25,14 @@ function deepSeekModel(slug) {
   const model = {
     slug,
     display_name: slug,
-    supports_search_tool: true,
+    // Upstream turned the search tool off for v4-pro while keeping it on flash.
+    supports_search_tool: slug !== "deepseek-v4-pro",
     web_search_tool_type: "text",
     tool_mode: null,
     multi_agent_version: "v2",
     use_responses_lite: false,
   };
-  if (slug === "deepseek-v4-flash-vision-exp") {
+  if (slug === "deepseek-flash") {
     model.input_modalities = ["text", "image"];
     model.supports_image_detail_original = true;
   }
@@ -61,9 +62,8 @@ function fixtures() {
     astra: astraModel(),
     deepSeek: {
       models: [
-        deepSeekModel("deepseek-v4-flash"),
+        deepSeekModel("deepseek-flash"),
         deepSeekModel("deepseek-v4-pro"),
-        deepSeekModel("deepseek-v4-flash-vision-exp"),
       ],
     },
   };
@@ -103,9 +103,8 @@ test("merges Astra and DeepSeek entries and applies the OpenAI provider workarou
       "gpt-5.6-sol",
       "gpt-5.6-terra",
       "gpt-5.6-luna",
-      "deepseek-v4-flash",
+      "deepseek-flash",
       "deepseek-v4-pro",
-      "deepseek-v4-flash-vision-exp",
     ],
   );
   assert.equal(merged.models[0].display_name, "GPT-6-Astra");
@@ -172,11 +171,36 @@ test("requires an official Astra entry when the versioned catalog does not conta
 test("rejects duplicate DeepSeek slugs already supplied by OpenAI", async () => {
   const { mergeModelCatalogs } = await modulePromise;
   const { openAi, astra, deepSeek } = fixtures();
-  openAi.models.push(deepSeekModel("deepseek-v4-flash"));
+  openAi.models.push(deepSeekModel("deepseek-flash"));
 
   assert.throws(
     () => mergeModelCatalogs(openAi, deepSeek, astra),
     /remove the manual DeepSeek merge/,
+  );
+});
+
+test("rejects deepseek-flash losing the image input it now carries", async () => {
+  const { mergeModelCatalogs } = await modulePromise;
+  const { openAi, astra, deepSeek } = fixtures();
+  const flash = deepSeek.models.find((model) => model.slug === "deepseek-flash");
+  delete flash.input_modalities;
+  delete flash.supports_image_detail_original;
+
+  assert.throws(
+    () => mergeModelCatalogs(openAi, deepSeek, astra),
+    /deepseek-flash image capability fields changed upstream/,
+  );
+});
+
+test("rejects a DeepSeek model whose search support flips unreviewed", async () => {
+  const { mergeModelCatalogs } = await modulePromise;
+  const { openAi, astra, deepSeek } = fixtures();
+  const pro = deepSeek.models.find((model) => model.slug === "deepseek-v4-pro");
+  pro.supports_search_tool = true;
+
+  assert.throws(
+    () => mergeModelCatalogs(openAi, deepSeek, astra),
+    /deepseek-v4-pro capability fields changed upstream/,
   );
 });
 

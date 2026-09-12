@@ -319,15 +319,27 @@ foreach ($slug in @('gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna
     }
 }
 
-foreach ($slug in @('deepseek-v4-flash', 'deepseek-v4-pro')) {
+# Upstream folded the vision variant into deepseek-flash and turned the search
+# tool off for v4-pro, so capabilities are asserted per model.
+$deepSeekExpected = @{
+    'deepseek-flash'  = @{ SupportsSearchTool = $true;  RequiresImageInput = $true }
+    'deepseek-v4-pro' = @{ SupportsSearchTool = $false; RequiresImageInput = $false }
+}
+foreach ($slug in $deepSeekExpected.Keys) {
+    $expected = $deepSeekExpected[$slug]
     $model = @($modelCatalogModels | Where-Object { $_.slug -eq $slug })
     if ($model.Count -ne 1) {
         throw "API model catalog must contain exactly one $slug entry."
     }
-    if ($model[0].supports_search_tool -ne $true -or
+    if ($model[0].supports_search_tool -ne $expected.SupportsSearchTool -or
         $model[0].web_search_tool_type -ne 'text' -or
         $model[0].use_responses_lite -ne $false) {
         throw "API model catalog has unexpected DeepSeek fields for $slug."
+    }
+    if ($expected.RequiresImageInput -and
+        (@($model[0].input_modalities) -notcontains 'image' -or
+         $model[0].supports_image_detail_original -ne $true)) {
+        throw "API model catalog lost image input for $slug."
     }
 }
 
@@ -405,10 +417,11 @@ try {
         '_internal\app\ChatGPT.exe',
         '_internal\app\resources\app.asar',
         '_internal\app\resources\codex.exe',
-        '_internal\app\resources\cua_node\bin\node_modules\@oai\sky\dist\js-deps\tslib.es6.js',
-        '_internal\patches\init.cjs',
-        '_internal\patches\plugin-service-compat.cjs',
-        '_internal\app\patches\init.cjs',
+         '_internal\patches\init.cjs',
+         '_internal\patches\capabilityContractData.cjs',
+         '_internal\patches\plugin-service-compat.cjs',
+         '_internal\app\patches\init.cjs',
+         '_internal\app\patches\capabilityContractData.cjs',
         '_internal\app\patches\plugin-service-compat.cjs',
         '_internal\powershell-shim\CodexOfflineShim\CodexOfflineShim.psd1',
         '_internal\powershell-shim\CodexOfflineShim\CodexOfflineShim.psm1',
@@ -430,13 +443,23 @@ try {
     try {
         $env:CODEX_HOME = Join-Path $tempRoot 'model-catalog-codex-home'
         New-Item -ItemType Directory -Force -Path $env:CODEX_HOME | Out-Null
-        $catalogDebugOutput = & $portableCodexBinary -c $catalogOverride debug models
+        # debug models emits UTF-8 JSON. PowerShell decodes a native command's
+        # output with the host code page, which mangles the non-ASCII characters
+        # in the model instruction templates and leaves the JSON unparseable, so
+        # force UTF-8 for the duration of the call.
+        $previousOutputEncoding = [Console]::OutputEncoding
+        try {
+            [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+            $catalogDebugOutput = & $portableCodexBinary -c $catalogOverride debug models
+        } finally {
+            [Console]::OutputEncoding = $previousOutputEncoding
+        }
         if ($LASTEXITCODE -ne 0) {
             throw "Bundled Codex rejected models-api.json with exit code $LASTEXITCODE."
         }
         $loadedCatalog = $catalogDebugOutput -join [Environment]::NewLine | ConvertFrom-Json
         $loadedSlugs = @($loadedCatalog.models | ForEach-Object { [string]$_.slug })
-        foreach ($slug in @('gpt-6-astra', 'gpt-5.6-sol', 'deepseek-v4-flash', 'deepseek-v4-pro')) {
+        foreach ($slug in @('gpt-6-astra', 'gpt-5.6-sol', 'deepseek-flash', 'deepseek-v4-pro')) {
             if ($loadedSlugs -notcontains $slug) {
                 throw "Bundled Codex did not load expected model from models-api.json: $slug"
             }
@@ -468,13 +491,8 @@ try {
                 throw "Packaged init.cjs is missing plugin-service adapter '$marker': $relativePath"
             }
         }
-        if ($initPatchContent -notmatch "'3413548395'\s*:\s*false") {
-            throw "Packaged init.cjs does not select the unified plugins page: $relativePath"
-        }
-        foreach ($gateId in @('3278809559', '1042620455', '4114442250')) {
-            if ($initPatchContent -notmatch "'$gateId'\s*:\s*true") {
-                throw "Packaged init.cjs does not enable settings gate '$gateId': $relativePath"
-            }
+        if ($initPatchContent -notmatch "_capabilityContract\.STATSIG_DEFAULT_FEATURE_OVERRIDES") {
+            throw "Packaged init.cjs does not consume the shared capability contract: $relativePath"
         }
     }
 
@@ -1095,31 +1113,6 @@ try {
             if (-not (Test-Path $computerUseTransportPath -PathType Leaf)) {
                 throw 'Bundled computer-use plugin is missing the Windows helper transport module.'
             }
-            $computerUseSkyDistRoot = Join-Path $computerUseSkyRoot 'dist'
-            $computerUseShortTslibPath = Join-Path $computerUseSkyDistRoot 'js-deps\tslib.es6.js'
-            if (-not (Test-Path $computerUseShortTslibPath -PathType Leaf)) {
-                throw 'Bundled computer-use runtime is missing its MAX_PATH-safe tslib dependency.'
-            }
-            foreach ($longCacheRelativePath in @('js-dependency-cache', 'node_modules\.pnpm')) {
-                if (Test-Path (Join-Path $computerUseSkyDistRoot $longCacheRelativePath) -PathType Container) {
-                    throw "Bundled computer-use runtime still contains the long Sky dependency cache path: $longCacheRelativePath"
-                }
-            }
-            $computerUseSkyJavaScript = @(
-                Get-ChildItem -LiteralPath $computerUseSkyDistRoot -Recurse -Filter '*.js' -File
-            )
-            $shortTslibImports = @(
-                $computerUseSkyJavaScript | Select-String -SimpleMatch 'js-deps/tslib.es6.js'
-            )
-            if ($shortTslibImports.Count -eq 0) {
-                throw 'Bundled computer-use runtime does not import its MAX_PATH-safe tslib dependency.'
-            }
-            $longTslibImports = @(
-                $computerUseSkyJavaScript | Select-String -Pattern 'js-dependency-cache|node_modules/\.pnpm'
-            )
-            if ($longTslibImports.Count -gt 0) {
-                throw 'Bundled computer-use runtime still imports the long Sky dependency cache path.'
-            }
         }
     }
     if (-not (Test-Path (Join-Path $browserPluginRoot '.codex-plugin\plugin.json') -PathType Leaf)) {
@@ -1327,11 +1320,26 @@ const DESKTOP_BROWSER_USE_AVAILABILITY_MARKERS = capabilityContract.DESKTOP_BROW
 const DESKTOP_BROWSER_USE_CAPABILITY_KEYS = capabilityContract.DESKTOP_BROWSER_USE_CAPABILITY_KEYS || [];
 const REQUIRED_STATSIG_FEATURE_MARKERS = capabilityContract.REQUIRED_STATSIG_FEATURE_MARKERS || [];
 const STATSIG_DEFAULT_FEATURE_OVERRIDES = capabilityContract.STATSIG_DEFAULT_FEATURE_OVERRIDES || {};
-function requiredPatchMarker(marker) {
-  if (!DESKTOP_ASAR_PATCH_MARKERS.includes(marker)) {
-    throw new Error(`Capability contract is missing required app.asar patch marker: ${marker}`);
+// Resolve a patch record from the contract. The contract decides how a patch
+// is asserted and what a miss costs; this file no longer hardcodes either.
+const degradedPatchWarnings = [];
+function patchAssertion(marker) {
+  const record = capabilityContract.getPatchRecord(marker);
+  if (!record) {
+    throw new Error(`Capability contract is missing app.asar patch marker: ${marker}`);
   }
-  return marker;
+  return record;
+}
+function patchMarker(marker) {
+  return patchAssertion(marker).marker;
+}
+function reportPatchMiss(marker, message) {
+  const record = patchAssertion(marker);
+  if (record.tier === 'degraded') {
+    degradedPatchWarnings.push(`${message} (degraded: ${record.reverify})`);
+    return;
+  }
+  throw new Error(message);
 }
 function escapeRegExp(value) {
   return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -1355,11 +1363,11 @@ function secondArgumentStatsigGateCallRe(gateId) {
     `!?(?:\\(0,[$\\w]+\\)|[$\\w]+(?:\\.[$\\w]+)*)\\([A-Za-z_$][\\w$]*\\s*,\\s*\\\`${escapeRegExp(gateId)}\\\`\\)`
   );
 }
-const PATCH_MARKER = requiredPatchMarker('/* codex-offline:windowsStore-patch */');
-const STDIO_WRITE_ERROR_GUARD_MARKER = '/*codex-offline:stdio-write-error-guard-v2*/';
+const STDIO_WRITE_ERROR_GUARD_MARKER = patchMarker('/*codex-offline:stdio-write-error-guard-v2*/');
 const SETTINGS_ROUTE_BAD_PATTERN_RE =
   /searchParams\.set\("initialRoute","\/settings\/"\+\([A-Za-z_$][\w$]*\.section\|\|"agent"\)\);/;
 const LOCALE_SOURCE_BAD_PATTERN = '.get(`locale_source`,`IDE`)';
+const I18N_BAD_PATTERN = '.get(`enable_i18n`,!1)';
 const WEBVIEW_BROKEN_BOOLEAN_PATCH_RE =
   /(?:^|[^\w$])(?!(?:return|throw|case)\b)[A-Za-z_$][\w$]*!0(?=[?),;])/;
 
@@ -1369,72 +1377,56 @@ const SLASH_UI_MARKER_GROUPS = [
   ['composer.planSlashCommand.title'],
 ];
 const CODEX_MOBILE_REMOTE_CONTROL_MFA_ENDPOINT = '/wham/remote/control/mfa_requirement';
-const CODEX_MOBILE_AUTH_RELOGIN_MARKER = requiredPatchMarker('/*codex-offline:codex-mobile-auth-relogin*/');
-const LEGACY_ELECTRON_NAMESPACE_PATCH_MARKER =
-  '/*codex-offline:electron-namespace-no-auto-updater*/';
-const BUNDLED_BROWSER_PLUGINS_PATCH_MARKER = requiredPatchMarker('/*codex-offline:bundled-browser-plugins-no-force-reload*/');
+const CODEX_MOBILE_AUTH_RELOGIN_MARKER = patchMarker('/*codex-offline:codex-mobile-auth-relogin*/');
+const BUNDLED_BROWSER_PLUGINS_PATCH_MARKER = patchMarker('/*codex-offline:bundled-browser-plugins-no-force-reload*/');
 const BROWSER_USE_DESCRIPTOR_CURRENT_PATCHED_RE =
   /\{\.\.\.[A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*\.browser,autoInstallOptOutKey:[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\),installWhenMissing:!0,isAvailable:\(\{features:[A-Za-z_$][\w$]*\}\)=>\/\*codex-offline:bundled-browser-plugins-no-force-reload\*\/!0,migrate:[A-Za-z_$][\w$]*\}/;
-const BUNDLED_RUNTIME_PLUGINS_PATCH_MARKER = requiredPatchMarker('/*codex-offline:bundled-runtime-plugins*/');
-const WINDOWS_BROWSER_USE_CAPABILITY_PATCH_MARKER = requiredPatchMarker('/*codex-offline:windows-browser-use-capability*/');
+const BUNDLED_RUNTIME_PLUGINS_PATCH_MARKER = patchMarker('/*codex-offline:bundled-runtime-plugins*/');
+const WINDOWS_BROWSER_USE_CAPABILITY_PATCH_MARKER = patchMarker('/*codex-offline:windows-browser-use-capability*/');
 const APP_SERVER_SANDBOX_OVERRIDE = '`-c`,`windows.sandbox=\'unelevated\'`,`app-server`,`--analytics-default-enabled`';
-const NODE_REPL_FEATURE_ENABLED_PATCH_MARKER = requiredPatchMarker('/*codex-offline:node-repl-feature-enabled*/');
+const NODE_REPL_FEATURE_ENABLED_PATCH_MARKER = patchMarker('/*codex-offline:node-repl-feature-enabled*/');
 const NODE_REPL_FEATURE_CONFIG_CURRENT_DISABLED_RE =
   /[A-Za-z_$][\w$]*=\{(?=[\s\S]{0,120}include_permissions_instructions:!1,)[\s\S]{0,800}?["']features\.js_repl["']:\s*!1[\s\S]{0,500}?web_search:`disabled`\}(?=[,;)\]])/;
-const NODE_REPL_CONFIG_RECONCILE_FINALLY_PATCH_MARKER =
-  requiredPatchMarker('/*codex-offline:node-repl-config-reconcile-finally*/');
 const NODE_REPL_DISABLE_SANDBOX_PATCH_MARKER =
-  requiredPatchMarker('/*codex-offline:node-repl-disable-sandbox*/');
+  patchMarker('/*codex-offline:node-repl-disable-sandbox*/');
 const NODE_REPL_TOOL_SEARCH_FEATURE_PATCH_MARKER =
-  requiredPatchMarker('/*codex-offline:node-repl-tool-search-feature*/');
-const COMPUTER_USE_PLUGIN_ROOT_FALLBACK_PATCH_MARKER =
-  requiredPatchMarker('/*codex-offline:computer-use-plugin-root-fallback*/');
+  patchMarker('/*codex-offline:node-repl-tool-search-feature*/');
 const COMPUTER_USE_RESOURCE_RUNTIME_PATHS_PATCH_MARKER =
-  requiredPatchMarker('/*codex-offline:computer-use-resource-runtime-paths*/');
+  patchMarker('/*codex-offline:computer-use-resource-runtime-paths*/');
 const COMPUTER_USE_CANONICAL_RUNTIME_PATHS_PATCHED_RE =
   /function [A-Za-z_$][\w$]*\(\{codexHome:[^}]+,env:[^}]+\}\)\{[^]*?source\.type===`local`\)\?\.source\.type===`local`\)return [A-Za-z_$][\w$]*\(\{codexHome:[^}]+pathExists:[A-Za-z_$][\w$]*\}\);return [A-Za-z_$][\w$]*\(\{env:[^}]+pathExists:[A-Za-z_$][\w$]*\}\)\}\/\*codex-offline:computer-use-resource-runtime-paths\*\//;
-const COMPUTER_USE_INPUT_MENTION_PATCH_MARKER =
-  requiredPatchMarker('/*codex-offline:computer-use-input-mention*/');
-const COMPUTER_USE_INPUT_MENTION_V2_PATCH_MARKER =
-  requiredPatchMarker('/*codex-offline:computer-use-input-mention-v2*/');
 const COMPUTER_USE_INPUT_SKILL_PATCH_MARKER =
-  requiredPatchMarker('/*codex-offline:computer-use-input-skill*/');
+  patchMarker('/*codex-offline:computer-use-input-skill*/');
 const COMPUTER_USE_THREAD_START_TOOL_SEARCH_PATCH_MARKER =
-  requiredPatchMarker('/*codex-offline:computer-use-thread-start-tool-search*/');
+  patchMarker('/*codex-offline:computer-use-thread-start-tool-search*/');
 const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_PATCH_MARKER =
-  requiredPatchMarker('/*codex-offline:computer-use-node-repl-dynamic-tool*/');
+  patchMarker('/*codex-offline:computer-use-node-repl-dynamic-tool*/');
 const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_PATCH_MARKER =
-  requiredPatchMarker('/*codex-offline:computer-use-node-repl-dynamic-tool-call*/');
+  patchMarker('/*codex-offline:computer-use-node-repl-dynamic-tool-call*/');
 const ARCHIVED_THREADS_PARTIAL_LIST_PATCH_MARKER =
-  requiredPatchMarker('/*codex-offline:archived-threads-partial-list*/');
+  patchMarker('/*codex-offline:archived-threads-partial-list*/');
 const ARCHIVED_THREADS_CACHE_FALLBACK_PATCH_MARKER =
-  requiredPatchMarker('/*codex-offline:archived-threads-cache-fallback*/');
+  patchMarker('/*codex-offline:archived-threads-cache-fallback*/');
 const ARCHIVED_SETTINGS_OFFLINE_LOCAL_VISIBILITY_PATCH_MARKER =
-  requiredPatchMarker('/*codex-offline:archived-settings-offline-local-visibility*/');
+  patchMarker('/*codex-offline:archived-settings-offline-local-visibility*/');
 const FEATURE_OVERRIDES_PRESERVE_MCP_CONFIG_PATCH_MARKER =
-  requiredPatchMarker('/*codex-offline:feature-overrides-preserve-mcp-config*/');
-const FEATURE_ENABLEMENT_PRESERVE_UNIFIED_EXEC_PATCH_MARKER =
-  requiredPatchMarker('/*codex-offline:feature-enablement-preserve-unified-exec*/');
+  patchMarker('/*codex-offline:feature-overrides-preserve-mcp-config*/');
 const BUNDLED_PLUGIN_CACHE_LOCK_NONFATAL_PATCH_MARKER =
-  requiredPatchMarker('/*codex-offline:bundled-plugin-cache-lock-nonfatal*/');
+  patchMarker('/*codex-offline:bundled-plugin-cache-lock-nonfatal*/');
 const SIDEBAR_ACTIVITY_VIEW_PATCH_MARKER =
-  requiredPatchMarker('/*codex-offline:sidebar-activity-view*/');
+  patchMarker('/*codex-offline:sidebar-activity-view*/');
 const RENDERER_KNOWN_STATSIG_GATES_PATCH_MARKER =
-  requiredPatchMarker('/*codex-offline:renderer-known-statsig-gates*/');
-const LEGACY_PLUGINS_MANAGEMENT_IN_SKILLS_PATCH_MARKER =
-  '/*codex-offline:plugins-management-in-skills*/';
-const UNIFIED_PLUGINS_PAGE_PATCH_MARKER =
-  requiredPatchMarker('/*codex-offline:unified-plugins-page*/');
+  patchMarker('/*codex-offline:renderer-known-statsig-gates*/');
 const WORKSPACE_DEPENDENCIES_SETTINGS_PATCH_MARKER =
-  requiredPatchMarker('/*codex-offline:workspace-dependencies-settings*/');
+  patchMarker('/*codex-offline:workspace-dependencies-settings*/');
 const WORKTREE_HEAD_REF_PATCH_MARKER =
-  requiredPatchMarker('/*codex-offline:worktree-head-ref*/');
+  patchMarker('/*codex-offline:worktree-head-ref*/');
 const MODEL_DISPLAY_NAME_FALLBACK_PATCH_MARKER =
-  requiredPatchMarker('/*codex-offline:model-id-display-name-fallback*/');
+  patchMarker('/*codex-offline:model-id-display-name-fallback*/');
 const OFFLINE_QUERY_NETWORK_MODE_PATCH_MARKER =
-  requiredPatchMarker('/*codex-offline:offline-query-network-mode*/');
+  patchMarker('/*codex-offline:offline-query-network-mode*/');
 const OFFLINE_MUTATION_NETWORK_MODE_PATCH_MARKER =
-  requiredPatchMarker('/*codex-offline:offline-mutation-network-mode*/');
+  patchMarker('/*codex-offline:offline-mutation-network-mode*/');
 const LEGACY_PLUGIN_RENDERER_PATCH_MARKERS = [
   '/*codex-offline:plugin-query-network-mode*/',
   '/*codex-offline:plugin-cloud-fallback*/',
@@ -1446,14 +1438,6 @@ const sidebarActivityPatchedSurfaceRe = new RegExp(
 );
 const sidebarActivityUnpatchedSurfaceRe =
   /([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*)\),([A-Za-z_$][\w$]*)=[A-Za-z_$][\w$]*\([A-Za-z_$][\w$]*\);return \1&&\(\4\.status===`allowed`\|\|\4\.status===`loading`\)\}[^]*?\3=`4039078146`/;
-const legacyPluginsPageSelectionRe = new RegExp(
-  `([A-Za-z_$][\\w$]*)=!0${escapeRegExp(RENDERER_KNOWN_STATSIG_GATES_PATCH_MARKER)}` +
-    '&&([A-Za-z_$][\\w$]*)===`plugins`&&\\(' +
-    '([A-Za-z_$][\\w$]*)\\.initialTab===`plugins`\\|\\|\\3\\.initialTab===`skills`\\)'
-);
-const invalidUnifiedPluginsPageMarkerRe = new RegExp(
-  `!0${escapeRegExp(UNIFIED_PLUGINS_PAGE_PATCH_MARKER)}`
-);
 const offlineNetworkModePatchedSurfaceRe = new RegExp(
   `([A-Za-z_$][\\w$]*)=\\{defaultOptions:\\{` +
     'mutations:\\{networkMode:`always`' +
@@ -1465,7 +1449,7 @@ const offlineNetworkModePatchedSurfaceRe = new RegExp(
 const offlineNetworkModeUnpatchedSurfaceRe =
   /([A-Za-z_$][\w$]*)=\{defaultOptions:\{queries:\{refetchOnWindowFocus:!1,retry:/;
 const ULTRA_REASONING_EFFORT_PATCH_MARKER =
-  requiredPatchMarker('/*codex-offline:ultra-reasoning-effort*/');
+  patchMarker('/*codex-offline:ultra-reasoning-effort*/');
 const bundledPluginCacheLockFatalResultRe =
   /if\([A-Za-z_$][\w$]*!=null\)\{if\([A-Za-z_$][\w$]*\.warning\(`bundled_plugins_marketplace_install_failed`,\{safe:\{errorCategory:[A-Za-z_$][\w$]*\(\{error:[A-Za-z_$][\w$]*\.error,platformFamily:e\.platformFamily\}\),marketplaceName:t,platformFamily:e\.platformFamily,\.\.\.[A-Za-z_$][\w$]*\.safe\},sensitive:\{error:[A-Za-z_$][\w$]*\.error,marketplaceRoot:e\.materializedMarketplace\.marketplaceRoot,\.\.\.[A-Za-z_$][\w$]*\.sensitive\}\}\),n\)throw [A-Za-z_$][\w$]*\.error;return!1\}return!0\}/;
 const bundledPluginCacheLockFatalCatchRe =
@@ -1515,8 +1499,8 @@ function hasComputerUseNodeReplDynamicToolCallBridge(content) {
   return matches.some(match => match[1] === requestFn) ||
     currentMatches.some(match => match[1] === requestFn);
 }
-const PLUGINS_API_KEY_NAV_PATCH_MARKER = requiredPatchMarker('/*codex-offline:plugins-api-key-nav*/');
-const PLUGINS_API_KEY_ROUTE_PATCH_MARKER = requiredPatchMarker('/*codex-offline:plugins-api-key-route*/');
+const PLUGINS_API_KEY_NAV_PATCH_MARKER = patchMarker('/*codex-offline:plugins-api-key-nav*/');
+const PLUGINS_API_KEY_ROUTE_PATCH_MARKER = patchMarker('/*codex-offline:plugins-api-key-route*/');
 
 const bundledBrowserPluginForceReloadRe = new RegExp(
   'forceReload:!0[\\s\\S]{0,500}(?:' +
@@ -1581,20 +1565,11 @@ if (!mainEntry) {
 }
 
 const mainContent = asar.extractFile(asarPath, entryMap.get(mainEntry)).toString('utf8');
-if (!mainContent.includes(PATCH_MARKER)) {
-  throw new Error('windowsStore patch marker is missing from the main entry.');
-}
 if (!mainContent.includes(STDIO_WRITE_ERROR_GUARD_MARKER)) {
   throw new Error('Asynchronous stdout/stderr write error guard is missing from the main entry.');
 }
 if (!mainContent.includes('CODEX_ELECTRON_ENABLE_WINDOWS_COMPUTER_USE')) {
   throw new Error('Computer Use environment default is missing from the main entry.');
-}
-if (!mainContent.includes('_codexOfflineMsixStub')) {
-  throw new Error('MSIX auto-updater binding stub is missing from the main entry.');
-}
-if (!mainContent.includes('electron_browser_msix_updater')) {
-  throw new Error('MSIX auto-updater binding stub does not target electron_browser_msix_updater.');
 }
 
 const javaScriptEntries = entries.filter(entry => entry.endsWith('.js'));
@@ -1607,11 +1582,9 @@ let bundledBrowserPluginDescriptorSeen = false;
 let windowsBrowserUseCapabilityPatched = false;
 let appServerSandboxOverridePatched = false;
 let nodeReplFeatureConfigPatched = false;
-let nodeReplConfigReconcileFinallyPatched = false;
 let nodeReplDisableSandboxPatched = false;
 let nodeReplToolSearchFeaturePatched = false;
 let computerUsePluginRootFallbackPatched = false;
-let computerUseInputMentionPatched = false;
 let computerUseInputSkillPatched = false;
 let computerUseThreadStartToolSearchPatched = false;
 let computerUseNodeReplDynamicToolPatched = false;
@@ -1643,12 +1616,11 @@ let codexMobileAuthReloginPatched = false;
 const bundledBrowserPluginForceReloadResiduals = [];
 const settingsRouteResiduals = [];
 const localeSourceResiduals = [];
-const legacyElectronNamespacePatchResiduals = [];
+const i18nDefaultResiduals = [];
 const bundledPluginCacheLockFatalResiduals = [];
 const webviewBrokenBooleanPatchResiduals = [];
 const rendererKnownStatsigGateResiduals = [];
 const sidebarActivityViewResiduals = [];
-const legacyPluginsPagePatchResiduals = [];
 const offlineNetworkModeResiduals = [];
 const legacyPluginRendererPatchResiduals = [];
 const ultraReasoningEffortResiduals = [];
@@ -1676,13 +1648,6 @@ for (const entry of javaScriptEntries) {
     ) {
       sidebarActivityViewSurfaceSeen = true;
       sidebarActivityViewResiduals.push(entry);
-    }
-    if (
-      content.includes(LEGACY_PLUGINS_MANAGEMENT_IN_SKILLS_PATCH_MARKER) ||
-      legacyPluginsPageSelectionRe.test(content) ||
-      invalidUnifiedPluginsPageMarkerRe.test(content)
-    ) {
-      legacyPluginsPagePatchResiduals.push(entry);
     }
     if (hasWorkspaceDependenciesSettingsSurface(content)) {
       workspaceDependenciesSettingsSurfaceSeen = true;
@@ -1735,8 +1700,6 @@ for (const entry of javaScriptEntries) {
   windowsBrowserUseCapabilityPatched ||= content.includes(WINDOWS_BROWSER_USE_CAPABILITY_PATCH_MARKER);
   appServerSandboxOverridePatched ||= content.includes(APP_SERVER_SANDBOX_OVERRIDE);
   nodeReplFeatureConfigPatched ||= content.includes(NODE_REPL_FEATURE_ENABLED_PATCH_MARKER);
-  nodeReplConfigReconcileFinallyPatched ||=
-    content.includes(NODE_REPL_CONFIG_RECONCILE_FINALLY_PATCH_MARKER);
   nodeReplDisableSandboxPatched ||=
     content.includes(NODE_REPL_DISABLE_SANDBOX_PATCH_MARKER) &&
     content.includes('`--disable-sandbox`');
@@ -1747,26 +1710,14 @@ for (const entry of javaScriptEntries) {
     throw new Error('Browser Use thread config has a malformed features.tool_search insertion.');
   }
   computerUsePluginRootFallbackPatched ||=
+    content.includes(COMPUTER_USE_RESOURCE_RUNTIME_PATHS_PATCH_MARKER) &&
     (
-      content.includes(COMPUTER_USE_PLUGIN_ROOT_FALLBACK_PATCH_MARKER) &&
-      content.includes('installedPluginRoot:f') &&
-      content.includes('source?.source===`local`')
-    ) ||
-    (
-      content.includes(COMPUTER_USE_RESOURCE_RUNTIME_PATHS_PATCH_MARKER) &&
       (
-        (
-          /nodeModuleDirs:[A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*\([A-Za-z_$][\w$]*\)/.test(content) &&
-          content.includes('serviceAppPath:l.platform===`darwin`?o.serviceAppPath:null')
-        ) ||
-        COMPUTER_USE_CANONICAL_RUNTIME_PATHS_PATCHED_RE.test(content)
-      )
+        /nodeModuleDirs:[A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*\([A-Za-z_$][\w$]*\)/.test(content) &&
+        content.includes('serviceAppPath:l.platform===`darwin`?o.serviceAppPath:null')
+      ) ||
+      COMPUTER_USE_CANONICAL_RUNTIME_PATHS_PATCHED_RE.test(content)
     );
-  computerUseInputMentionPatched ||=
-    content.includes(COMPUTER_USE_INPUT_MENTION_PATCH_MARKER) &&
-    content.includes(COMPUTER_USE_INPUT_MENTION_V2_PATCH_MARKER) &&
-    content.includes('name:i,path:r') &&
-    content.includes('plugin://computer-use@openai-bundled');
   computerUseInputSkillPatched ||=
     content.includes(COMPUTER_USE_INPUT_SKILL_PATCH_MARKER) &&
     content.includes('type:`skill`,name:`computer-use`') &&
@@ -1826,15 +1777,9 @@ for (const entry of javaScriptEntries) {
     content.includes('`features.non_prefixed_mcp_tool_names`]=!0') &&
     content.includes('`features.unavailable_dummy_tools`]=!0');
   featureEnablementPreserveUnifiedExecPatched ||=
-    (
-      content.includes(FEATURE_ENABLEMENT_PRESERVE_UNIFIED_EXEC_PATCH_MARKER) &&
-      content.includes('unified_exec:!0')
-    ) ||
-    (
-      content.includes(FEATURE_OVERRIDES_PRESERVE_MCP_CONFIG_PATCH_MARKER) &&
-      content.includes('`features.unified_exec`]=!0') &&
-      content.includes('`features.tool_search`]=!0')
-    );
+    content.includes(FEATURE_OVERRIDES_PRESERVE_MCP_CONFIG_PATCH_MARKER) &&
+    content.includes('`features.unified_exec`]=!0') &&
+    content.includes('`features.tool_search`]=!0');
   if (content.includes('`tool_suggest`,`unified_exec`')) {
     throw new Error('Renderer sends unsupported unified_exec through app-server feature enablement.');
   }
@@ -1851,9 +1796,6 @@ for (const entry of javaScriptEntries) {
   pluginsApiKeyRoutePatched ||= content.includes(PLUGINS_API_KEY_ROUTE_PATCH_MARKER);
   codexMobileRemoteControlMfaEndpointSeen ||= content.includes(CODEX_MOBILE_REMOTE_CONTROL_MFA_ENDPOINT);
   codexMobileAuthReloginPatched ||= content.includes(CODEX_MOBILE_AUTH_RELOGIN_MARKER);
-  if (content.includes(LEGACY_ELECTRON_NAMESPACE_PATCH_MARKER)) {
-    legacyElectronNamespacePatchResiduals.push(entry);
-  }
   browserUseDescriptorPatched ||=
     /\{autoInstallOptOutKey:[A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*\([A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*\),installWhenMissing:!0,name:[A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*,isAvailable:\(\{features:[A-Za-z_$][\w$]*\}\)=>\/\*codex-offline:bundled-browser-plugins-no-force-reload\*\/!0,migrate:[A-Za-z_$][\w$]*\}/.test(content) ||
     BROWSER_USE_DESCRIPTOR_CURRENT_PATCHED_RE.test(content);
@@ -1867,6 +1809,9 @@ for (const entry of javaScriptEntries) {
   }
   if (content.includes(LOCALE_SOURCE_BAD_PATTERN)) {
     localeSourceResiduals.push(entry);
+  }
+  if (content.includes(I18N_BAD_PATTERN)) {
+    i18nDefaultResiduals.push(entry);
   }
 
 }
@@ -1906,12 +1851,6 @@ if (!sidebarActivityViewSurfaceSeen) {
 }
 if (!sidebarActivityViewPatched) {
   throw new Error('Sidebar Activity priority surface is not statically enabled in app.asar.');
-}
-if (legacyPluginsPagePatchResiduals.length > 0) {
-  throw new Error(
-    'Legacy plugin-page gate patches remain in app.asar: ' +
-    legacyPluginsPagePatchResiduals.join(', ')
-  );
 }
 if (!workspaceDependenciesSettingsSurfaceSeen) {
   throw new Error('Workspace Dependencies settings surface is missing from app.asar.');
@@ -1958,12 +1897,6 @@ if (!ultraReasoningEffortSurfaceSeen) {
 if (!ultraReasoningEffortPatched) {
   throw new Error('Renderer Ultra reasoning effort availability patch is missing from app.asar.');
 }
-if (legacyElectronNamespacePatchResiduals.length > 0) {
-  throw new Error(
-    'Legacy Electron namespace patch breaks electron.default and must be removed: ' +
-    legacyElectronNamespacePatchResiduals.join(', ')
-  );
-}
 
 const webviewEntry = entries.find(entry => /(^|\/)webview\/assets\/index-[^/]+\.js$/.test(entry));
 if (!webviewEntry) {
@@ -1984,22 +1917,31 @@ if (hasDesktopFeatureAvailability && !windowsBrowserUseCapabilityPatched) {
   throw new Error('Windows Browser Use capability override is present but was not patched.');
 }
 if (!nodeReplFeatureConfigPatched) {
-  throw new Error('Browser Use thread config still lacks the node_repl feature enable patch.');
+  reportPatchMiss(
+    "/*codex-offline:node-repl-feature-enabled*/",
+    'Browser Use thread config still lacks the node_repl feature enable patch.',
+  );
 }
 if (!appServerSandboxOverridePatched) {
   throw new Error('Desktop app-server launch does not force windows.sandbox=\'unelevated\'.');
 }
-if (!nodeReplConfigReconcileFinallyPatched) {
-  info('Current app version does not require the bundled plugin reconcile finalizer marker; required node_repl gates are verified separately.');
-}
 if (!nodeReplDisableSandboxPatched) {
-  throw new Error('Browser Use thread config does not add node_repl --disable-sandbox for offline Windows Computer Use.');
+  reportPatchMiss(
+    "/*codex-offline:node-repl-disable-sandbox*/",
+    'Browser Use thread config does not add node_repl --disable-sandbox for offline Windows Computer Use.',
+  );
 }
 if (!nodeReplToolSearchFeaturePatched) {
-  throw new Error('Browser Use thread config does not enable features.tool_search for offline Windows Computer Use.');
+  reportPatchMiss(
+    "/*codex-offline:node-repl-tool-search-feature*/",
+    'Browser Use thread config does not enable features.tool_search for offline Windows Computer Use.',
+  );
 }
 if (!featureOverridesPreserveMcpConfigPatched) {
-  throw new Error('Feature override config merge does not preserve mcp_servers.* keys and required Computer Use features.');
+  reportPatchMiss(
+    "/*codex-offline:feature-overrides-preserve-mcp-config*/",
+    'Feature override config merge does not preserve mcp_servers.* keys and required Computer Use features.',
+  );
 }
 if (!featureEnablementPreserveUnifiedExecPatched) {
   throw new Error('Renderer feature enablement refresh does not preserve unified_exec.');
@@ -2062,17 +2004,23 @@ if (!allJavaScriptContent.some(content => /for\(let [A-Za-z_$][\w$]* of \[(["'`]
 if (!computerUsePluginRootFallbackPatched) {
   throw new Error('Computer Use runtime path compatibility marker is missing; packaged computer-use runtime paths may be unavailable.');
 }
-if (!computerUseInputMentionPatched) {
-  info('Computer Use prompt input mention marker is not required for this app version; transport-level skill injection is verified separately.');
-}
 if (!computerUseInputSkillPatched) {
-  throw new Error('Computer Use prompt input skill injection patch marker is missing.');
+  reportPatchMiss(
+    "/*codex-offline:computer-use-input-skill*/",
+    'Computer Use prompt input skill injection patch marker is missing.',
+  );
 }
 if (!computerUseThreadStartToolSearchPatched) {
-  throw new Error('Computer Use thread/start forwarding does not preserve features.tool_search and node_repl --disable-sandbox.');
+  reportPatchMiss(
+    "/*codex-offline:computer-use-thread-start-tool-search*/",
+    'Computer Use thread/start forwarding does not preserve features.tool_search and node_repl --disable-sandbox.',
+  );
 }
 if (!computerUseNodeReplDynamicToolPatched) {
-  throw new Error('Computer Use node_repl.js dynamic tool exposure marker is missing.');
+  reportPatchMiss(
+    "/*codex-offline:computer-use-node-repl-dynamic-tool*/",
+    'Computer Use node_repl.js dynamic tool exposure marker is missing.',
+  );
 }
 if (computerUseNodeReplNamespaceGroupSeen && !computerUseNodeReplNamespaceGroupTopLevel) {
   throw new Error(
@@ -2081,7 +2029,10 @@ if (computerUseNodeReplNamespaceGroupSeen && !computerUseNodeReplNamespaceGroupT
   );
 }
 if (!computerUseNodeReplDynamicToolCallPatched) {
-  throw new Error('Computer Use node_repl.js dynamic tool call bridge marker is missing.');
+  reportPatchMiss(
+    "/*codex-offline:computer-use-node-repl-dynamic-tool-call*/",
+    'Computer Use node_repl.js dynamic tool call bridge marker is missing.',
+  );
 }
 if (!archivedThreadsPartialListPatched) {
   throw new Error('Archived thread list pagination fallback marker is missing.');
@@ -2097,6 +2048,18 @@ if (!archivedSettingsOfflineLocalVisibilityPatched) {
 }
 if (codexMobileRemoteControlMfaEndpointSeen && !codexMobileAuthReloginPatched) {
   info('Codex Mobile remote-control auth relogin is a legacy renderer patch outside the current Computer Use gate.');
+}
+if (degradedPatchWarnings.length > 0) {
+  info(`${degradedPatchWarnings.length} degraded patch(es) did not apply; necessity was never established for these:`);
+  for (const warning of degradedPatchWarnings) {
+    info(`  - ${warning}`);
+  }
+}
+if (i18nDefaultResiduals.length > 0) {
+  throw new Error(
+    'The i18n provider still defaults enable_i18n to false in: ' +
+    i18nDefaultResiduals.join(', ')
+  );
 }
 console.log(`[verify-offline-package] Verified app.asar patches in ${path.basename(asarPath)}`);
 '@

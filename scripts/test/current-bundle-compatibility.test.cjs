@@ -45,6 +45,22 @@ function verifierSourceSlice(startNeedle, endNeedle) {
   return verifierScriptSource.slice(start, end);
 }
 
+test("portable extraction path budget is the guard against deep dependency paths", () => {
+  // The Sky tslib shortening was retired when upstream flattened that layout in
+  // 26.908 and the payload fit the budget without it. This check is what catches
+  // a future bundle that reintroduces deep paths.
+  assert.ok(verifierScriptSource.includes("$portableZipEntryMaxLength = 200"));
+  assert.match(
+    verifierScriptSource,
+    /\$longestPortableZipEntry\.Length -gt \$portableZipEntryMaxLength\)\s*\{\s*throw/,
+    "exceeding the extraction budget must fail the build, not warn",
+  );
+  assert.ok(
+    !buildScriptSource.includes("Shorten-SkyTslibDependencyPath"),
+    "the retired shortening should not linger in the build script",
+  );
+});
+
 test("26.715 settings IPC keeps its native config handler while patching settings routes", () => {
   const needleSource = sourceSlice(
     "  // 26.825: open-config-toml has its own Electron implementation.",
@@ -217,11 +233,11 @@ test("26.814 package verification checks browser service markers when present", 
 
 test("26.814 Computer Use path resolver accepts the canonical bundled runtime", () => {
   const regexSource = sourceSlice(
-    "  const COMPUTER_USE_PLUGIN_ROOT_FALLBACK_CURRENT_RE_V3 =",
+    "  const COMPUTER_USE_RUNTIME_PATHS_CANONICAL_RE =",
     "  const COMPUTER_USE_RESOURCE_RUNTIME_PATHS_CURRENT_RE =",
   );
   const currentResolverRe = Function(
-    `"use strict";\n${regexSource}\nreturn COMPUTER_USE_PLUGIN_ROOT_FALLBACK_CURRENT_RE_V3;`,
+    `"use strict";\n${regexSource}\nreturn COMPUTER_USE_RUNTIME_PATHS_CANONICAL_RE;`,
   )();
   const fixture =
     "function ete({codexHome:e,env:t=process.env,marketplaceName:r=n.js(a.a.resolve())," +
@@ -236,7 +252,7 @@ test("26.814 Computer Use path resolver accepts the canonical bundled runtime", 
 test("26.814 package verification accepts the canonical Computer Use runtime marker", () => {
   const verifierRegexSource = verifierSourceSlice(
     "const COMPUTER_USE_CANONICAL_RUNTIME_PATHS_PATCHED_RE =",
-    "const COMPUTER_USE_INPUT_MENTION_PATCH_MARKER =",
+    "const COMPUTER_USE_INPUT_SKILL_PATCH_MARKER =",
   );
   const currentResolverRe = Function(
     `"use strict";\n${verifierRegexSource}\nreturn COMPUTER_USE_CANONICAL_RUNTIME_PATHS_PATCHED_RE;`,
@@ -321,7 +337,7 @@ test("26.814 browser descriptors patch shared plugin descriptor spreads", () => 
 test("26.814 dynamic tool handler bridges node_repl through the app server", () => {
   const patchSource = sourceSlice(
     "  const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_RE =",
-    "  const ARCHIVED_THREADS_LIST_ALL_DIRECT_RE =",
+    "  const ARCHIVED_THREADS_DATA_CONTROLS_CURRENT_RE =",
   );
   const patchComputerUseNodeReplDynamicToolCall = Function(
     "COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_PATCH_MARKER",
@@ -346,25 +362,6 @@ test("26.814 dynamic tool handler bridges node_repl through the app server", () 
   assert.equal(patched.patched, true);
 });
 
-test("26.818 dynamic tool handler tolerates execution metadata before abort guard", () => {
-  const regexSource = sourceSlice(
-    "  const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_CURRENT_V6_RE =",
-    "  const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_CURRENT_V4_RE =",
-  );
-  const currentRegex = Function(
-    `"use strict";\n${regexSource}\nreturn COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_CURRENT_V6_RE;`,
-  )();
-  const fixture =
-    "async function o6o({scope:e,serverRequest:t,hostId:n,queryClient:r,signal:i,transport:q}){" +
-    "let{id:a,params:o}=t,{threadId:s,tool:c}=o,l={callId:o.callId,isRemoteHost:n!==Yg,tool:c,turnId:o.turnId};" +
-    "if(!s)return Mp.error(`Missing threadId`),!1;" +
-    "if(i?.aborted||jY.dynamicToolCalls!=null&&!await jY.dynamicToolCalls.tryClaimExecution(" +
-    "{callId:o.callId,hostId:n,threadId:s,turnId:o.turnId})||i?.aborted)return!1;";
-  const match = currentRegex.exec(fixture);
-  assert.ok(match);
-  assert.equal(match.groups.hostId, "n");
-  assert.equal(match.groups.params, "o");
-});
 
 test("26.814 package verification accepts the app-server sendRequest bridge", () => {
   const verifierBridgeSource = verifierSourceSlice(
@@ -472,70 +469,6 @@ test("26.810 Chrome ambient network patch avoids minified parameter collisions",
   assert.match(patchedFixture, /function zn\(t\)\{let _codexOfflineAmbientNetworkValue=/);
 });
 
-test("26.810 Chrome ambient network patch repairs cached invalid output", () => {
-  const migrationSource = sourceSlice(
-    "  const staleScopedAmbientNetworkPatchRe =",
-    "\n  if (content.includes(ambientNetworkPatchMarker))",
-  );
-  const migrateAmbientNetwork = Function(
-    "content",
-    "ambientNetworkPatchMarker",
-    "log",
-    `"use strict";\nlet changed = false;\n${migrationSource}\nreturn { content, changed };`,
-  );
-  const fixture =
-    'var fw="BROWSER_USE_DISABLE_AMBIENT_NETWORK";' +
-    'function Ts(e,t){return process.env[t]}' +
-    'function zn(t){let t=Ts(t,fw);return t==="0"||t==="false"?!1:!0}' +
-    "/*codex-offline:browser-use-disable-ambient-network-default*/";
-
-  const result = migrateAmbientNetwork(
-    fixture,
-    "/*codex-offline:browser-use-disable-ambient-network-default*/",
-    () => {},
-  );
-
-  assert.equal(result.changed, true);
-  assert.doesNotThrow(() => Function(result.content));
-  assert.match(result.content, /function zn\(t\)\{let _codexOfflineAmbientNetworkValue=/);
-});
-
-test("P1 release guard rejects Sky tslib cache roots that contain junctions before recursive deletion", () => {
-  const functionStart = buildScriptSource.indexOf("function Shorten-SkyTslibDependencyPath {");
-  const functionEnd = buildScriptSource.indexOf("\n\n$scriptRoot =", functionStart);
-  assert.notEqual(functionStart, -1, "Shorten-SkyTslibDependencyPath is missing");
-  assert.notEqual(functionEnd, -1, "Shorten-SkyTslibDependencyPath terminator is missing");
-
-  const helperSource = buildScriptSource.slice(functionStart, functionEnd);
-  const removeIndex = helperSource.indexOf("Remove-Item -LiteralPath $resolvedCacheRoot -Recurse -Force");
-  assert.notEqual(removeIndex, -1, "Sky tslib cache removal is missing");
-
-  const reparseGuardIndex = helperSource.search(
-    /Get-Item -LiteralPath \$resolvedCacheRoot[\s\S]*?ReparsePoint[\s\S]*?throw/i,
-  );
-  assert.notEqual(
-    reparseGuardIndex,
-    -1,
-    "cache root itself must fail-closed when it is a reparse point",
-  );
-  assert.ok(
-    reparseGuardIndex < removeIndex,
-    "cache root reparse-point guard must run before recursive deletion",
-  );
-
-  const descendantGuardIndex = helperSource.search(
-    /Get-ChildItem -LiteralPath \$resolvedCacheRoot[\s\S]*?-Recurse[\s\S]*?ReparsePoint[\s\S]*?throw/i,
-  );
-  assert.notEqual(
-    descendantGuardIndex,
-    -1,
-    "cache descendants must fail-closed when a nested reparse point is present",
-  );
-  assert.ok(
-    descendantGuardIndex < removeIndex,
-    "descendant reparse-point guard must run before recursive deletion",
-  );
-});
 
 test("26.721 Computer Use accepts resource-based Windows runtime paths", () => {
   const regexSource = sourceSlice(
@@ -559,33 +492,6 @@ test("26.721 Computer Use accepts resource-based Windows runtime paths", () => {
   assert.ok(fixture.includes("serviceAppPath:l.platform===`darwin`?o.serviceAppPath:null"));
 });
 
-test("26.721 dynamic tool bridge accepts the execution claim guard", () => {
-  const regexSource = sourceSlice(
-    "  const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_CURRENT_V4_RE =",
-    "\n  const COMPUTER_USE_NODE_REPL_RESULT_TEXT_CODE =",
-  );
-  const currentRegex = Function(
-    `"use strict";\n${regexSource}\nreturn COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_CURRENT_V4_RE;`,
-  )();
-  const fixture =
-    "async function Hfu({scope:e,serverRequest:t,hostId:n,queryClient:r}){" +
-    "let{id:i,params:a}=t,{threadId:o,tool:s}=a;if(!o){" +
-    "Bf.error(`Missing threadId for dynamic tool call request`,{safe:{},sensitive:{id:i,params:a}});return}" +
-    "if(dp.dynamicToolCalls!=null&&!await dp.dynamicToolCalls.tryClaimExecution(" +
-    "{callId:a.callId,hostId:n,threadId:o,turnId:a.turnId}))return;" +
-    "let c,l=a.namespace===a4,u=a.namespace==null&&epu.has(s)," +
-    "d=l||u?await dHc({argumentsValue:a.arguments}):null," +
-    "f=a.namespace===`plugin_management`?await XLc(a,{hostId:n}):null;" +
-    "if(f!=null)c=f;else if(!l&&!u)c=Gx(`Unsupported dynamic tool namespace: ${a.namespace}`);" +
-    "else if(d!=null)c=d;else";
-  const match = currentRegex.exec(fixture);
-
-  assert.ok(match);
-  assert.equal(match.groups.hostId, "n");
-  assert.equal(match.groups.params, "a");
-  assert.equal(match.groups.result, "c");
-  assert.equal(match.groups.failureFn, "Gx");
-});
 
 test("26.721 scheduled forwarding receives Computer Use thread context", () => {
   const injectionSource = sourceSlice(
@@ -613,12 +519,12 @@ test("26.721 scheduled forwarding receives Computer Use thread context", () => {
 
 test("26.721 automation runtime normalizes cwd before creating legacy targets", () => {
   const regexSource = sourceSlice(
-    "  const AUTOMATION_RUNTIME_LEGACY_TARGET_CWD_RE =",
+    "  const AUTOMATION_RUNTIME_TARGET_CWD_RE =",
     "\n  const AUTOMATION_RUNTIME_CWD_PATCH_MARKER =",
   );
   const patch = Function(
     "AUTOMATION_CWD_NORMALIZER_INLINE",
-    `"use strict";\n${regexSource}\nreturn { re: AUTOMATION_RUNTIME_LEGACY_TARGET_CWD_RE, replacement: AUTOMATION_RUNTIME_LEGACY_TARGET_CWD_REPLACEMENT };`,
+    `"use strict";\n${regexSource}\nreturn { re: AUTOMATION_RUNTIME_TARGET_CWD_RE, replacement: AUTOMATION_RUNTIME_TARGET_CWD_REPLACEMENT };`,
   )("e=>typeof e==`string`?e:e");
   const fixture =
     "if(t.target==null)h=t.cwds.map(e=>({type:`legacy`,cwd:e}));else";
@@ -632,7 +538,7 @@ test("26.721 automation runtime normalizes cwd before creating legacy targets", 
 test("26.721 plugin cache lock failures remain nonfatal in both reconcile branches", () => {
   const constantsSource = sourceSlice(
     "  const BUNDLED_PLUGIN_CACHE_LOCK_NONFATAL_PATCH_MARKER =",
-    "\n  const NODE_REPL_CONFIG_RECONCILE_FINAL_STEP =",
+    "\n  const NODE_REPL_CONFIG_HELPER_RE =",
   );
   const constants = Function(
     "contractPatchMarker",
@@ -704,104 +610,44 @@ test("26.727 browser-use descriptor accepts external browser availability", () =
   assert.match(fixture, currentRegex);
 });
 
-test("26.727 dynamic tools keep node_repl at the top-level namespace boundary", () => {
+
+
+
+test("26.908 dynamic tools keep node_repl at the top-level namespace boundary", () => {
   const regexSource = sourceSlice(
-    "  const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOLS_TOP_LEVEL_CURRENT_RE =",
+    "  const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOLS_TOP_LEVEL_RE =",
     "\n  const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_RE =",
   );
   const currentRegex = Function(
-    `"use strict";\n${regexSource}\nreturn COMPUTER_USE_NODE_REPL_DYNAMIC_TOOLS_TOP_LEVEL_CURRENT_RE;`,
+    `"use strict";\n${regexSource}\nreturn COMPUTER_USE_NODE_REPL_DYNAMIC_TOOLS_TOP_LEVEL_RE;`,
   )();
   const replacementSource = sourceSlice(
-    "  function computerUseNodeReplDynamicToolsTopLevelCurrentReplacement(",
+    "  function computerUseNodeReplDynamicToolsTopLevelReplacement(",
     "\n  function patchComputerUseNodeReplDynamicTools(",
   );
   const replacement = Function(
     "COMPUTER_USE_NODE_REPL_NAMESPACE_GROUP_SPEC",
     "COMPUTER_USE_NODE_REPL_NAMESPACE_TOOL_SPEC",
     "COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_PATCH_MARKER",
-    `"use strict";\n${replacementSource}\nreturn computerUseNodeReplDynamicToolsTopLevelCurrentReplacement;`,
+    `"use strict";\n${replacementSource}\nreturn computerUseNodeReplDynamicToolsTopLevelReplacement;`,
   )(
-    "{type:`namespace`,name:`node_repl`,description:`Node REPL tools for Computer Use.`,tools:[{type:`function`,name:`js`}]}",
-    "{type:`function`,name:`js`}",
+    "{type:\`namespace\`,name:\`node_repl\`,description:\`Node REPL tools for Computer Use.\`,tools:[{type:\`function\`,name:\`js\`}]}",
+    "{type:\`function\`,name:\`js\`}",
     "/*codex-offline:computer-use-node-repl-dynamic-tool*/",
   );
+  // 26.908 builds the function tools from a destructured `tools` parameter, so
+  // the collection is a binding rather than an inline array literal, and the
+  // app-namespace description comes from a shared binding.
   const fixture =
-    "const tools=[...C];" +
-    "].map(e=>({type:`function`,...e,...x&&!jtl.has(e.name)?{deferLoading:!0}:{}}));" +
-    "return x?[{type:`namespace`,name:L2,description:`Tools provided by the Codex app.`,tools:A},...D]:A";
-
-  const patched = fixture.replace(currentRegex, replacement);
-  assert.ok(patched.includes("/*codex-offline:computer-use-node-repl-dynamic-tool*/"));
-  assert.match(patched, /\.\.\.D,\{type:`namespace`,name:`node_repl`/);
-  assert.match(patched, /:A\.concat\(\[\{type:`function`,name:`js`/);
-});
-
-test("26.810 dynamic tools keep node_repl at the top-level namespace boundary with guarded deferLoading", () => {
-  const regexSource = sourceSlice(
-    "  const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOLS_TOP_LEVEL_CURRENT_RE =",
-    "\n  const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_RE =",
-  );
-  const currentRegex = Function(
-    `"use strict";\n${regexSource}\nreturn COMPUTER_USE_NODE_REPL_DYNAMIC_TOOLS_TOP_LEVEL_CURRENT_RE;`,
-  )();
-  const replacementSource = sourceSlice(
-    "  function computerUseNodeReplDynamicToolsTopLevelCurrentReplacement(",
-    "\n  function patchComputerUseNodeReplDynamicTools(",
-  );
-  const replacement = Function(
-    "COMPUTER_USE_NODE_REPL_NAMESPACE_GROUP_SPEC",
-    "COMPUTER_USE_NODE_REPL_NAMESPACE_TOOL_SPEC",
-    "COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_PATCH_MARKER",
-    `"use strict";\n${replacementSource}\nreturn computerUseNodeReplDynamicToolsTopLevelCurrentReplacement;`,
-  )(
-    "{type:`namespace`,name:`node_repl`,description:`Node REPL tools for Computer Use.`,tools:[{type:`function`,name:`js`}]}",
-    "{type:`function`,name:`js`}",
-    "/*codex-offline:computer-use-node-repl-dynamic-tool*/",
-  );
-  const fixture =
-    "].map(e=>({type:`function`,...e,...E&&(!zzl.has(e.name)||o&&Azl.includes(e.name))?{deferLoading:!0}:{}}));" +
-    "return E?[{type:`namespace`,name:Rzl,description:`Tools provided by the Codex app.`,tools:I},...M]:I";
+    "e.map(e=>({type:\`function\`,...e,...r&&(!t.has(e.name)||n.includes(e.name))?{deferLoading:!0}:{}}));" +
+    "return r?[{type:\`namespace\`,name:A5n,description:bre,tools:a},...i]:a";
 
   const patched = fixture.replace(currentRegex, replacement);
   assert.notEqual(patched, fixture);
   assert.ok(patched.includes("/*codex-offline:computer-use-node-repl-dynamic-tool*/"));
-  assert.match(patched, /\.\.\.M,\{type:`namespace`,name:`node_repl`/);
-  assert.match(patched, /:I\.concat\(\[\{type:`function`,name:`js`/);
-});
-
-test("26.820 dynamic tools accept a shared description binding", () => {
-  const regexSource = sourceSlice(
-    "  const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOLS_TOP_LEVEL_CURRENT_RE =",
-    "\n  const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_RE =",
-  );
-  const currentRegex = Function(
-    `"use strict";\n${regexSource}\nreturn COMPUTER_USE_NODE_REPL_DYNAMIC_TOOLS_TOP_LEVEL_CURRENT_RE;`,
-  )();
-  const replacementSource = sourceSlice(
-    "  function computerUseNodeReplDynamicToolsTopLevelCurrentReplacement(",
-    "\n  function patchComputerUseNodeReplDynamicTools(",
-  );
-  const replacement = Function(
-    "COMPUTER_USE_NODE_REPL_NAMESPACE_GROUP_SPEC",
-    "COMPUTER_USE_NODE_REPL_NAMESPACE_TOOL_SPEC",
-    "COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_PATCH_MARKER",
-    `"use strict";\n${replacementSource}\nreturn computerUseNodeReplDynamicToolsTopLevelCurrentReplacement;`,
-  )(
-    "{type:`namespace`,name:`node_repl`,description:`Node REPL tools for Computer Use.`,tools:[{type:`function`,name:`js`}]}",
-    "{type:`function`,name:`js`}",
-    "/*codex-offline:computer-use-node-repl-dynamic-tool*/",
-  );
-  const fixture =
-    "].map(e=>({type:`function`,...e,...O&&(!Urs.has(e.name)||o&&Ves.includes(e.name))?{deferLoading:!0}:{}}));" +
-    "return O?[{type:`namespace`,name:Hrs,description:uwe,tools:B},...I]:B";
-
-  const patched = fixture.replace(currentRegex, replacement);
-  assert.notEqual(patched, fixture);
-  assert.ok(patched.includes("/*codex-offline:computer-use-node-repl-dynamic-tool*/"));
-  assert.match(patched, /description:uwe,tools:B/);
-  assert.match(patched, /\.\.\.I,\{type:`namespace`,name:`node_repl`/);
-  assert.match(patched, /:B\.concat\(\[\{type:`function`,name:`js`/);
+  assert.match(patched, /description:bre,tools:a/);
+  assert.match(patched, /\.\.\.i,\{type:`namespace`,name:`node_repl`/);
+  assert.match(patched, /:a\.concat\(\[\{type:`function`,name:`js`/);
 });
 
 test("26.825 worktree resolver rejects the retired pre-HEAD shape", () => {
@@ -833,7 +679,7 @@ test("26.825 worktree resolver rejects the retired pre-HEAD shape", () => {
     "capabilityContractData.cjs",
   ));
   assert.ok(contract.DESKTOP_ASAR_PATCH_MARKERS.includes(marker));
-  assert.ok(verifierScriptSource.includes(`requiredPatchMarker('${marker}')`));
+  assert.ok(verifierScriptSource.includes(`patchMarker('${marker}')`));
 });
 
 test("26.825 worktree resolver keeps the upstream HEAD fast-path explicit", () => {
@@ -876,7 +722,7 @@ test("26.825 worktree resolver keeps the upstream HEAD fast-path explicit", () =
 test("26.825 node_repl config enables quoted features.js_repl without touching js_repl_tools_only", () => {
   const nodeReplFeatureConfigSource = sourceSlice(
     "  const NODE_REPL_FEATURE_CONFIG_CURRENT_RE =",
-    "  const NODE_REPL_CONFIG_RECONCILE_FINALLY_PATCH_MARKER =",
+    "  const NODE_REPL_DISABLE_SANDBOX_PATCH_MARKER =",
   );
   const [currentRe, currentPatchedRe] = Function(
     `"use strict";\n${nodeReplFeatureConfigSource}\nreturn [NODE_REPL_FEATURE_CONFIG_CURRENT_RE, NODE_REPL_FEATURE_CONFIG_CURRENT_PATCHED_RE];`,
@@ -1015,7 +861,7 @@ test("rg_adguard app-source cache requires the current resolver target", {
 test("26.825 verifier rejects a disabled quoted shared node_repl config", () => {
   const verifierBlock = verifierSourceSlice(
     "const NODE_REPL_FEATURE_CONFIG_CURRENT_DISABLED_RE =",
-    "const NODE_REPL_CONFIG_RECONCILE_FINALLY_PATCH_MARKER =",
+    "const NODE_REPL_DISABLE_SANDBOX_PATCH_MARKER =",
   );
   const currentDisabledRe = Function(
     `"use strict";\n${verifierBlock}\nreturn NODE_REPL_FEATURE_CONFIG_CURRENT_DISABLED_RE;`,
@@ -1032,7 +878,7 @@ test("26.825 verifier rejects a disabled quoted shared node_repl config", () => 
 test("26.727 archived settings keeps local errors separate from cloud task errors", () => {
   const patchSource = sourceSlice(
     "  function patchArchivedSettingsOfflineVisibility(content) {",
-    "\n  const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_LEGACY_RE =",
+    "\n  const BUNDLED_BROWSER_PLUGINS_PATCH_MARKER =",
   );
   const patchArchivedSettingsOfflineVisibility = Function(
     "ARCHIVED_SETTINGS_OFFLINE_LOCAL_VISIBILITY_PATCH_MARKER",
@@ -1054,7 +900,7 @@ test("26.727 archived settings keeps local errors separate from cloud task error
 test("26.810 archived settings ignores both cloud archive errors offline", () => {
   const patchSource = sourceSlice(
     "  function patchArchivedSettingsOfflineVisibility(content) {",
-    "\n  const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_LEGACY_RE =",
+    "\n  const BUNDLED_BROWSER_PLUGINS_PATCH_MARKER =",
   );
   const patchArchivedSettingsOfflineVisibility = Function(
     "ARCHIVED_SETTINGS_OFFLINE_LOCAL_VISIBILITY_PATCH_MARKER",
@@ -1126,47 +972,11 @@ test("26.727 verifier recognizes the current agent settings surface", () => {
   assert.equal(hasWorkspaceDependenciesSettingsSurface("other surface"), false);
 });
 
-test("26.810 dynamic tool bridge accepts ownership guards before execution claim", () => {
-  const regexSource = sourceSlice(
-    "  const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_CURRENT_V4_RE =",
-    "\n  const COMPUTER_USE_NODE_REPL_RESULT_TEXT_CODE =",
-  );
-  const currentRegex = Function(
-    `"use strict";\n${regexSource}\nreturn COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_CURRENT_V4_RE;`,
-  )();
-  const fixture =
-    "async function Hfu({scope:e,serverRequest:t,hostId:n,queryClient:r}){" +
-    "let{id:i,params:a}=t,{threadId:o,tool:s}=a;if(!o){" +
-    "Bf.error(`Missing threadId for dynamic tool call request`,{safe:{},sensitive:{id:i,params:a}});return}" +
-    "let c=Ql(o),l=new K9r(e).getForHostId(n),u=l?.getConversation(c)," +
-    "d=Hv(u,a.turnId),f=d?.items.find(e=>e.type===`userMessage`);" +
-    "if(f?.clientId!=null&&f.clientId!==d?.params.clientUserMessageId)return;" +
-    "if(f?.clientId==null&&f?.content?.some(e=>e.type===`text`&&e.text.startsWith(`<realtime_delegation>`))){" +
-    "let t=e.get(HE);if(t.locator?.hostId!==n||t.locator.conversationId!==c)return}" +
-    "if(l?.getStreamRole?.(c)==null&&n===`local`&&_m.clientCoordination!=null)try{" +
-    "if(await _m.clientCoordination.findThreadOwner({hostId:n,conversationId:c})!=null)return}" +
-    "catch(e){qp.warning(`dynamic_tool_call_owner_discovery_failed`,{safe:{threadId:o,hostId:n},sensitive:{error:e}})}" +
-    "if(_m.dynamicToolCalls!=null&&!await _m.dynamicToolCalls.tryClaimExecution(" +
-    "{callId:a.callId,hostId:n,threadId:o,turnId:a.turnId}))return;" +
-    "let p,m=a.namespace===Rzl,h=a.namespace==null&&KBl.has(s)," +
-    "g=m||h?await dHc({argumentsValue:a.arguments}):null," +
-    "_=a.namespace===`plugin_management`||a.namespace===`openai_settings`?await XLc(a,{hostId:n}):null;" +
-    "if(_!=null)p=_;else if(!m&&!h)p=fC(`Unsupported dynamic tool namespace: ${a.namespace}`);" +
-    "else if(g!=null)p=g;else";
-  const match = currentRegex.exec(fixture);
-
-  assert.ok(match);
-  assert.equal(match.groups.hostId, "n");
-  assert.equal(match.groups.params, "a");
-  assert.equal(match.groups.result, "p");
-  assert.equal(match.groups.failureFn, "fC");
-  assert.ok(match.groups.prefix.includes("dynamic_tool_call_owner_discovery_failed"));
-});
 
 test("26.730 node_repl config keeps env_vars when adding the sandbox bypass", () => {
   const helperSource = sourceSlice(
     "  const NODE_REPL_CONFIG_HELPER_RE =",
-    "\n  const COMPUTER_USE_PLUGIN_ROOT_FALLBACK_NEEDLE =",
+    "\n  const COMPUTER_USE_RUNTIME_PATHS_CANONICAL_RE =",
   );
   const [configHelperRe, replacement] = Function(
     "NODE_REPL_TOOL_SEARCH_FEATURE_PATCH_MARKER",
@@ -1247,29 +1057,7 @@ test("26.730 packaging repairs the encoded Statsig global module filenames", () 
   assert.ok(verifierScriptSource.includes("'%24_StatsigGlobal.*'"));
 });
 
-test("26.803 packaging shortens the Sky tslib dependency cache path", () => {
-  assert.ok(buildScriptSource.includes("function Shorten-SkyTslibDependencyPath"));
-  assert.ok(buildScriptSource.includes("'js-deps/tslib.es6.js'"));
-  assert.ok(buildScriptSource.includes("'js-dependency-cache'"));
-  assert.ok(
-    buildScriptSource.includes(
-      "Shorten-SkyTslibDependencyPath -CuaNodeRoot (Join-Path $internalRoot 'app/resources/cua_node')",
-    ),
-  );
-  assert.ok(
-    verifierScriptSource.includes(
-      "'_internal\\app\\resources\\cua_node\\bin\\node_modules\\@oai\\sky\\dist\\js-deps\\tslib.es6.js'",
-    ),
-  );
-});
 
-test("26.810 packaging shortens the Sky pnpm tslib dependency path", () => {
-  assert.ok(buildScriptSource.includes("'node_modules/.pnpm'"));
-  assert.ok(
-    buildScriptSource.includes("(?:js-dependency-cache|node_modules/\\.pnpm)"),
-  );
-  assert.ok(verifierScriptSource.includes("'node_modules\\.pnpm'"));
-});
 
 test("portable ZIP keeps entries relative to the package root", () => {
   assert.match(

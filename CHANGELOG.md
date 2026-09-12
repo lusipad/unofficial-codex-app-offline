@@ -1,5 +1,29 @@
 # Changelog
 
+## 2026-09-12
+
+### 中文
+
+- 跟进 Codex `26.908.4834.0` 的两处上游结构变化：渲染层动态工具列表改为从解构的 `tools` 参数构建（集合从数组字面量变成绑定）、应用命名空间描述被抽到共享绑定，补丁已针对新形态重写；同时上游把 Sky 的 tslib 依赖布局改浅，原先为规避 Windows 路径长度而做的缩短步骤不再有对应形态，予以退休——便携包 200 字符的解压路径预算检查仍然失败关闭，继续兜住未来重新变深的布局。
+- 跟进 DeepSeek 官方 Codex 目录的改名与合并：`deepseek-v4-flash` 改名为 `deepseek-flash` 并且**自带图像输入**，独立的 `deepseek-v4-flash-vision-exp` 被上游移除。图像能力校验随之移到 `deepseek-flash`，不再允许它悄悄退化成纯文本模型。上游同时关闭了 `deepseek-v4-pro` 的搜索工具支持，因此能力校验从"所有型号必须一致"改为**按型号声明预期**，这样单个型号再变仍会被拦下。`config.toml` 里写着旧 `deepseek-v4-flash` 的需要改成 `deepseek-flash`。
+- 修复包验证在中文等非 UTF-8 代码页的 Windows 上失败的问题：`codex debug models` 输出的是 UTF-8 JSON，而 PowerShell 用主机代码页解码原生命令输出，会打散模型指令模板里的非 ASCII 字符并使 JSON 无法解析。验证期间强制按 UTF-8 解码。
+- 重划桌面补丁边界。补丁清单升级为记录，每条带 `kind`（活补丁 / 零改动哨兵）、`tier`（必需 / 陛落）、`assert`（marker / 缺席 / 反向）以及证据和重验条件；补丁器和验证脚本都从这份契约读取，不再各自硬编码。基线为官方 `26.903.8094.0`。
+- 删除对当前 Store bundle 无作用的补丁：`windowsStore-patch` 及其 MSIX updater 打桩（该标志全包仅 1 处引用且在 Sentry 遥测里，注入它本身才是把 autoUpdater 指向未链接 MSIX 绑定的原因，A/B 实测移除后离线直启正常）、`electron-namespace-no-auto-updater`、`fast-mode-selector`、`fast-mode-service-tier-options`、`context-usage-visible`、`node-repl-config-reconcile-finally`、`feature-enablement-preserve-unified-exec`、`computer-use-input-mention`(+v2)、`unified-plugins-page`，并把 `computer-use-plugin-root-fallback` 合并进 `computer-use-resource-runtime-paths`。
+- 每个补丁只保留与当前 Store bundle 匹配的一个形态；未识别的上游改动失败关闭，由重写补丁解决而不是再加变体。所有变体均对原始包实测后再取舍——`automation cwd` 名为 `LEGACY` 的形态才是生效的那个。
+- 补丁器只接受未打补丁的 asar，构建在 staging 前校验源载荷，`import-store-bundle-from-url.ps1` 不再对导入的载荷打补丁（此前源与 stage 会被打两遍，靠补丁器幂等掩盖）。
+- 契约成为单一事实源：`settings-route-map`、`locale-source-default`、`stdio-write-error-guard-v2` 不再绕过契约；`enable_i18n` 补丁此前既无 marker 也无任何断言，现已补齐身份与反向断言。必要性无法确定的 9 个补丁降级为告警并登记重验条件，不再造成硬性构建中断。
+
+### English
+
+- Followed two upstream restructurings in Codex `26.908.4834.0`: the renderer dynamic tools list now builds from a destructured `tools` parameter, so the collection is a binding rather than an inline array literal, and the app-namespace description moved into a shared binding — the patch is rewritten against that shape. Upstream also flattened the Sky tslib dependency layout, so the path-shortening step that existed to keep Windows paths short no longer has a shape to act on and is retired; the portable zip's 200-character extraction budget still fails closed and remains the guard against a future deep layout.
+- Followed DeepSeek's rename and consolidation of its official Codex catalog: `deepseek-v4-flash` is now `deepseek-flash` and **carries image input itself**, and the separate `deepseek-v4-flash-vision-exp` entry is gone upstream. The image capability check moved onto `deepseek-flash` so it cannot quietly regress to a text-only model. Upstream also turned the search tool off for `deepseek-v4-pro`, so capabilities are now asserted per model rather than requiring one answer from all of them — a later flip on a single model is still caught. Configs still naming `deepseek-v4-flash` need updating to `deepseek-flash`.
+- Fixed package verification failing on Windows hosts whose code page is not UTF-8 (for example Chinese locales). `codex debug models` emits UTF-8 JSON, but PowerShell decodes a native command's output with the host code page, which mangles the non-ASCII characters in the model instruction templates and leaves the JSON unparseable. Verification now forces UTF-8 for that call.
+- Redrew the desktop patch boundary. The patch list is now a record set: each entry carries `kind` (live patch or zero-change sentinel), `tier` (required or degraded), `assert` (marker, absence, or the upstream bad shape), plus the evidence behind it and what would settle it again. The patcher and the package verifier both read that contract instead of hardcoding their own answers. Established against the official `26.903.8094.0` bundle.
+- Dropped patches that no longer affect the current Store bundle: `windowsStore-patch` and its MSIX updater stub (the flag has a single reference, inside Sentry's `build_type`, and setting it was itself what routed `autoUpdater` to the unlinked MSIX binding; an A/B launch test confirmed the offline package starts without either), `electron-namespace-no-auto-updater`, `fast-mode-selector`, `fast-mode-service-tier-options`, `context-usage-visible`, `node-repl-config-reconcile-finally`, `feature-enablement-preserve-unified-exec`, `computer-use-input-mention` (+v2) and `unified-plugins-page`, and merged `computer-use-plugin-root-fallback` into `computer-use-resource-runtime-paths`.
+- Each patch keeps a single shape matching the current Store bundle; unrecognized upstream changes fail closed and are answered by rewriting the patch rather than adding another variant. Every variant was tested against the pristine bundle before being dropped — for automation cwd normalization the shape named `LEGACY` turned out to be the live one.
+- The patcher accepts only an unpatched asar, the build verifies the source payload before staging, and `import-store-bundle-from-url.ps1` no longer patches what it imports. Previously the source and the staged copy were both patched, which only worked because the patcher was idempotent.
+- The contract is now authoritative: `settings-route-map`, `locale-source-default` and `stdio-write-error-guard-v2` no longer assert themselves outside it, and the `enable_i18n` patch — which had neither a marker nor any assertion — gained both. Nine patches whose necessity could not be established are degraded to warnings that name their re-verification condition instead of failing the build.
+
 ## 2026-09-04
 
 ### 中文
@@ -247,3 +271,4 @@
 - `pwsh -NoProfile -File ./scripts/build-offline-package.ps1 -SkipInstaller -MetadataOutputPath ./build/tmp/web-refactor-build-metadata.json`
 - `pwsh -NoProfile -File ./scripts/verify-offline-package.ps1 -BuildMetadataPath ./build/tmp/web-refactor-build-metadata.json`
 - Browser smoke on `http://127.0.0.1:3744`
+- Desktop feature gates now use the shared capability contract from both the Gateway and `init.cjs`. A central renderer Statsig seam enables unknown gates by default while preserving explicit false decisions; the existing known-gate patch remains as a fallback when the upstream seam drifts.

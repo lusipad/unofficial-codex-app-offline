@@ -58,10 +58,12 @@ GPT-6-Astra 和 GPT-5.6 官方条目原本已经声明 `supports_search_tool = t
 
 ## DeepSeek 配置示例
 
-截至本文更新时，DeepSeek 官方 Codex 指南只确认 `deepseek-v4-flash` 可用。目录也保留官方提供的 `deepseek-v4-pro` 条目，但在官方确认支持前请使用 Flash。
+截至本文更新时，DeepSeek 官方 Codex 指南确认可用的是 `deepseek-flash`。它由原来的 `deepseek-v4-flash` 改名而来，并且**现在自带图像输入**——独立的 `deepseek-v4-flash-vision-exp` 已被上游合并进来并移除。目录也保留官方提供的 `deepseek-v4-pro` 条目，但上游已关闭它的搜索工具支持（`supports_search_tool: false`），在官方确认支持前请使用 Flash。
+
+如果你的 `config.toml` 里还写着旧的 `deepseek-v4-flash`，需要改成 `deepseek-flash`；DeepSeek 官方安装脚本也会清理这些旧名称。
 
 ```toml
-model = "deepseek-v4-flash"
+model = "deepseek-flash"
 model_provider = "deepseek"
 preferred_auth_method = "apikey"
 forced_login_method = "api"

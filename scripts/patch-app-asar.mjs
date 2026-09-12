@@ -3,20 +3,23 @@
  * patch-app-asar.mjs
  *
  * Patches app/resources/app.asar after it has been extracted from the MSIX so
- * that features which are gated on "running as a Windows Store app" continue to
- * work when Codex is launched as a standalone exe.
+ * that Codex keeps working when it is launched as a standalone exe.
  *
  * Patches applied:
  *
- * 1. process.windowsStore = true
- *    Electron exposes this flag only inside MSIX containers.  Codex checks it
- *    for telemetry and build-type reporting.  We inject it at the top of the
- *    main-process entry point.  The same bootstrap patch also defaults the
- *    Windows Computer Use process environment gate so direct ChatGPT.exe
- *    launches get the same runtime features as the provided launchers, and
- *    stubs the electron_browser_msix_updater native binding so that reading
- *    electron.autoUpdater (which windowsStore=true routes to the MSIX updater)
- *    does not abort standalone startup with "No such binding was linked".
+ * 1. Main-entry bootstrap
+ *    Prepends three fragments to the main-process entry point: the Windows
+ *    Computer Use process environment default (so a direct ChatGPT.exe launch
+ *    gets the same runtime features as the provided launchers), a stdout/stderr
+ *    guard for closed pipes, and the require() that loads init.cjs for
+ *    IPC-level Statsig gate interception.
+ *
+ *    This used to also set process.windowsStore = true and stub the
+ *    electron_browser_msix_updater binding.  Against 26.903.8094.0 the flag has
+ *    a single reference, inside Sentry's build_type field, and setting it is
+ *    what routed electron.autoUpdater to the unlinked MSIX binding in the first
+ *    place; an A/B launch test showed the offline package starts fine without
+ *    either.  Both were removed.
  *
  * 2. Implement "show-settings" and "open-config-toml" IPC handlers
  *    The Electron build throws "not implemented" for these messages.  We
@@ -118,9 +121,13 @@
  *     compiled tokens, which churn on every upstream build. This is the single
  *     most effective way to reduce per-release patch breakage.
  *   - When a needle is unavoidable, anchor on stable text (API names, error
- *     strings, gate IDs) rather than minified variable names. Keep only the
- *     variants used by the current Store payload; release builds regenerate
- *     from that payload instead of carrying historical bundle shapes.
+ *     strings, gate IDs) rather than minified variable names.
+ *   - Single shape. Keep only the shape used by the current Store payload. When
+ *     an upstream bundle changes, the patch fails closed and is rewritten
+ *     against the new shape — never extended with an additional variant. Each
+ *     extra variant is one more chance to match the wrong site silently, and
+ *     the names rot: against 26.903.8094.0 the constants called CURRENT were
+ *     dead while the ones called LEGACY were live.
  *   - Every required patch needs a matching assertion in
  *     verify-offline-package.ps1 (marker or behaviour) so a silent miss in this
  *     script is still caught downstream.
@@ -153,8 +160,8 @@ const {
   DESKTOP_ASAR_PATCH_MARKERS,
   DESKTOP_ASAR_KNOWN_GATE_IDS,
   DESKTOP_BROWSER_USE_CAPABILITY_KEYS,
-  CONTEXT_USAGE_CONTRACT,
   FAST_MODE_CONTRACT,
+  DESKTOP_GATE_DENYLIST,
 } = require('../web-gateway/gateway/src/ipc/codex/capabilityContractData.cjs');
 const {
   computeAsarHeaderHash,
@@ -277,39 +284,10 @@ function resolveMainEntry(extractDir) {
   return candidates.find(fs.existsSync) ?? null;
 }
 
-const PATCH_MARKER = '/* codex-offline:windowsStore-patch */';
-const LEGACY_ELECTRON_NAMESPACE_PATCH_MARKER =
-  '/*codex-offline:electron-namespace-no-auto-updater*/';
 const COMPUTER_USE_ENV_DEFAULT =
   'if(process.env.CODEX_ELECTRON_ENABLE_WINDOWS_COMPUTER_USE==null){' +
     'process.env.CODEX_ELECTRON_ENABLE_WINDOWS_COMPUTER_USE="1"' +
   '}\n';
-// Neutralize the MSIX auto-updater native binding for portable launches.
-// process.windowsStore=true makes Electron route electron.autoUpdater through
-// the MSIX updater (lib/browser/api/auto-updater/auto-updater-msix.ts), whose
-// module load calls process._linkedBinding("electron_browser_msix_updater").
-// That binding is only linked inside a real MSIX container, so a standalone
-// ChatGPT.exe aborts at bootstrap with "No such binding was linked". Newer builds
-// (>= 26.609) read electron.autoUpdater during startup via a __toESM namespace
-// copy that the Sentry-breadcrumb needle patch does not cover, so we stub the
-// binding itself: any electron_browser_msix_updater lookup returns a chainable
-// no-op so the updater module loads (and stays inert) instead of crashing.
-const MSIX_UPDATER_BINDING_STUB =
-  '(function(){try{' +
-    'if(process._codexOfflineMsixStub)return;' +
-    'process._codexOfflineMsixStub=true;' +
-    'var _lb=process._linkedBinding;' +
-    'if(typeof _lb!=="function")return;' +
-    'var _stub=new Proxy(function(){return _stub},{' +
-      'get:function(_t,_p){return _p==="then"?undefined:_stub},' +
-      'apply:function(){return _stub},' +
-      'construct:function(){return _stub}' +
-    '});' +
-    'process._linkedBinding=function(_n){' +
-      'if(_n==="electron_browser_msix_updater")return _stub;' +
-      'return _lb.apply(this,arguments)' +
-    '}' +
-  '}catch(_e){}})();\n';
 // Suppress closed-pipe errors on stdout/stderr that surface as uncaught
 // exceptions when the Electron app writes to a console pipe that has
 // already been closed (e.g. the CMD window that launched Codex exits
@@ -317,15 +295,6 @@ const MSIX_UPDATER_BINDING_STUB =
 // these either synchronously from write() or asynchronously via "error".
 const STDIO_WRITE_ERROR_GUARD_MARKER =
   '/*codex-offline:stdio-write-error-guard-v2*/';
-const LEGACY_EPIPE_GUARD =
-  'function _epipeGuard(s){' +
-    'var ow=s.write;' +
-    's.write=function(){' +
-      'try{return ow.apply(s,arguments)}' +
-      'catch(e){if(e.code!=="EPIPE")throw e}' +
-    '}' +
-  '}' +
-  '_epipeGuard(process.stdout);_epipeGuard(process.stderr);\n';
 const EPIPE_GUARD =
   STDIO_WRITE_ERROR_GUARD_MARKER +
   'function _epipeGuard(s){' +
@@ -354,68 +323,29 @@ const PATCH_BOOTSTRAP_REQUIRE =
     '}' +
   '}catch(_codexOfflineE){}' +
   '\n';
-const PATCH_SNIPPET = `${PATCH_MARKER}\nif(!process.windowsStore){process.windowsStore=true;}\n${MSIX_UPDATER_BINDING_STUB}${COMPUTER_USE_ENV_DEFAULT}${EPIPE_GUARD}${PATCH_BOOTSTRAP_REQUIRE}`;
+const PATCH_SNIPPET = `${COMPUTER_USE_ENV_DEFAULT}${EPIPE_GUARD}${PATCH_BOOTSTRAP_REQUIRE}`;
 
-/** Return true if the file already contains our patch marker. */
-function isAlreadyPatched(filePath) {
-  const content = fs.readFileSync(filePath, 'utf8');
-  return content.includes(PATCH_MARKER);
+/**
+ * Refuse to run against an asar that this script has patched before.
+ *
+ * Every patch keeps exactly one shape and has no re-patch path, so a second
+ * pass would either double-apply a prepended snippet or silently skip work.
+ * Failing here turns a confusing downstream symptom into a named cause.
+ */
+function assertPristineAsar(asarPath) {
+  const contents = fs.readFileSync(asarPath);
+  if (contents.includes('codex-offline:', 0, 'utf8')) {
+    throw new Error(
+      `${asarPath} already contains codex-offline patch markers. This patcher ` +
+      'only accepts an unpatched Store payload; re-extract the source bundle.',
+    );
+  }
 }
 
 /** Prepend the patch snippet to a JS file. */
 function patchFile(filePath) {
   const original = fs.readFileSync(filePath, 'utf8');
   fs.writeFileSync(filePath, PATCH_SNIPPET + original, 'utf8');
-}
-
-function refreshMainEntryPatch(filePath) {
-  let content = fs.readFileSync(filePath, 'utf8');
-  let changed = false;
-
-  // Add Computer Use env default if missing from a prior build.
-  if (!content.includes('CODEX_ELECTRON_ENABLE_WINDOWS_COMPUTER_USE')) {
-    const windowsStoreLine = 'if(!process.windowsStore){process.windowsStore=true;}\n';
-    if (content.includes(windowsStoreLine)) {
-      content = content.replace(windowsStoreLine, windowsStoreLine + COMPUTER_USE_ENV_DEFAULT);
-    } else {
-      content = content.replace(PATCH_MARKER, `${PATCH_MARKER}\n${COMPUTER_USE_ENV_DEFAULT}`);
-    }
-    changed = true;
-  }
-
-  // Add the MSIX auto-updater binding stub if missing from a prior build.
-  // Required for >= 26.609 portable startup (see MSIX_UPDATER_BINDING_STUB).
-  if (!content.includes('_codexOfflineMsixStub')) {
-    const windowsStoreLine = 'if(!process.windowsStore){process.windowsStore=true;}\n';
-    if (content.includes(windowsStoreLine)) {
-      content = content.replace(windowsStoreLine, windowsStoreLine + MSIX_UPDATER_BINDING_STUB);
-    } else {
-      content = content.replace(PATCH_MARKER, `${PATCH_MARKER}\n${MSIX_UPDATER_BINDING_STUB}`);
-    }
-    changed = true;
-  }
-
-  // Upgrade the synchronous-only stdout/stderr guard used by prior builds.
-  if (!content.includes(STDIO_WRITE_ERROR_GUARD_MARKER)) {
-    if (content.includes(LEGACY_EPIPE_GUARD)) {
-      content = content.replace(LEGACY_EPIPE_GUARD, EPIPE_GUARD);
-    } else {
-      content = content.replace(PATCH_MARKER, `${PATCH_MARKER}\n${EPIPE_GUARD}`);
-    }
-    changed = true;
-  }
-
-  // Add init.cjs require() for IPC-level Statsig gate interception.
-  if (!content.includes('_codexOfflineD')) {
-    const epipeEnd = '_epipeGuard(process.stdout);_epipeGuard(process.stderr);';
-    content = content.replace(epipeEnd, epipeEnd + '\n' + PATCH_BOOTSTRAP_REQUIRE);
-    changed = true;
-  }
-
-  if (changed) {
-    fs.writeFileSync(filePath, content, 'utf8');
-  }
-  return changed;
 }
 
 function patchWorktreeHeadRefResolver(content, patchMarker) {
@@ -786,6 +716,19 @@ function patchDirectStatsigGateCalls(content, gateIds, patchMarker) {
   return { content: next, count };
 }
 
+function patchDefaultOnStatsigCheckGate(content, patchMarker, denylist, overrides) {
+  if (content.includes(patchMarker)) return { content, seen: true, patched: false, alreadyCorrect: true };
+  const anchor = /checkGate\(([A-Za-z_$][\w$]*),([A-Za-z_$][\w$]*)\)\{return this\.getFeatureGate\(\1,\2\)\.value\}/;
+  const match = anchor.exec(content);
+  if (!match) return { content, seen: false, patched: false, alreadyCorrect: false };
+  const explicitFalse = Object.entries(overrides || {})
+    .filter(([, value]) => value === false)
+    .map(([key]) => String(key));
+  const denied = JSON.stringify([...new Set([...explicitFalse, ...Array.from(denylist || []).map(String)])]);
+  const replacement = `checkGate(${match[1]},${match[2]}){return ${denied}.includes(String(${match[1]}))?this.getFeatureGate(${match[1]},${match[2]}).value:!0${patchMarker}}`;
+  return { content: content.replace(anchor, replacement), seen: true, patched: true, alreadyCorrect: false };
+}
+
 function patchOfflineNetworkModeDefaults(
   content,
   queryPatchMarker,
@@ -892,46 +835,6 @@ function patchSidebarActivitySurface(content) {
     patched,
     sidebarSurfaceSeen,
     sidebarCorrect: sidebarPatchedSurfaceRe.test(next),
-  };
-}
-
-function migrateLegacyPluginsPageSelection(content) {
-  let next = content;
-  let migratedCount = 0;
-  const legacyPageSelectionSource =
-    `([A-Za-z_$][\\w$]*)=!0${escapeRegExp(RENDERER_KNOWN_STATSIG_GATES_PATCH_MARKER)}` +
-    '&&([A-Za-z_$][\\w$]*)===`plugins`&&\\(' +
-    '([A-Za-z_$][\\w$]*)\\.initialTab===`plugins`\\|\\|\\3\\.initialTab===`skills`\\)';
-  const legacyPageSelectionRe = new RegExp(legacyPageSelectionSource, 'g');
-  const legacyPrefetchRe = new RegExp(
-    `([A-Za-z_$][\\w$]*)&&!0${escapeRegExp(LEGACY_PLUGINS_MANAGEMENT_IN_SKILLS_PATCH_MARKER)}` +
-      '&&Promise\\.all\\(\\[',
-    'g',
-  );
-
-  next = next.replace(
-    legacyPageSelectionRe,
-    (_match, selected, browseTab, initialState) => {
-      migratedCount += 1;
-      return (
-        `${selected}=!1${UNIFIED_PLUGINS_PAGE_PATCH_MARKER}&&` +
-        `${browseTab}===\`plugins\`&&(${initialState}.initialTab===\`plugins\`||` +
-        `${initialState}.initialTab===\`skills\`)`
-      );
-    },
-  );
-  next = next.replace(legacyPrefetchRe, (_match, enabled) => {
-    migratedCount += 1;
-    return `${enabled}&&!1${UNIFIED_PLUGINS_PAGE_PATCH_MARKER}&&Promise.all([`;
-  });
-
-  return {
-    content: next,
-    migratedCount,
-    legacyMarkerResidual: next.includes(
-      LEGACY_PLUGINS_MANAGEMENT_IN_SKILLS_PATCH_MARKER,
-    ),
-    legacySelectionResidual: new RegExp(legacyPageSelectionSource).test(next),
   };
 }
 
@@ -1083,10 +986,6 @@ const SIDEBAR_ACTIVITY_VIEW_PATCH_MARKER =
   contractPatchMarker('/*codex-offline:sidebar-activity-view*/');
 const RENDERER_KNOWN_STATSIG_GATES_PATCH_MARKER =
   contractPatchMarker('/*codex-offline:renderer-known-statsig-gates*/');
-const LEGACY_PLUGINS_MANAGEMENT_IN_SKILLS_PATCH_MARKER =
-  '/*codex-offline:plugins-management-in-skills*/';
-const UNIFIED_PLUGINS_PAGE_PATCH_MARKER =
-  contractPatchMarker('/*codex-offline:unified-plugins-page*/');
 const OFFLINE_QUERY_NETWORK_MODE_PATCH_MARKER =
   contractPatchMarker('/*codex-offline:offline-query-network-mode*/');
 const OFFLINE_MUTATION_NETWORK_MODE_PATCH_MARKER =
@@ -1287,9 +1186,7 @@ function patchChromeBrowserClient(filePath) {
     nativePipeHelpersWithoutTimeout,
     'Removed stale Chrome browser client native pipe timeout helpers.',
   );
-  if (content.includes(nativePipeDirectPatchMarker)) {
-    log('Chrome browser client native pipe direct path already patched.');
-  } else if (content.includes(nativePipeFallbackPatchMarker)) {
+  if (content.includes(nativePipeFallbackPatchMarker)) {
     const fallbackFirstCreateNeedles = [
       'static async create(e){let r=Wf();if(r!=null)try{let n=await _codexOfflineBridgeCreateConnection(r,e);return new t(n)}catch(n){if(!_codexOfflineShouldUseNativePipeFallback(e))throw n}if(_codexOfflineShouldUseNativePipeFallback(e)){let n=await _codexOfflineCreateNativePipeConnection(e);return new t(n)}throw new Error(Vf())}',
       'static async create(e){if(_codexOfflineShouldUseNativePipeFallback(e)){let r=await _codexOfflineCreateNativePipeConnection(e);return new t(r)}let r=Wf();if(r!=null){let n=await _codexOfflineBridgeCreateConnection(r,e);return new t(n)}throw new Error(Vf())}',
@@ -1401,9 +1298,7 @@ function patchChromeBrowserClient(filePath) {
 
   const diagnosticsPatchMarker =
     '/*codex-offline:browser-use-discovery-diagnostics*/';
-  if (content.includes(diagnosticsPatchMarker)) {
-    log('Chrome browser client discovery diagnostics already patched.');
-  } else {
+  {
     const legacyDiagnosticsNeedle =
       'let e=t,r=new Ac,n=p=>new Rc(p,r,Gr),{browsers:o,diagnostics:i}=await US(n),s=await HO(o),a=s.map(p=>new Tc(p.api,p.id,p.info));';
     const legacyDiagnosticsReplacement =
@@ -1465,9 +1360,7 @@ function patchChromeBrowserClient(filePath) {
 
   const chromePipeFilterPatchMarker =
     '/*codex-offline:browser-use-chrome-pipe-filter*/';
-  if (content.includes(chromePipeFilterPatchMarker)) {
-    log('Chrome browser client Windows Chrome pipe filter already patched.');
-  } else {
+  {
     const legacyPipeListMatch = content.match(
       /([A-Za-z_$][\w$]*)=async\(\)=>\{let ([A-Za-z_$][\w$]*)="\\\\\\\\\.\\\\pipe\\\\";return\(await ([A-Za-z_$][\w$]*)\(\2\)\)\.map\(([A-Za-z_$][\w$]*)=>([A-Za-z_$][\w$]*)\.resolve\(\2,\4\)\)\.filter\(([A-Za-z_$][\w$]*)=>\6\.startsWith\(([A-Za-z_$][\w$]*)\)\)\}/,
     );
@@ -1529,9 +1422,7 @@ function patchChromeBrowserClient(filePath) {
 
   const directSetupPatchMarker =
     '/*codex-offline:browser-use-direct-setup*/';
-  if (content.includes(directSetupPatchMarker)) {
-    log('Chrome browser client direct Windows pipe setup already patched.');
-  } else {
+  {
     const shouldUseFallbackMatch = content.match(
       /function _codexOfflineShouldUseNativePipeFallback\(([A-Za-z_$][\w$]*)\)\{return ([A-Za-z_$][\w$]*)\(\)==="win32"&&typeof \1=="string"&&\1\.startsWith\(([^{}]+)\)\}/,
     );
@@ -1605,20 +1496,7 @@ function patchChromeBrowserClient(filePath) {
 
   const ambientNetworkPatchMarker =
     '/*codex-offline:browser-use-disable-ambient-network-default*/';
-  const staleScopedAmbientNetworkPatchRe =
-    /function ([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*)\)\{let \2=([A-Za-z_$][\w$]*)\(\2,([A-Za-z_$][\w$]*)\);return \2==="0"\|\|\2==="false"\?!1:!0\}\/\*codex-offline:browser-use-disable-ambient-network-default\*\//;
-  if (staleScopedAmbientNetworkPatchRe.test(content)) {
-    content = content.replace(
-      staleScopedAmbientNetworkPatchRe,
-      (_match, functionName, parameterName, rawReader, ambientEnvVar) =>
-        `function ${functionName}(${parameterName}){let _codexOfflineAmbientNetworkValue=${rawReader}(${parameterName},${ambientEnvVar});return _codexOfflineAmbientNetworkValue==="0"||_codexOfflineAmbientNetworkValue==="false"?!1:!0}${ambientNetworkPatchMarker}`,
-    );
-    changed = true;
-    log('Repaired cached Chrome browser client ambient network patch.');
-  }
-  if (content.includes(ambientNetworkPatchMarker)) {
-    log('Chrome browser client ambient network default already patched.');
-  } else {
+  {
     const requestMetaAmbientNetworkMatch = content.match(
       /function ([A-Za-z_$][\w$]*)\(\)\{return globalThis\.nodeRepl\?\.requestMeta\?\.\[([A-Za-z_$][\w$]*)\]===!0\}/,
     );
@@ -1706,10 +1584,6 @@ function patchChromeNativeHostCheck(filePath) {
 
   let content = fs.readFileSync(filePath, 'utf8');
   const patchMarker = '/*codex-offline:localized-registry-default*/';
-  if (content.includes(patchMarker)) {
-    log('Chrome native host registry parser already patched.');
-    return;
-  }
 
   const needle = 'return readRegistryValue(output, "(Default)");';
   const replacement =
@@ -1773,10 +1647,6 @@ function patchChromeSkillInstructions(chromePluginRoot) {
 
   let content = fs.readFileSync(filePath, 'utf8');
   const patchMarker = '<!-- codex-offline:trusted-marketplace-browser-client -->';
-  if (content.includes(patchMarker)) {
-    log('Chrome skill trusted marketplace bootstrap already patched.');
-    return;
-  }
 
   const needle =
     /The `browser-client` module is the core entry point for browser use, and is available under `scripts\/browser-client\.mjs` in this plugin's root directory\. ALWAYS import it using an absolute path\.\s+IMPORTANT: If this path cannot be found, stop and report that this plugin is missing `scripts\/browser-client\.mjs`\. NEVER use the built in `browser-client` library\./;
@@ -1932,6 +1802,7 @@ if (!fs.existsSync(asarPath)) {
 }
 
 log(`Patching: ${asarPath}`);
+assertPristineAsar(asarPath);
 
 // Extract to a temp directory.
 const tmpDir = path.join(os.tmpdir(), `codex-asar-patch-${crypto.randomBytes(6).toString('hex')}`);
@@ -1949,11 +1820,10 @@ try {
 
   // Find main entry point.
   //
-  // The main-process entry carries the load-bearing bootstrap patches
-  // (process.windowsStore, the MSIX updater binding stub, the Computer Use
-  // env default and the init.cjs require). Without them a standalone
-  // ChatGPT.exe crashes at startup, so a missing entry must fail the build
-  // instead of silently shipping a broken package.
+  // The main-process entry carries the bootstrap fragments (the Computer Use
+  // env default, the stdio guard and the init.cjs require). Without the
+  // init.cjs require the package ships with every renderer gate closed, so a
+  // missing entry must fail the build instead of shipping silently.
   const mainEntry = resolveMainEntry(tmpDir);
   if (!mainEntry) {
     throw new Error(
@@ -1964,16 +1834,8 @@ try {
 
   log(`Main entry: ${path.relative(tmpDir, mainEntry)}`);
 
-  if (isAlreadyPatched(mainEntry)) {
-    if (refreshMainEntryPatch(mainEntry)) {
-      log(`Main entry patch refreshed for direct ${MAIN_EXECUTABLE_NAME} Computer Use launch.`);
-    } else {
-      log('Main entry already patched.');
-    }
-  } else {
-    patchFile(mainEntry);
-    log('windowsStore patch applied.');
-  }
+  patchFile(mainEntry);
+  log('Main entry bootstrap applied.');
 
   const chromeBrowserClientHash = patchChromePluginScripts(path.resolve(appDir));
 
@@ -2031,13 +1893,9 @@ try {
     'throw Error(`"${t.type}" is not implemented in Electron.`)';
   const AUTOMATION_CWD_NORMALIZER_INLINE =
     'e=>typeof e==`string`&&e.startsWith(`\\\\\\\\?\\\\`)&&/^[A-Za-z]:/.test(e.slice(4))?e.slice(4):e';
-  const AUTOMATION_RUNTIME_CWD_RE =
-    /let (\w+)=(\w+)\.cwds;if\(\1\.length===0\)/;
-  const AUTOMATION_RUNTIME_CWD_REPLACEMENT =
-    `let $1=$2.cwds.map(${AUTOMATION_CWD_NORMALIZER_INLINE});if($1.length===0)`;
-  const AUTOMATION_RUNTIME_LEGACY_TARGET_CWD_RE =
+  const AUTOMATION_RUNTIME_TARGET_CWD_RE =
     /if\(([A-Za-z_$][\w$]*)\.target==null\)([A-Za-z_$][\w$]*)=\1\.cwds\.map\(([A-Za-z_$][\w$]*)=>\(\{type:`legacy`,cwd:\3\}\)\)/;
-  const AUTOMATION_RUNTIME_LEGACY_TARGET_CWD_REPLACEMENT =
+  const AUTOMATION_RUNTIME_TARGET_CWD_REPLACEMENT =
     `if($1.target==null)$2=$1.cwds.map(${AUTOMATION_CWD_NORMALIZER_INLINE}).map($3=>({type:\`legacy\`,cwd:$3}))`;
   const AUTOMATION_RUNTIME_CWD_PATCH_MARKER =
     `.cwds.map(${AUTOMATION_CWD_NORMALIZER_INLINE})`;
@@ -2053,14 +1911,10 @@ try {
   ];
   const WINDOWS_BROWSER_USE_CAPABILITY_PATCH_MARKER =
     contractPatchMarker('/*codex-offline:windows-browser-use-capability*/');
-  const WINDOWS_BROWSER_USE_CAPABILITY_LEGACY_RE =
-    /function\s+([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*),\{env:([A-Za-z_$][\w$]*)=process\.env,platform:([A-Za-z_$][\w$]*)=process\.platform\}=\{\}\)\{return\s+\4!==`win32`\|\|\3\.CODEX_ELECTRON_ENABLE_WINDOWS_COMPUTER_USE!==`1`\?\2:\{\.\.\.\2,computerUse:!0,computerUseNodeRepl:!0\}\}/;
-  const WINDOWS_BROWSER_USE_CAPABILITY_CURRENT_RE =
-    /function\s+([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*),\{((?:buildFlavor:[A-Za-z_$][\w$]*=[^,}]+,)?env:([A-Za-z_$][\w$]*)=[^,}]+,platform:([A-Za-z_$][\w$]*)=[^,}]+)\}=\{\}\)\{let ([A-Za-z_$][\w$]*)=\5===`win32`&&\4\.CODEX_ELECTRON_ENABLE_WINDOWS_COMPUTER_USE===`1`\?\{\.\.\.\2,computerUse:!0,computerUseNodeRepl:!0\}:\2,/;
   // v26.608+ introduced a multi-step let chain: darwin/win32-cu checks precede the CODEX env check.
   // The CODEX_ELECTRON_ENABLE_WINDOWS_COMPUTER_USE assignment is no longer the first let; it is
   // preceded by a comma rather than being immediately after the opening brace.
-  const WINDOWS_BROWSER_USE_CAPABILITY_V3_RE =
+  const WINDOWS_BROWSER_USE_CAPABILITY_CANONICAL_RE =
     /,([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)===`win32`&&([A-Za-z_$][\w$]*)\.CODEX_ELECTRON_ENABLE_WINDOWS_COMPUTER_USE===`1`\?\{\.\.\.([A-Za-z_$][\w$]*),computerUse:!0,computerUseNodeRepl:!0\}:\4(?=,)/;
   const NODE_REPL_FEATURE_ENABLED_PATCH_MARKER =
     contractPatchMarker('/*codex-offline:node-repl-feature-enabled*/');
@@ -2068,14 +1922,10 @@ try {
     /([A-Za-z_$][\w$]*=\{(?=[\s\S]{0,120}include_permissions_instructions:!1,)[\s\S]{0,800}?["']features\.js_repl["']:\s*)(!0|!1)(?:\/\*codex-offline:node-repl-feature-enabled\*\/)?([\s\S]{0,500}?web_search:`disabled`\})(?=[,;)\]])/;
   const NODE_REPL_FEATURE_CONFIG_CURRENT_PATCHED_RE =
     /[A-Za-z_$][\w$]*=\{(?=[\s\S]{0,120}include_permissions_instructions:!1,)[\s\S]{0,800}?["']features\.js_repl["']:\s*!0\/\*codex-offline:node-repl-feature-enabled\*\/[\s\S]{0,500}?web_search:`disabled`\}(?=[,;)\]])/;
-  const NODE_REPL_CONFIG_RECONCILE_FINALLY_PATCH_MARKER =
-    contractPatchMarker('/*codex-offline:node-repl-config-reconcile-finally*/');
   const NODE_REPL_DISABLE_SANDBOX_PATCH_MARKER =
     contractPatchMarker('/*codex-offline:node-repl-disable-sandbox*/');
   const NODE_REPL_TOOL_SEARCH_FEATURE_PATCH_MARKER =
     contractPatchMarker('/*codex-offline:node-repl-tool-search-feature*/');
-  const COMPUTER_USE_PLUGIN_ROOT_FALLBACK_PATCH_MARKER =
-    contractPatchMarker('/*codex-offline:computer-use-plugin-root-fallback*/');
   const COMPUTER_USE_RESOURCE_RUNTIME_PATHS_PATCH_MARKER =
     contractPatchMarker('/*codex-offline:computer-use-resource-runtime-paths*/');
   const COMPUTER_USE_FORWARD_THREAD_START_DIAGNOSTICS_PATCH_MARKER =
@@ -2092,10 +1942,6 @@ try {
     '/*codex-offline:computer-use-mcp-status-diagnostics*/';
   const COMPUTER_USE_THREAD_START_TOOL_SEARCH_PATCH_MARKER =
     contractPatchMarker('/*codex-offline:computer-use-thread-start-tool-search*/');
-  const COMPUTER_USE_INPUT_MENTION_PATCH_MARKER =
-    contractPatchMarker('/*codex-offline:computer-use-input-mention*/');
-  const COMPUTER_USE_INPUT_MENTION_V2_PATCH_MARKER =
-    contractPatchMarker('/*codex-offline:computer-use-input-mention-v2*/');
   const COMPUTER_USE_INPUT_SKILL_PATCH_MARKER =
     contractPatchMarker('/*codex-offline:computer-use-input-skill*/');
   const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_PATCH_MARKER =
@@ -2108,45 +1954,6 @@ try {
     contractPatchMarker('/*codex-offline:archived-threads-cache-fallback*/');
   const ARCHIVED_SETTINGS_OFFLINE_LOCAL_VISIBILITY_PATCH_MARKER =
     contractPatchMarker('/*codex-offline:archived-settings-offline-local-visibility*/');
-  const COMPUTER_USE_INPUT_MENTION_HELPER =
-    'function _codexOfflineComputerUseMentionItems(e){let t=typeof e==`string`?e.trimStart():``;' +
-    'let n=t.match(/\\[(@?(?:[^\\]]+))\\]\\((plugin:\\/\\/computer-use(?:@[^)]+)?)\\)/),' +
-    'r=n?.[2]??`plugin://computer-use@openai-bundled`,i=typeof n?.[1]==`string`?' +
-    'n[1].replace(/^@/,``).trim():``;' +
-    'i.length===0&&(i=/^(?:@?\\u7535\\u8111)(?=\\s|$)/.test(t)?`\\u7535\\u8111`:`Computer`);' +
-    'r.includes(`@`)||(r=`plugin://computer-use@openai-bundled`);' +
-    'return(t.includes(`plugin://computer-use`)||/^(?:@?(?:\\u7535\\u8111|Computer(?: Use)?))(?=\\s|$)/i.test(t))?' +
-    '[{type:`mention`,name:i,path:r}]:[]}' +
-    COMPUTER_USE_INPUT_MENTION_PATCH_MARKER +
-    COMPUTER_USE_INPUT_MENTION_V2_PATCH_MARKER;
-  const COMPUTER_USE_INPUT_MENTION_HELPER_RE =
-    /function _codexOfflineComputerUseMentionItems\(e\)\{[\s\S]*?\}\/\*codex-offline:computer-use-input-mention\*\/(?:\/\*codex-offline:computer-use-input-mention-v2\*\/)?/;
-  const COMPUTER_USE_INPUT_MENTION_HELPER_NEEDLE =
-    'async function $g({context:e,prompt:t,workspaceRoots:n,cwd:r,hostId:i,agentMode:a,serviceTier:o,collaborationMode:s,memoryPreferences:c,workspaceKind:l=`project`,projectlessOutputDirectory:u,projectAssignment:d})';
-  const COMPUTER_USE_INPUT_MENTION_PATCHES = [
-    {
-      needle:
-        'input:[{type:`text`,text:t,text_elements:[]},...Qg(e,i!==He,{shouldRestrictRemoteHostImageSize:!1})]',
-      replacement:
-        'input:[{type:`text`,text:t,text_elements:[]},..._codexOfflineComputerUseMentionItems(t),...Qg(e,i!==He,{shouldRestrictRemoteHostImageSize:!1})]',
-    },
-    {
-      needle:
-        'p=[{type:`text`,text:v(i),text_elements:[]},...Qg(i,d,{shouldRestrictRemoteHostImageSize:!1})]',
-      replacement:
-        'p=[{type:`text`,text:v(i),text_elements:[]},..._codexOfflineComputerUseMentionItems(v(i)),...Qg(i,d,{shouldRestrictRemoteHostImageSize:!1})]',
-    },
-    {
-      needle:
-        'f=[{type:`text`,text:v(u),text_elements:[]},...Qg(u,c,{shouldRestrictRemoteHostImageSize:!1})]',
-      replacement:
-        'f=[{type:`text`,text:v(u),text_elements:[]},..._codexOfflineComputerUseMentionItems(v(u)),...Qg(u,c,{shouldRestrictRemoteHostImageSize:!1})]',
-    },
-  ];
-  const COMPUTER_USE_INPUT_MENTION_CURRENT_RE =
-    /(\[\{type:`text`,text:([^,\]]+?),text_elements:\[\]\},)\.\.\.([A-Za-z_$][\w$]*)\(([^)]*?\{shouldRestrictRemoteHostImageSize:!1\})\)\]/g;
-  const COMPUTER_USE_INPUT_MENTION_CURRENT_TEST_RE =
-    /(\[\{type:`text`,text:([^,\]]+?),text_elements:\[\]\},)\.\.\.([A-Za-z_$][\w$]*)\(([^)]*?\{shouldRestrictRemoteHostImageSize:!1\})\)\]/;
   const FEATURE_OVERRIDES_PRESERVE_MCP_CONFIG_PATCH_MARKER =
     contractPatchMarker('/*codex-offline:feature-overrides-preserve-mcp-config*/');
   const FEATURE_OVERRIDES_CONFIG_NAMESPACE_RE =
@@ -2180,33 +1987,6 @@ try {
     /catch\(([A-Za-z_$][\w$]*)\)\{if\(([A-Za-z_$][\w$]*)\.warning\(`bundled_plugins_marketplace_install_failed`,\{safe:\{errorCategory:([A-Za-z_$][\w$]*)\(\{error:\1,platformFamily:e\.platformFamily\}\),marketplaceName:t,platformFamily:e\.platformFamily\},sensitive:\{error:\1,marketplaceRoot:e\.materializedMarketplace\.marketplaceRoot\}\}\),n\)throw \1;return!1\}/g;
   const BUNDLED_PLUGIN_CACHE_LOCK_CURRENT_CATCH_THROW_RE =
     /catch\(([A-Za-z_$][\w$]*)\)\{if\(([A-Za-z_$][\w$]*)\.warning\(`bundled_plugins_marketplace_install_failed`,\{safe:\{errorCategory:([A-Za-z_$][\w$]*)\(\{error:\1,platformFamily:([A-Za-z_$][\w$]*)\.platformFamily\}\),marketplaceName:([A-Za-z_$][\w$]*),platformFamily:\4\.platformFamily\},sensitive:\{error:\1,marketplaceRoot:\4\.materializedMarketplace\.marketplaceRoot\}\}\),\4\.throwOnReconcileFailure\)throw \1;return\{/;
-  const NODE_REPL_CONFIG_RECONCILE_FINAL_STEP =
-    'await Ro({appServerConnection:r,chromeExtensionSyncManagedPluginStore:l,' +
-    'devRuntimeRepoRoot:s,marketplacePluginNames:e.marketplacePluginNames,' +
-    'forceInstallPluginNames:d,installWhenMissingPluginNames:f,' +
-    'syncInstallStateWithChromeExtensionPluginNames:m,marketplaceName:a,' +
-    'resourcesPath:i,runtimeMarketplaceRoot:o}),await Promise.all(' +
-    'e.marketplacePluginDescriptors.map(async e=>{e.migrate!=null&&' +
-    'await e.migrate({appServerConnection:r,codexHome:t.codexHome,' +
-    'marketplaceName:a,trashItem:t.trashItem})})),await ci({' +
-    'appServerConnection:r,desktopFeatureAvailability:e.desktopFeatureAvailability,' +
-    'isPackaged:t.isPackaged,platform:u,repoRoot:t.repoRoot,resourcesPath:i}),' +
-    'p=await b(e.marketplacePluginDescriptors),t.onReconcileComplete?.()';
-  const NODE_REPL_CONFIG_RECONCILE_FINAL_STEP_REPLACEMENT =
-    'try{await Ro({appServerConnection:r,chromeExtensionSyncManagedPluginStore:l,' +
-    'devRuntimeRepoRoot:s,marketplacePluginNames:e.marketplacePluginNames,' +
-    'forceInstallPluginNames:d,installWhenMissingPluginNames:f,' +
-    'syncInstallStateWithChromeExtensionPluginNames:m,marketplaceName:a,' +
-    'resourcesPath:i,runtimeMarketplaceRoot:o}),await Promise.all(' +
-    'e.marketplacePluginDescriptors.map(async e=>{e.migrate!=null&&' +
-    'await e.migrate({appServerConnection:r,codexHome:t.codexHome,' +
-    'marketplaceName:a,trashItem:t.trashItem})}))}finally{await ci({' +
-    'appServerConnection:r,desktopFeatureAvailability:e.desktopFeatureAvailability,' +
-    'isPackaged:t.isPackaged,platform:u,repoRoot:t.repoRoot,resourcesPath:i})}' +
-    NODE_REPL_CONFIG_RECONCILE_FINALLY_PATCH_MARKER +
-    ';p=await b(e.marketplacePluginDescriptors),t.onReconcileComplete?.()';
-  const NODE_REPL_CONFIG_RECONCILE_FINAL_STEP_CURRENT_RE =
-    /await ([A-Za-z_$][\w$]*)\(\{appServerConnection:([A-Za-z_$][\w$]*),browserSkillVariant:([A-Za-z_$][\w$]*),chromeExtensionSyncManagedPluginStore:([A-Za-z_$][\w$]*),devRuntimeRepoRoot:([A-Za-z_$][\w$]*),marketplacePluginNames:([A-Za-z_$][\w$]*)\.marketplacePluginNames,forceInstallPluginNames:([A-Za-z_$][\w$]*),installWhenMissingPluginNames:([A-Za-z_$][\w$]*),syncInstallStateWithChromeExtensionPluginNames:([A-Za-z_$][\w$]*),marketplaceName:([A-Za-z_$][\w$]*),resourcesPath:([A-Za-z_$][\w$]*),runtimeMarketplaceRoot:([A-Za-z_$][\w$]*)\}\),await Promise\.all\(\6\.marketplacePluginDescriptors\.map\(async ([A-Za-z_$][\w$]*)=>\{\13\.migrate!=null&&await \13\.migrate\(\{appServerConnection:\2,codexHome:e\.codexHome,marketplaceName:\10,trashItem:e\.trashItem\}\)\}\)\),await ([A-Za-z_$][\w$]*)\(\{appServerConnection:\2,desktopFeatureAvailability:\6\.desktopFeatureAvailability,isPackaged:e\.isPackaged,platform:([A-Za-z_$][\w$]*),repoRoot:e\.repoRoot,resourcesPath:\11\}\),/;
   const NODE_REPL_CONFIG_HELPER_RE =
     /\{\[`mcp_servers\.\$\{([A-Za-z_$][\w$]*)\}`\]:\{args:\[\],command:([A-Za-z_$][\w$]*),env:([A-Za-z_$][\w$]*)(,\.\.\.[A-Za-z_$][\w$]*\.length===0\?\{\}:\{env_vars:Array\.from\([A-Za-z_$][\w$]*\)\}),startup_timeout_sec:120\}\}/;
   const NODE_REPL_CONFIG_HELPER_REPLACEMENT =
@@ -2220,32 +2000,7 @@ try {
     NODE_REPL_TOOL_SEARCH_FEATURE_PATCH_MARKER +
     '}' +
     NODE_REPL_DISABLE_SANDBOX_PATCH_MARKER;
-  const COMPUTER_USE_PLUGIN_ROOT_FALLBACK_NEEDLE =
-    'function Tt({codexHome:t,env:r=process.env,marketplaceName:i=e.ir(n.j.resolve()),' +
-    'marketplaces:a,pathExists:o=c.existsSync}){for(let n of ft({marketplaceName:i,marketplaces:a}))' +
-    '{let i=n.plugins.find(e=>e.name===`computer-use`&&e.installed&&e.enabled&&e.source.type===`local`);' +
-    'if(i?.source.type===`local`)return wt({env:r,installedPluginRoot:e.cr({codexHome:t,' +
-    'localVersion:i.localVersion,marketplaceName:n.name,pluginName:i.name}),pathExists:o})}' +
-    'return wt({env:r,pathExists:o})}';
-  const COMPUTER_USE_PLUGIN_ROOT_FALLBACK_REPLACEMENT =
-    'function Tt({codexHome:t,env:r=process.env,marketplaceName:i=e.ir(n.j.resolve()),' +
-    'marketplaces:a,pathExists:l=c.existsSync}){for(let n of ft({marketplaceName:i,marketplaces:a}))' +
-    '{let i=n.plugins.find(e=>e.name===`computer-use`&&e.installed&&e.enabled&&e.source.type===`local`);' +
-    'if(i?.source.type===`local`)return wt({env:r,installedPluginRoot:e.cr({codexHome:t,' +
-    'localVersion:i.localVersion,marketplaceName:n.name,pluginName:i.name}),pathExists:l});' +
-    'let u=n.plugins.find(e=>e.name===`computer-use`&&' +
-    '(e.source?.type===`local`||e.source?.source===`local`)),d=u?.source?.path??null,' +
-    'f=n.path!=null&&d!=null?o.default.resolve(n.path,d):null;' +
-    'if(f!=null&&l(f)){Cn.info(`computer_use_plugin_root_fallback_used`,' +
-    '{safe:{marketplaceName:n.name},sensitive:{installedPluginRoot:f}});' +
-    'return wt({env:r,installedPluginRoot:f,pathExists:l})}}' +
-    COMPUTER_USE_PLUGIN_ROOT_FALLBACK_PATCH_MARKER +
-    'return wt({env:r,pathExists:l})}';
-  const COMPUTER_USE_PLUGIN_ROOT_FALLBACK_CURRENT_RE =
-    /function ([A-Za-z_$][\w$]*)\(\{codexHome:([A-Za-z_$][\w$]*),env:([A-Za-z_$][\w$]*)=process\.env,marketplaceName:([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\.or\(([A-Za-z_$][\w$]*)\.M\.resolve\(\)\),marketplaces:([A-Za-z_$][\w$]*),pathExists:([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\.existsSync\}\)\{for\(let ([A-Za-z_$][\w$]*) of ([A-Za-z_$][\w$]*)\(\{marketplaceName:\4,marketplaces:\7\}\)\)\{let ([A-Za-z_$][\w$]*)=\10\.plugins\.find\(([A-Za-z_$][\w$]*)=>\13\.name===`computer-use`&&\13\.installed&&\13\.enabled&&\13\.source\.type===`local`\);if\(\12\?\.source\.type===`local`\)return ([A-Za-z_$][\w$]*)\(\{env:\3,installedPluginRoot:\5\.([A-Za-z_$][\w$]*)\(\{codexHome:\2,localVersion:\12\.localVersion,marketplaceName:\10\.name,pluginName:\12\.name\}\),pathExists:\8\}\)\}return \14\(\{env:\3,pathExists:\8\}\)\}/;
-  const COMPUTER_USE_PLUGIN_ROOT_FALLBACK_CURRENT_RE_V2 =
-    /function ([A-Za-z_$][\w$]*)\(\{codexHome:([A-Za-z_$][\w$]*),env:([A-Za-z_$][\w$]*)=process\.env,marketplaceName:([A-Za-z_$][\w$]*)=([^,{}]+?\([^{}]*?\.resolve\(\)\)),marketplaces:([A-Za-z_$][\w$]*),pathExists:([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\.existsSync\}\)\{for\(let ([A-Za-z_$][\w$]*) of ([A-Za-z_$][\w$]*)\(\{marketplaceName:\4,marketplaces:\6\}\)\)\{let ([A-Za-z_$][\w$]*)=\9\.plugins\.find\(([A-Za-z_$][\w$]*)=>\12\.name===`computer-use`&&\12\.installed&&\12\.enabled&&\12\.source\.type===`local`\);if\(\11\?\.source\.type===`local`\)return ([A-Za-z_$][\w$]*)\(\{env:\3,installedPluginRoot:([A-Za-z_$][\w$]*)\.([A-Za-z_$][\w$]*)\(\{codexHome:\2,localVersion:\11\.localVersion,marketplaceName:\9\.name,pluginName:\11\.name\}\),pathExists:\7\}\)\}return \13\(\{env:\3,pathExists:\7\}\)\}/;
-  const COMPUTER_USE_PLUGIN_ROOT_FALLBACK_CURRENT_RE_V3 =
+  const COMPUTER_USE_RUNTIME_PATHS_CANONICAL_RE =
     /function (?<functionName>[A-Za-z_$][\w$]*)\(\{codexHome:(?<codexHome>[A-Za-z_$][\w$]*),env:(?<env>[A-Za-z_$][\w$]*)=process\.env,marketplaceName:(?<marketplaceName>[A-Za-z_$][\w$]*)=(?<marketplaceNameDefault>[^,]+),marketplaces:(?<marketplaces>[A-Za-z_$][\w$]*),pathExists:(?<pathExists>[A-Za-z_$][\w$]*)=(?<fsNamespace>[A-Za-z_$][\w$]*)\.existsSync\}\)\{for\(let (?<marketplace>[A-Za-z_$][\w$]*) of (?<listMarketplaces>[A-Za-z_$][\w$]*)\(\{marketplaceName:\k<marketplaceName>,marketplaces:\k<marketplaces>\}\)\)if\(\k<marketplace>\.plugins\.find\((?<pluginEntry>[A-Za-z_$][\w$]*)=>\k<pluginEntry>\.name===`computer-use`&&\k<pluginEntry>\.installed&&\k<pluginEntry>\.enabled&&\k<pluginEntry>\.source\.type===`local`\)\?\.source\.type===`local`\)return (?<computerUsePaths>[A-Za-z_$][\w$]*)\(\{codexHome:\k<codexHome>,env:\k<env>,pathExists:\k<pathExists>\}\);return \k<computerUsePaths>\(\{env:\k<env>,pathExists:\k<pathExists>\}\)\}/;
   const COMPUTER_USE_RESOURCE_RUNTIME_PATHS_CURRENT_RE =
     /function ([A-Za-z_$][\w$]*)\(\{codexHome:([A-Za-z_$][\w$]*),env:([A-Za-z_$][\w$]*)=process\.env,marketplaceName:([A-Za-z_$][\w$]*)=([^,{}]+),marketplaces:([A-Za-z_$][\w$]*),pathExists:([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\.existsSync\}\)\{for\(let ([A-Za-z_$][\w$]*) of ([A-Za-z_$][\w$]*)\(\{marketplaceName:\4,marketplaces:\6\}\)\)if\(\9\.plugins\.find\(([A-Za-z_$][\w$]*)=>\11\.name===`computer-use`&&\11\.installed&&\11\.enabled&&\11\.source\.type===`local`\)\?\.source\.type===`local`\)return ([A-Za-z_$][\w$]*)\(\{codexHome:\2,env:\3,pathExists:\7\}\);return \12\(\{env:\3,pathExists:\7\}\)\}/;
@@ -2255,16 +2010,6 @@ try {
     'transportKind:this.options.transport.kind,pendingCount:this.pendingRequests.size},' +
     'sensitive:{}}),this.sendMessage(t),t.method===`turn/start`&&i!=null&&' +
     'this.prewarmedThreads.publishThreadStarted(i)}catch(n){';
-  const COMPUTER_USE_FORWARD_INPUT_DIAGNOSTICS_LEGACY_SAFE_FIELDS =
-    'inputItemCount:_codexOfflineItems.length,' +
-    'inputItemTypes:_codexOfflineItems.map(e=>e?.type).join(`,`),' +
-    'mentionCount:_codexOfflineItems.filter(e=>e?.type===`mention`).length,' +
-    'skillCount:_codexOfflineItems.filter(e=>e?.type===`skill`).length,' +
-    'hasComputerUseMention:_codexOfflineItems.some(e=>typeof e?.path===`string`&&' +
-    'e.path.includes(`plugin://computer-use`)),' +
-    'hasComputerUseText:_codexOfflineItems.some(e=>typeof e?.text===`string`&&' +
-    'e.text.includes(`plugin://computer-use`)),' +
-    'textPrefix:String(_codexOfflineItems.find(e=>e?.type===`text`)?.text??``).slice(0,160)';
   const COMPUTER_USE_FORWARD_INPUT_DIAGNOSTICS_V2_SAFE_FIELDS =
     'inputItemCount:_codexOfflineItems.length,' +
     'inputItemTypes:_codexOfflineItems.map(e=>e?.type).join(`,`),' +
@@ -2320,10 +2065,6 @@ try {
     'if(t.method===`thread/start`&&t.params?.config?.[`mcp_servers.node_repl`]!=null)' +
     '{t.params.config={...t.params.config,[`features.tool_search`]:!0,' +
     '[`features.js_repl_tools_only`]:!0,[`features.tool_suggest`]:!0}}' +
-    COMPUTER_USE_THREAD_START_TOOL_SEARCH_PATCH_MARKER;
-  const COMPUTER_USE_THREAD_START_TOOL_SEARCH_LEGACY_CODE =
-    'if(t.method===`thread/start`&&t.params?.config?.[`mcp_servers.node_repl`]!=null)' +
-    '{t.params.config={...t.params.config,[`features.tool_search`]:!0}}' +
     COMPUTER_USE_THREAD_START_TOOL_SEARCH_PATCH_MARKER;
   const COMPUTER_USE_THREAD_START_TOOL_SEARCH_JS_REPL_ONLY_CODE =
     'if(t.method===`thread/start`&&t.params?.config?.[`mcp_servers.node_repl`]!=null)' +
@@ -2388,25 +2129,6 @@ try {
     'transportKind:this.options.transport.kind,pendingCount:this.pendingRequests.size},' +
     'sensitive:{}}),this.sendMessage(t),t.method===`turn/start`&&i!=null&&' +
     'this.prewarmedThreads.publishThreadStarted(i)}catch(n){';
-  const COMPUTER_USE_FORWARD_INPUT_DIAGNOSTICS_LEGACY_NEEDLE =
-    COMPUTER_USE_FORWARD_THREAD_START_DIAGNOSTICS_PATCH_MARKER +
-    'this.logger.debug(`bridge_forwarded_to_transport`,{safe:{requestId:r,';
-  const COMPUTER_USE_FORWARD_INPUT_DIAGNOSTICS_LEGACY_REPLACEMENT =
-    COMPUTER_USE_FORWARD_THREAD_START_DIAGNOSTICS_PATCH_MARKER +
-    COMPUTER_USE_THREAD_START_TOOL_SEARCH_CODE +
-    COMPUTER_USE_INPUT_SKILL_INJECTION_CODE +
-    COMPUTER_USE_THREAD_START_TOOL_CONTEXT_DIAGNOSTICS_CODE +
-    'if(t.method===`thread/start`||t.method===`turn/start`){let ' +
-    '_codexOfflineInput=t.params?.input??t.params?.params?.input??null,' +
-    '_codexOfflineItems=Array.isArray(_codexOfflineInput)?_codexOfflineInput:[];' +
-    'this.logger.info(`computer_use_forward_input`,{safe:{method:t.method,' +
-    COMPUTER_USE_FORWARD_INPUT_DIAGNOSTICS_SAFE_FIELDS +
-    '},' +
-    'sensitive:{}})}' +
-    COMPUTER_USE_FORWARD_INPUT_DIAGNOSTICS_PATCH_MARKER +
-    COMPUTER_USE_FORWARD_INPUT_DIAGNOSTICS_V2_PATCH_MARKER +
-    COMPUTER_USE_FORWARD_INPUT_DIAGNOSTICS_V3_PATCH_MARKER +
-    'this.logger.debug(`bridge_forwarded_to_transport`,{safe:{requestId:r,';
   const COMPUTER_USE_MCP_STATUS_RESPONSE_NEEDLE =
     'this.logger.info(`response_routed`,{safe:{requestId:n,method:r?.method??null,' +
     'conversationId:r?.conversationId??null,originWebcontentsId:r?.originWebContentsId??null,' +
@@ -2439,26 +2161,17 @@ try {
   // inner tools array: that array deserializes as function-only on the
   // app-server, so a namespace entry there fails thread/start with
   // "unknown variant `namespace`, expected `function`".
+  // 26.908 moved the app-namespace description into a shared binding and
+  // builds the function tools from a destructured `tools` parameter, so the
+  // collection is an identifier rather than an inline array literal.
   const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOLS_TOP_LEVEL_RE =
-    /\]\.map\((?<item>[A-Za-z_$][\w$]*)=>\(\{type:`function`,\.\.\.\k<item>,\.\.\.(?<eager>[A-Za-z_$][\w$]*)\.has\(\k<item>\.name\)\?\{\}:\{deferLoading:!0\}\}\)\);return (?<supportsNamespaces>[A-Za-z_$][\w$]*)\?\[\{type:`namespace`,name:(?<appNamespace>[A-Za-z_$][\w$]*),description:`Tools provided by the Codex app\.`,tools:(?<functionTools>[A-Za-z_$][\w$]*)\},\.\.\.(?<namespaceGroups>[A-Za-z_$][\w$]*)\]:\k<functionTools>/;
-  const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOLS_TOP_LEVEL_CURRENT_RE =
-    /\]\.map\((?<item>[A-Za-z_$][\w$]*)=>\(\{type:`function`,\.\.\.\k<item>,\.\.\.(?<deferLoadingGuard>(?<supportsNamespaces>[A-Za-z_$][\w$]*)&&[^?]+)\?\{deferLoading:!0\}:\{\}\}\)\);return \k<supportsNamespaces>\?\[\{type:`namespace`,name:(?<appNamespace>[A-Za-z_$][\w$]*),description:(?<appDescription>`Tools provided by the Codex app\.`|[A-Za-z_$][\w$]*),tools:(?<functionTools>[A-Za-z_$][\w$]*)\},\.\.\.(?<namespaceGroups>[A-Za-z_$][\w$]*)\]:(?<fallbackTools>[A-Za-z_$][\w$]*)/;
+    /(?<collection>[A-Za-z_$][\w$]*)\.map\((?<item>[A-Za-z_$][\w$]*)=>\(\{type:`function`,\.\.\.\k<item>,\.\.\.(?<deferLoadingGuard>(?<supportsNamespaces>[A-Za-z_$][\w$]*)&&[^?]+)\?\{deferLoading:!0\}:\{\}\}\)\);return \k<supportsNamespaces>\?\[\{type:`namespace`,name:(?<appNamespace>[A-Za-z_$][\w$]*),description:(?<appDescription>[A-Za-z_$][\w$]*),tools:(?<functionTools>[A-Za-z_$][\w$]*)\},\.\.\.(?<namespaceGroups>[A-Za-z_$][\w$]*)\]:(?<fallbackTools>[A-Za-z_$][\w$]*)/;
   const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_COMPAT_MISSING_RE =
     /(\(\{namespace:`node_repl`,name:`js`,description:`Execute JavaScript in the persistent Node REPL used by Computer Use\.`,inputSchema:\{[\s\S]{0,700}?required:\[`code`\]\}\}\),)(?!\(\{name:`js`,description:`Execute JavaScript in the persistent Node REPL used by Computer Use\. This forwards to node_repl\.js\.`)/;
   const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_RE =
     /(let [A-Za-z_$][\w$]*=[A-Za-z_$][\w$]*\.get\([A-Za-z_$][\w$]*\),\{id:([A-Za-z_$][\w$]*),params:([A-Za-z_$][\w$]*)\}=[A-Za-z_$][\w$]*,\{threadId:([A-Za-z_$][\w$]*),tool:([A-Za-z_$][\w$]*)\}=\3;if\(!\4\)\{[\s\S]{0,260}?return\})/;
-  const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_CURRENT_RE =
-    /(async function [A-Za-z_$][\w$]*\(\{scope:([A-Za-z_$][\w$]*),serverRequest:([A-Za-z_$][\w$]*),hostId:([A-Za-z_$][\w$]*),queryClient:([A-Za-z_$][\w$]*)\}\)\{let [A-Za-z_$][\w$]*=\2\.get\([A-Za-z_$][\w$]*\),\{id:([A-Za-z_$][\w$]*),params:([A-Za-z_$][\w$]*)\}=\3,\{threadId:([A-Za-z_$][\w$]*),tool:([A-Za-z_$][\w$]*)\}=\7;if\(!\8\)\{[\s\S]{0,260}?return\})/;
-  const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_CURRENT_V2_RE =
-    /(?<prefix>async function [A-Za-z_$][\w$]*\(\{scope:(?<scope>[A-Za-z_$][\w$]*),serverRequest:(?<serverRequest>[A-Za-z_$][\w$]*),hostId:(?<hostId>[A-Za-z_$][\w$]*),queryClient:(?<queryClient>[A-Za-z_$][\w$]*)\}\)\{(?:let [^;{}]+;)?let\{id:(?<requestId>[A-Za-z_$][\w$]*),params:(?<params>[A-Za-z_$][\w$]*)\}=\k<serverRequest>,\{threadId:(?<threadId>[A-Za-z_$][\w$]*),tool:(?<tool>[A-Za-z_$][\w$]*)\}=\k<params>;if\(!\k<threadId>\)\{(?<logger>[A-Za-z_$][\w$]*)\.error\(`Missing threadId for dynamic tool call request`,\{safe:\{\},sensitive:\{id:\k<requestId>,params:\k<params>\}\}\);return\}let (?<result>[A-Za-z_$][\w$]*),(?<namespaceOk>[A-Za-z_$][\w$]*)=\k<params>\.namespace===[^,;]+,(?<compatOk>[A-Za-z_$][\w$]*)=\k<params>\.namespace==null&&[^;]+;)(?<gate>if\(!\k<namespaceOk>&&!\k<compatOk>\)\k<result>=(?<failureFn>[A-Za-z_$][\w$]*)\(`Unsupported dynamic tool namespace: \$\{\k<params>\.namespace\}`\);else)/;
-  const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_CURRENT_V3_RE =
-    /(?<prefix>async function [A-Za-z_$][\w$]*\(\{scope:(?<scope>[A-Za-z_$][\w$]*),serverRequest:(?<serverRequest>[A-Za-z_$][\w$]*),hostId:(?<hostId>[A-Za-z_$][\w$]*),queryClient:(?<queryClient>[A-Za-z_$][\w$]*)\}\)\{let\{id:(?<requestId>[A-Za-z_$][\w$]*),params:(?<params>[A-Za-z_$][\w$]*)\}=\k<serverRequest>,\{threadId:(?<threadId>[A-Za-z_$][\w$]*),tool:(?<tool>[A-Za-z_$][\w$]*)\}=\k<params>;if\(!\k<threadId>\)\{(?<logger>[A-Za-z_$][\w$]*)\.error\(`Missing threadId for dynamic tool call request`,\{safe:\{\},sensitive:\{id:\k<requestId>,params:\k<params>\}\}\);return\}let (?<result>[A-Za-z_$][\w$]*),(?<namespaceOk>[A-Za-z_$][\w$]*)=\k<params>\.namespace===[^,;]+,(?<compatOk>[A-Za-z_$][\w$]*)=\k<params>\.namespace==null&&[^;]+;)(?<gate>if\([A-Za-z_$][\w$]*!=null\)\k<result>=[A-Za-z_$][\w$]*;else if\(!\k<namespaceOk>&&!\k<compatOk>\)\k<result>=(?<failureFn>[A-Za-z_$][\w$]*)\(`Unsupported dynamic tool namespace: \$\{\k<params>\.namespace\}`\);else)/;
-  const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_CURRENT_V5_RE =
-    /(?<prefix>async function [A-Za-z_$][\w$]*\(\{scope:(?<scope>[A-Za-z_$][\w$]*),serverRequest:(?<serverRequest>[A-Za-z_$][\w$]*),hostId:(?<hostId>[A-Za-z_$][\w$]*),queryClient:(?<queryClient>[A-Za-z_$][\w$]*),signal:(?<signal>[A-Za-z_$][\w$]*)\}\)\{let\{id:(?<requestId>[A-Za-z_$][\w$]*),params:(?<params>[A-Za-z_$][\w$]*)\}=\k<serverRequest>,\{threadId:(?<threadId>[A-Za-z_$][\w$]*),tool:(?<tool>[A-Za-z_$][\w$]*)\}=\k<params>;if\(!\k<threadId>\)(?:\{[\s\S]{0,260}?return\}|return[\s\S]{0,260}?;)[\s\S]{0,2000}?if\(\k<signal>\?\.aborted\|\|[A-Za-z_$][\w$]*\.dynamicToolCalls!=null&&!await [A-Za-z_$][\w$]*\.dynamicToolCalls\.tryClaimExecution\(\{callId:\k<params>\.callId,hostId:\k<hostId>,threadId:\k<threadId>,turnId:\k<params>\.turnId\}\)\|\|\k<signal>\?\.aborted\)return!1;)/;
-  const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_CURRENT_V6_RE =
+  const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_CANONICAL_RE =
     /(?<prefix>async function [A-Za-z_$][\w$]*\(\{scope:(?<scope>[A-Za-z_$][\w$]*),serverRequest:(?<serverRequest>[A-Za-z_$][\w$]*),hostId:(?<hostId>[A-Za-z_$][\w$]*),queryClient:(?<queryClient>[A-Za-z_$][\w$]*),signal:(?<signal>[A-Za-z_$][\w$]*)(?:,transport:[A-Za-z_$][\w$]*)?\}\)\{let\{id:(?<requestId>[A-Za-z_$][\w$]*),params:(?<params>[A-Za-z_$][\w$]*)\}=\k<serverRequest>,\{threadId:(?<threadId>[A-Za-z_$][\w$]*),tool:(?<tool>[A-Za-z_$][\w$]*)\}=\k<params>[\s\S]{0,4000}?if\(\k<signal>\?\.aborted\|\|[A-Za-z_$][\w$]*\.dynamicToolCalls!=null&&!await [A-Za-z_$][\w$]*\.dynamicToolCalls\.tryClaimExecution\(\{callId:\k<params>\.callId,hostId:\k<hostId>,threadId:\k<threadId>,turnId:\k<params>\.turnId\}\)\|\|\k<signal>\?\.aborted\)return!1;)/;
-  const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_CURRENT_V4_RE =
-    /(?<prefix>async function [A-Za-z_$][\w$]*\(\{scope:(?<scope>[A-Za-z_$][\w$]*),serverRequest:(?<serverRequest>[A-Za-z_$][\w$]*),hostId:(?<hostId>[A-Za-z_$][\w$]*),queryClient:(?<queryClient>[A-Za-z_$][\w$]*)\}\)\{let\{id:(?<requestId>[A-Za-z_$][\w$]*),params:(?<params>[A-Za-z_$][\w$]*)\}=\k<serverRequest>,\{threadId:(?<threadId>[A-Za-z_$][\w$]*),tool:(?<tool>[A-Za-z_$][\w$]*)\}=\k<params>;if\(!\k<threadId>\)\{(?<logger>[A-Za-z_$][\w$]*)\.error\(`Missing threadId for dynamic tool call request`,\{safe:\{\},sensitive:\{id:\k<requestId>,params:\k<params>\}\}\);return\}(?<preClaimGuards>[\s\S]{0,900}?)if\([A-Za-z_$][\w$]*\.dynamicToolCalls!=null&&!await [A-Za-z_$][\w$]*\.dynamicToolCalls\.tryClaimExecution\(\{callId:\k<params>\.callId,hostId:\k<hostId>,threadId:\k<threadId>,turnId:\k<params>\.turnId\}\)\)return;let (?<result>[A-Za-z_$][\w$]*),(?<namespaceOk>[A-Za-z_$][\w$]*)=\k<params>\.namespace===[^,;]+,(?<compatOk>[A-Za-z_$][\w$]*)=\k<params>\.namespace==null&&[^,;]+,(?<dynamicResult>[A-Za-z_$][\w$]*)=[^,;]+\?await [^;]+:null,(?<pluginResult>[A-Za-z_$][\w$]*)=(?:\k<params>\.namespace===`plugin_management`(?:\|\|\k<params>\.namespace===`openai_settings\`)?)\?await [^;]+:null;)(?<gate>if\(\k<pluginResult>!=null\)\k<result>=\k<pluginResult>;else if\(!\k<namespaceOk>&&!\k<compatOk>\)\k<result>=(?<failureFn>[A-Za-z_$][\w$]*)\(`Unsupported dynamic tool namespace: \$\{\k<params>\.namespace\}`\);else if\(\k<dynamicResult>!=null\)\k<result>=\k<dynamicResult>;else)/;
   const COMPUTER_USE_NODE_REPL_RESULT_TEXT_CODE =
     'let _codexOfflineNodeReplStringify=e=>{try{return JSON.stringify(e)}catch{return String(e)}};' +
     'let _codexOfflineNodeReplContentText=e=>Array.isArray(e)?e.map(e=>(e?.type===`text`||e?.type===`inputText`)?String(e.text??``):e?.text!=null?String(e.text):_codexOfflineNodeReplStringify(e)).join(`\\n`):``;' +
@@ -2500,42 +2213,7 @@ try {
     '}catch(_codexOfflineNodeReplError){_codexOfflineNodeReplResponse=Ge(String(_codexOfflineNodeReplError?.message??_codexOfflineNodeReplError))}' +
     COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_PATCH_MARKER +
     'X.dispatchMessage(`mcp-response`,{hostId:$4,response:{id:a($6),result:_codexOfflineNodeReplResponse}});return}';
-  function computerUseNodeReplDynamicToolCallCurrentV2Replacement(...args) {
-    const groups = args.at(-1);
-    const source = args.at(-2);
-    const appServerRequestFn = typeof source === 'string'
-      ? findAppServerRequestBusName(source)
-      : null;
-    if (!appServerRequestFn) {
-      throw new Error(
-        'Could not locate app-server request bus for Computer Use node_repl.js bridge.',
-      );
-    }
-    return (
-      groups.prefix +
-      `if((${groups.params}.namespace===\`node_repl\`&&${groups.tool}===\`js\`)||` +
-      `(${groups.params}.namespace==null&&${groups.tool}===\`js\`)){` +
-      'let _codexOfflineNodeReplResult;try{' +
-      `_codexOfflineNodeReplResult=await ${appServerRequestFn}(\`call-mcp-tool\`,{` +
-      `hostId:${groups.hostId},threadId:${groups.threadId},server:\`node_repl\`,` +
-      `tool:\`js\`,arguments:${groups.params}.arguments});` +
-      COMPUTER_USE_NODE_REPL_RESULT_TEXT_CODE +
-      `${groups.logger}.info(\`computer_use_node_repl_js_call\`,{safe:{` +
-      `namespace:${groups.params}.namespace??null,tool:${groups.tool},` +
-      `codePrefix:String(${groups.params}.arguments?.code??\`\`).slice(0,500),` +
-      `hasDirectSkyImport:String(${groups.params}.arguments?.code??\`\`).includes(\`@oai/sky\`),` +
-      `hasListApps:String(${groups.params}.arguments?.code??\`\`).includes(\`list_apps\`),` +
-      'resultPrefix:_codexOfflineNodeReplText.slice(0,500),' +
-      'isError:_codexOfflineNodeReplResult?.isError===!0},sensitive:{}});' +
-      `${groups.result}={contentItems:[{type:\`inputText\`,text:_codexOfflineNodeReplText}],` +
-      'success:_codexOfflineNodeReplResult?.isError!==!0}' +
-      `}catch(_codexOfflineNodeReplError){${groups.result}=${groups.failureFn}(` +
-      'String(_codexOfflineNodeReplError?.message??_codexOfflineNodeReplError))}' +
-      COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_PATCH_MARKER +
-      `}else ${groups.gate}`
-    );
-  }
-  function computerUseNodeReplDynamicToolCallCurrentV5Replacement(...args) {
+  function computerUseNodeReplDynamicToolCallReplacement(...args) {
     const groups = args.at(-1);
     const source = args.at(-2);
     const appServerRequestFn = typeof source === 'string'
@@ -2572,25 +2250,7 @@ try {
     `tools:[${COMPUTER_USE_NODE_REPL_NAMESPACE_TOOL_SPEC}]}`;
   function computerUseNodeReplDynamicToolsTopLevelReplacement(...args) {
     const {
-      item,
-      eager,
-      supportsNamespaces,
-      appNamespace,
-      functionTools,
-      namespaceGroups,
-    } = args.at(-1);
-    return (
-      `].map(${item}=>({type:\`function\`,...${item},` +
-      `...${eager}.has(${item}.name)?{}:{deferLoading:!0}}));` +
-      `return ${supportsNamespaces}?[{type:\`namespace\`,name:${appNamespace},` +
-      `description:\`Tools provided by the Codex app.\`,tools:${functionTools}},` +
-      `...${namespaceGroups},${COMPUTER_USE_NODE_REPL_NAMESPACE_GROUP_SPEC}]` +
-      `:${functionTools}.concat([${COMPUTER_USE_NODE_REPL_NAMESPACE_TOOL_SPEC}])` +
-      COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_PATCH_MARKER
-    );
-  }
-  function computerUseNodeReplDynamicToolsTopLevelCurrentReplacement(...args) {
-    const {
+      collection,
       item,
       deferLoadingGuard,
       supportsNamespaces,
@@ -2601,7 +2261,7 @@ try {
       fallbackTools,
     } = args.at(-1);
     return (
-      `].map(${item}=>({type:\`function\`,...${item},` +
+      `${collection}.map(${item}=>({type:\`function\`,...${item},` +
       `...${deferLoadingGuard}?{deferLoading:!0}:{}}));` +
       `return ${supportsNamespaces}?[{type:\`namespace\`,name:${appNamespace},` +
       `description:${appDescription},tools:${functionTools}},` +
@@ -2631,63 +2291,15 @@ try {
       COMPUTER_USE_NODE_REPL_DYNAMIC_TOOLS_TOP_LEVEL_RE,
       computerUseNodeReplDynamicToolsTopLevelReplacement,
     );
-    if (next !== content) {
-      return { content: next, alreadyCorrect: false, patched: true };
-    }
-
-    next = content.replace(
-      COMPUTER_USE_NODE_REPL_DYNAMIC_TOOLS_TOP_LEVEL_CURRENT_RE,
-      computerUseNodeReplDynamicToolsTopLevelCurrentReplacement,
-    );
     return { content: next, alreadyCorrect: false, patched: next !== content };
   }
   function patchComputerUseNodeReplDynamicToolCall(content) {
-    if (content.includes(COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_PATCH_MARKER)) {
-      return { content, alreadyCorrect: true, patched: false };
-    }
-
-    let next = content.replace(
-      COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_CURRENT_V6_RE,
-      computerUseNodeReplDynamicToolCallCurrentV5Replacement,
+    const next = content.replace(
+      COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_CANONICAL_RE,
+      computerUseNodeReplDynamicToolCallReplacement,
     );
-    if (next === content) {
-      next = content.replace(
-        COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_CURRENT_V5_RE,
-        computerUseNodeReplDynamicToolCallCurrentV5Replacement,
-      );
-    }
-    if (next === content) {
-      next = content.replace(
-        COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_CURRENT_V2_RE,
-        computerUseNodeReplDynamicToolCallCurrentV2Replacement,
-      );
-    }
-    if (next === content) {
-      next = content.replace(
-        COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_CURRENT_V3_RE,
-        computerUseNodeReplDynamicToolCallCurrentV2Replacement,
-      );
-    }
-    if (next === content) {
-      next = content.replace(
-        COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_CURRENT_V4_RE,
-        computerUseNodeReplDynamicToolCallCurrentV2Replacement,
-      );
-    }
     return { content: next, alreadyCorrect: false, patched: next !== content };
   }
-  const ARCHIVED_THREADS_LIST_ALL_DIRECT_RE =
-    /async function ([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*),\{modelProviders:([A-Za-z_$][\w$]*),archived:([A-Za-z_$][\w$]*)=!1,sourceKinds:([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*),useStateDbOnly:([A-Za-z_$][\w$]*)=!1\}\)\{let ([A-Za-z_$][\w$]*)=\[\],([A-Za-z_$][\w$]*)=async ([A-Za-z_$][\w$]*)=>\{let ([A-Za-z_$][\w$]*)=await \2\.sendRequest\(`thread\/list`,\{limit:200,cursor:\10,sortKey:\2\.recentConversationsSortKey,modelProviders:\3,sourceKinds:\5,archived:\4,useStateDbOnly:\7\}\);\8\.push\(\.\.\.\11\.data\),\11\.nextCursor&&await \9\(\11\.nextCursor\)\};return await \9\(null\),\8\}/;
-  const ARCHIVED_THREADS_LIST_ALL_QUERY_RE =
-    /async function ([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*),\{modelProviders:([A-Za-z_$][\w$]*),archived:([A-Za-z_$][\w$]*)=!1,sourceKinds:([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*),useStateDbOnly:([A-Za-z_$][\w$]*)=!1\}\)\{let ([A-Za-z_$][\w$]*)=\[\],([A-Za-z_$][\w$]*)=async ([A-Za-z_$][\w$]*)=>\{let ([A-Za-z_$][\w$]*)=\{limit:200,cursor:\10,sortKey:\2\.recentConversationsSortKey,modelProviders:\3,sourceKinds:\5,archived:\4,useStateDbOnly:\7\},([A-Za-z_$][\w$]*)=await \2\.sendRequest\(`thread\/list`,\11\);\8\.push\(\.\.\.\12\.data\),\12\.nextCursor&&await \9\(\12\.nextCursor\)\};return await \9\(null\),\8\}/;
-  const ARCHIVED_THREADS_LIST_ALL_PATCHED_DIRECT_RE =
-    /async function ([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*),\{modelProviders:([A-Za-z_$][\w$]*),archived:([A-Za-z_$][\w$]*)=!1,sourceKinds:([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*),useStateDbOnly:([A-Za-z_$][\w$]*)=!1\}\)\{let ([A-Za-z_$][\w$]*)=\[\],([A-Za-z_$][\w$]*)=async ([A-Za-z_$][\w$]*)=>\{let ([A-Za-z_$][\w$]*);try\{\11=await \2\.sendRequest\(`thread\/list`,\{limit:200,cursor:\10,sortKey:\2\.recentConversationsSortKey,modelProviders:\3,sourceKinds:\5,archived:\4,useStateDbOnly:\7\}\)\}catch\(_codexOfflineArchiveListError\)\{if\(\4\)return;throw _codexOfflineArchiveListError\}\8\.push\(\.\.\.\(\11\.data\?\?\[\]\)\),\11\.nextCursor&&await \9\(\11\.nextCursor\)\};return await \9\(null\),\8\}\/\*codex-offline:archived-threads-partial-list\*\//;
-  const ARCHIVED_THREADS_LIST_ALL_PATCHED_QUERY_RE =
-    /async function ([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*),\{modelProviders:([A-Za-z_$][\w$]*),archived:([A-Za-z_$][\w$]*)=!1,sourceKinds:([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*),useStateDbOnly:([A-Za-z_$][\w$]*)=!1\}\)\{let ([A-Za-z_$][\w$]*)=\[\],([A-Za-z_$][\w$]*)=async ([A-Za-z_$][\w$]*)=>\{let ([A-Za-z_$][\w$]*)=\{limit:200,cursor:\10,sortKey:\2\.recentConversationsSortKey,modelProviders:\3,sourceKinds:\5,archived:\4,useStateDbOnly:\7\},([A-Za-z_$][\w$]*);try\{\12=await \2\.sendRequest\(`thread\/list`,\11\)\}catch\(_codexOfflineArchiveListError\)\{if\(\4\)return;throw _codexOfflineArchiveListError\}\8\.push\(\.\.\.\(\12\.data\?\?\[\]\)\),\12\.nextCursor&&await \9\(\12\.nextCursor\)\};return await \9\(null\),\8\}\/\*codex-offline:archived-threads-partial-list\*\//;
-  const ARCHIVED_THREADS_LIST_ALL_CURRENT_RE =
-    /function (?<functionName>[A-Za-z_$][\w$]*)\((?<requestClient>[A-Za-z_$][\w$]*),\{modelProviders:(?<modelProviders>[A-Za-z_$][\w$]*),archived:(?<archived>[A-Za-z_$][\w$]*)=!1,sourceKinds:(?<sourceKinds>[A-Za-z_$][\w$]*)=(?<defaultSourceKinds>[A-Za-z_$][\w$]*),useStateDbOnly:(?<useStateDbOnly>[A-Za-z_$][\w$]*)=!1\}\)\{let (?<threads>[A-Za-z_$][\w$]*)=\[\],(?<loadPage>[A-Za-z_$][\w$]*)=async (?<cursor>[A-Za-z_$][\w$]*)=>\{let (?<query>[A-Za-z_$][\w$]*)=\{limit:100,cursor:\k<cursor>,sortKey:\k<requestClient>\.recentConversationsSortKey,modelProviders:\k<modelProviders>,sourceKinds:\k<sourceKinds>,archived:\k<archived>,useStateDbOnly:\k<useStateDbOnly>\},(?<page>[A-Za-z_$][\w$]*)=await \k<requestClient>\.sendRequest\(`thread\/list`,\k<query>,\{priority:`background`,source:`thread_list`\}\);\k<threads>\.push\(\.\.\.\k<page>\.data\),\k<page>\.nextCursor&&await \k<loadPage>\(\k<page>\.nextCursor\)\};return await \k<loadPage>\(null\),\k<threads>\}/;
-  const ARCHIVED_THREADS_LIST_ALL_CURRENT_V2_RE =
-    /function (?<functionName>[A-Za-z_$][\w$]*)\((?<requestClient>[A-Za-z_$][\w$]*),\{modelProviders:(?<modelProviders>[A-Za-z_$][\w$]*),archived:(?<archived>[A-Za-z_$][\w$]*)=!1,sourceKinds:(?<sourceKinds>[A-Za-z_$][\w$]*)=(?<defaultSourceKinds>[A-Za-z_$][\w$]*)\}\)\{let (?<threads>[A-Za-z_$][\w$]*)=\[\],(?<loadPage>[A-Za-z_$][\w$]*)=async (?<cursor>[A-Za-z_$][\w$]*)=>\{let (?<query>[A-Za-z_$][\w$]*)=\{limit:100,cursor:\k<cursor>,sortKey:\k<requestClient>\.recentConversationsSortKey,modelProviders:\k<modelProviders>,sourceKinds:\k<sourceKinds>,archived:\k<archived>,useStateDbOnly:!0\},(?<page>[A-Za-z_$][\w$]*)=await \k<requestClient>\.sendRequest\(`thread\/list`,\k<query>,\{priority:`background`,source:`thread_list`\}\);\k<threads>\.push\(\.\.\.\k<page>\.data\),\k<page>\.nextCursor&&await \k<loadPage>\(\k<page>\.nextCursor\)\};return await \k<loadPage>\(null\),\k<threads>\}/;
   // 26.831 moved archived-thread loading into the data-controls component.
   // Keep this exact shape narrow so an upstream rewrite still fails closed.
   const ARCHIVED_THREADS_DATA_CONTROLS_CURRENT_RE =
@@ -2698,223 +2310,7 @@ try {
       `(globalThis.__codexOfflineArchivedThreadsCache=${threads},${threads})):${threads}`;
   }
   function patchArchivedThreadsPartialList(content) {
-    if (content.includes(ARCHIVED_THREADS_CACHE_FALLBACK_PATCH_MARKER)) {
-      return { content, alreadyCorrect: true, patched: false };
-    }
-
     let next = content.replace(
-      ARCHIVED_THREADS_LIST_ALL_DIRECT_RE,
-      (
-        _match,
-        functionName,
-        requestClient,
-        modelProviders,
-        archived,
-        sourceKinds,
-        defaultSourceKinds,
-        useStateDbOnly,
-        threads,
-        loadPage,
-        cursor,
-        page,
-      ) => {
-        const failed = '_codexOfflineArchiveListFailed';
-        return (
-        `async function ${functionName}(${requestClient},{modelProviders:${modelProviders},` +
-        `archived:${archived}=!1,sourceKinds:${sourceKinds}=${defaultSourceKinds},` +
-        `useStateDbOnly:${useStateDbOnly}=!1}){let ${threads}=[],${failed}=!1,${loadPage}=async ${cursor}=>{` +
-        `let ${page};try{${page}=await ${requestClient}.sendRequest(\`thread/list\`,{limit:200,` +
-          `cursor:${cursor},sortKey:${requestClient}.recentConversationsSortKey,` +
-          `modelProviders:${modelProviders},sourceKinds:${sourceKinds},archived:${archived},` +
-          `useStateDbOnly:${archived}?!0:${useStateDbOnly}})}catch(_codexOfflineArchiveListError){` +
-        `if(${archived}){${failed}=!0;return}throw _codexOfflineArchiveListError}` +
-        `${threads}.push(...(${page}.data??[])),${page}.nextCursor&&await ${loadPage}(${page}.nextCursor)` +
-        `};return await ${loadPage}(null),${archivedThreadsReturnExpression(archived, failed, threads)}}` +
-        ARCHIVED_THREADS_PARTIAL_LIST_PATCH_MARKER +
-        ARCHIVED_THREADS_CACHE_FALLBACK_PATCH_MARKER
-        );
-      },
-    );
-    if (next === content) {
-      next = content.replace(
-        ARCHIVED_THREADS_LIST_ALL_QUERY_RE,
-        (
-          _match,
-          functionName,
-          requestClient,
-          modelProviders,
-          archived,
-          sourceKinds,
-          defaultSourceKinds,
-          useStateDbOnly,
-          threads,
-          loadPage,
-          cursor,
-          query,
-          page,
-        ) => {
-          const failed = '_codexOfflineArchiveListFailed';
-          return (
-          `async function ${functionName}(${requestClient},{modelProviders:${modelProviders},` +
-          `archived:${archived}=!1,sourceKinds:${sourceKinds}=${defaultSourceKinds},` +
-          `useStateDbOnly:${useStateDbOnly}=!1}){let ${threads}=[],${failed}=!1,${loadPage}=async ${cursor}=>{` +
-          `let ${query}={limit:200,cursor:${cursor},sortKey:${requestClient}.recentConversationsSortKey,` +
-          `modelProviders:${modelProviders},sourceKinds:${sourceKinds},archived:${archived},` +
-          `useStateDbOnly:${archived}?!0:${useStateDbOnly}},${page};try{${page}=await ${requestClient}.sendRequest(\`thread/list\`,${query})` +
-          `}catch(_codexOfflineArchiveListError){if(${archived}){${failed}=!0;return}throw _codexOfflineArchiveListError}` +
-          `${threads}.push(...(${page}.data??[])),${page}.nextCursor&&await ${loadPage}(${page}.nextCursor)` +
-          `};return await ${loadPage}(null),${archivedThreadsReturnExpression(archived, failed, threads)}}` +
-          ARCHIVED_THREADS_PARTIAL_LIST_PATCH_MARKER +
-          ARCHIVED_THREADS_CACHE_FALLBACK_PATCH_MARKER
-          );
-        },
-      );
-    }
-    if (next === content) {
-      next = content.replace(
-        ARCHIVED_THREADS_LIST_ALL_PATCHED_DIRECT_RE,
-        (
-          _match,
-          functionName,
-          requestClient,
-          modelProviders,
-          archived,
-          sourceKinds,
-          defaultSourceKinds,
-          useStateDbOnly,
-          threads,
-          loadPage,
-          cursor,
-          page,
-        ) => {
-          const failed = '_codexOfflineArchiveListFailed';
-          return (
-          `async function ${functionName}(${requestClient},{modelProviders:${modelProviders},` +
-          `archived:${archived}=!1,sourceKinds:${sourceKinds}=${defaultSourceKinds},` +
-          `useStateDbOnly:${useStateDbOnly}=!1}){let ${threads}=[],${failed}=!1,${loadPage}=async ${cursor}=>{` +
-          `let ${page};try{${page}=await ${requestClient}.sendRequest(\`thread/list\`,{limit:200,` +
-        `cursor:${cursor},sortKey:${requestClient}.recentConversationsSortKey,` +
-        `modelProviders:${modelProviders},sourceKinds:${sourceKinds},archived:${archived},` +
-        `useStateDbOnly:${archived}?!0:${useStateDbOnly}})}catch(_codexOfflineArchiveListError){` +
-          `if(${archived}){${failed}=!0;return}throw _codexOfflineArchiveListError}` +
-          `${threads}.push(...(${page}.data??[])),${page}.nextCursor&&await ${loadPage}(${page}.nextCursor)` +
-          `};return await ${loadPage}(null),${archivedThreadsReturnExpression(archived, failed, threads)}}` +
-          ARCHIVED_THREADS_PARTIAL_LIST_PATCH_MARKER +
-          ARCHIVED_THREADS_CACHE_FALLBACK_PATCH_MARKER
-          );
-        },
-      );
-    }
-    if (next === content) {
-      next = content.replace(
-        ARCHIVED_THREADS_LIST_ALL_PATCHED_QUERY_RE,
-        (
-          _match,
-          functionName,
-          requestClient,
-          modelProviders,
-          archived,
-          sourceKinds,
-          defaultSourceKinds,
-          useStateDbOnly,
-          threads,
-          loadPage,
-          cursor,
-          query,
-          page,
-        ) => {
-          const failed = '_codexOfflineArchiveListFailed';
-          return (
-          `async function ${functionName}(${requestClient},{modelProviders:${modelProviders},` +
-          `archived:${archived}=!1,sourceKinds:${sourceKinds}=${defaultSourceKinds},` +
-          `useStateDbOnly:${useStateDbOnly}=!1}){let ${threads}=[],${failed}=!1,${loadPage}=async ${cursor}=>{` +
-          `let ${query}={limit:200,cursor:${cursor},sortKey:${requestClient}.recentConversationsSortKey,` +
-          `modelProviders:${modelProviders},sourceKinds:${sourceKinds},archived:${archived},` +
-          `useStateDbOnly:${archived}?!0:${useStateDbOnly}},${page};try{${page}=await ${requestClient}.sendRequest(\`thread/list\`,${query})` +
-          `}catch(_codexOfflineArchiveListError){if(${archived}){${failed}=!0;return}throw _codexOfflineArchiveListError}` +
-          `${threads}.push(...(${page}.data??[])),${page}.nextCursor&&await ${loadPage}(${page}.nextCursor)` +
-          `};return await ${loadPage}(null),${archivedThreadsReturnExpression(archived, failed, threads)}}` +
-          ARCHIVED_THREADS_PARTIAL_LIST_PATCH_MARKER +
-          ARCHIVED_THREADS_CACHE_FALLBACK_PATCH_MARKER
-          );
-        },
-      );
-    }
-    if (next === content) {
-      next = content.replace(
-        ARCHIVED_THREADS_LIST_ALL_CURRENT_RE,
-        (
-          _match,
-          functionName,
-          requestClient,
-          modelProviders,
-          archived,
-          sourceKinds,
-          defaultSourceKinds,
-          useStateDbOnly,
-          threads,
-          loadPage,
-          cursor,
-          query,
-          page,
-        ) => {
-          const failed = '_codexOfflineArchiveListFailed';
-          return (
-          `function ${functionName}(${requestClient},{modelProviders:${modelProviders},` +
-          `archived:${archived}=!1,sourceKinds:${sourceKinds}=${defaultSourceKinds},` +
-          `useStateDbOnly:${useStateDbOnly}=!1}){let ${threads}=[],${failed}=!1,${loadPage}=async ${cursor}=>{` +
-          `let ${query}={limit:100,cursor:${cursor},sortKey:${requestClient}.recentConversationsSortKey,` +
-          `modelProviders:${modelProviders},sourceKinds:${sourceKinds},archived:${archived},` +
-          `useStateDbOnly:${archived}?!0:${useStateDbOnly}},${page};try{${page}=await ${requestClient}.sendRequest(` +
-          `\`thread/list\`,${query},{priority:\`background\`,source:\`thread_list\`})` +
-          `}catch(_codexOfflineArchiveListError){if(${archived}){${failed}=!0;return}` +
-          `throw _codexOfflineArchiveListError}${threads}.push(...(${page}.data??[])),` +
-          `${page}.nextCursor&&await ${loadPage}(${page}.nextCursor)};return await ${loadPage}(null),` +
-          `${archivedThreadsReturnExpression(archived, failed, threads)}}` +
-          ARCHIVED_THREADS_PARTIAL_LIST_PATCH_MARKER +
-          ARCHIVED_THREADS_CACHE_FALLBACK_PATCH_MARKER
-          );
-        },
-      );
-    }
-    if (next === content) {
-      next = content.replace(
-        ARCHIVED_THREADS_LIST_ALL_CURRENT_V2_RE,
-        (...args) => {
-          const {
-            functionName,
-            requestClient,
-            modelProviders,
-            archived,
-            sourceKinds,
-            defaultSourceKinds,
-            threads,
-            loadPage,
-            cursor,
-            query,
-            page,
-          } = args.at(-1);
-          const failed = '_codexOfflineArchiveListFailed';
-          return (
-            `function ${functionName}(${requestClient},{modelProviders:${modelProviders},` +
-            `archived:${archived}=!1,sourceKinds:${sourceKinds}=${defaultSourceKinds}}){` +
-            `let ${threads}=[],${failed}=!1,${loadPage}=async ${cursor}=>{` +
-            `let ${query}={limit:100,cursor:${cursor},sortKey:${requestClient}.recentConversationsSortKey,` +
-            `modelProviders:${modelProviders},sourceKinds:${sourceKinds},archived:${archived},` +
-            `useStateDbOnly:!0},${page};try{${page}=await ${requestClient}.sendRequest(` +
-            `\`thread/list\`,${query},{priority:\`background\`,source:\`thread_list\`})` +
-            `}catch(_codexOfflineArchiveListError){if(${archived}){${failed}=!0;return}` +
-            `throw _codexOfflineArchiveListError}${threads}.push(...(${page}.data??[])),` +
-            `${page}.nextCursor&&await ${loadPage}(${page}.nextCursor)};return await ${loadPage}(null),` +
-            `${archivedThreadsReturnExpression(archived, failed, threads)}}` +
-            ARCHIVED_THREADS_PARTIAL_LIST_PATCH_MARKER +
-            ARCHIVED_THREADS_CACHE_FALLBACK_PATCH_MARKER
-          );
-        },
-      );
-    }
-    if (next === content) {
-      next = content.replace(
         ARCHIVED_THREADS_DATA_CONTROLS_CURRENT_RE,
         (_match, ...args) => {
           const { loader, threads, seen, cursor, page, send, scope, host, sourceKinds } =
@@ -2938,8 +2334,7 @@ try {
             ARCHIVED_THREADS_CACHE_FALLBACK_PATCH_MARKER
           );
         },
-      );
-    }
+    );
     return { content: next, alreadyCorrect: false, patched: next !== content };
   }
   // The archived settings panel (Settings → Data controls → Archived) combines
@@ -3025,18 +2420,6 @@ try {
       patched: true,
     };
   }
-  const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_LEGACY_RE =
-    /if\(([A-Za-z_$][\w$]*)\.namespace===`node_repl`&&([A-Za-z_$][\w$]*)===`js`\)\{let _codexOfflineNodeReplResult;try\{_codexOfflineNodeReplResult=await Pi\(`mcpServer\/tool\/call`,\{params:\{threadId:([A-Za-z_$][\w$]*),server:`node_repl`,tool:`js`,arguments:\1\.arguments\}\}\);let _codexOfflineNodeReplText=Array\.isArray\(_codexOfflineNodeReplResult\?\.content\)\?_codexOfflineNodeReplResult\.content\.map\(e=>e\?\.type===`text`\?String\(e\.text\?\?``\):JSON\.stringify\(e\)\)\.join\(`\\n`\):JSON\.stringify\(_codexOfflineNodeReplResult\);u=\{contentItems:\[\{type:`inputText`,text:_codexOfflineNodeReplText\}\],success:_codexOfflineNodeReplResult\?\.isError!==!0\}\}catch\(_codexOfflineNodeReplError\)\{u=Ge\(String\(_codexOfflineNodeReplError\?\.message\?\?_codexOfflineNodeReplError\)\)\}\/\*codex-offline:computer-use-node-repl-dynamic-tool-call\*\/X\.dispatchMessage\(`mcp-response`,\{hostId:([A-Za-z_$][\w$]*),response:\{id:a\(([A-Za-z_$][\w$]*)\),result:u\}\}\);return\}/;
-  const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_LEGACY_REPLACEMENT =
-    'if(($1.namespace===`node_repl`&&$2===`js`)||($1.namespace==null&&$2===`js`)){let _codexOfflineNodeReplResult,_codexOfflineNodeReplResponse;try{' +
-    '_codexOfflineNodeReplResult=await ln(`call-mcp-tool`,{hostId:$4,threadId:$3,server:`node_repl`,tool:`js`,arguments:$1.arguments});' +
-    COMPUTER_USE_NODE_REPL_RESULT_TEXT_CODE +
-    'G.info(`computer_use_node_repl_js_call`,{safe:{namespace:$1.namespace??null,tool:$2,codePrefix:String($1.arguments?.code??``).slice(0,500),hasDirectSkyImport:String($1.arguments?.code??``).includes(`@oai/sky`),hasListApps:String($1.arguments?.code??``).includes(`list_apps`),resultPrefix:_codexOfflineNodeReplText.slice(0,500),isError:_codexOfflineNodeReplResult?.isError===!0},sensitive:{}});' +
-    '_codexOfflineNodeReplResponse={contentItems:[{type:`inputText`,text:_codexOfflineNodeReplText}],success:_codexOfflineNodeReplResult?.isError!==!0}' +
-    '}catch(_codexOfflineNodeReplError){_codexOfflineNodeReplResponse=Ge(String(_codexOfflineNodeReplError?.message??_codexOfflineNodeReplError))}' +
-    COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_PATCH_MARKER +
-    'X.dispatchMessage(`mcp-response`,{hostId:$4,response:{id:a($5),result:_codexOfflineNodeReplResponse}});return}';
-  // ── Patch 36: Keep bundled browser plugins in runtime marketplace ─────
   const BUNDLED_BROWSER_PLUGINS_PATCH_MARKER =
     contractPatchMarker('/*codex-offline:bundled-browser-plugins-no-force-reload*/');
   const CHROME_DESCRIPTOR_RE =
@@ -3103,8 +2486,6 @@ try {
       'Permanent worktree HEAD resolution patched in ' +
       `${worktreeHeadRefPatchedFiles.join(', ')}.`,
     );
-  } else if (worktreeHeadRefAlreadyCorrect) {
-    log('Permanent worktree HEAD resolution already patched.');
   } else {
     failRequiredPatch(
       'Could not locate the Git starting-ref resolver used by permanent worktrees.',
@@ -3113,7 +2494,6 @@ try {
 
   const settingsPatchedFiles = [];
   const settingsRoutePatchedFiles = [];
-  const settingsRouteAlreadyCorrectFiles = [];
   let settingsHandlerSeen = false;
 
   const trustedBrowserClientHashesPatch =
@@ -3123,8 +2503,6 @@ try {
       'Chrome browser-client trusted hash patched in ' +
       `${trustedBrowserClientHashesPatch.patchedFiles.map(filePath => path.relative(tmpDir, filePath)).join(', ')}.`,
     );
-  } else if (trustedBrowserClientHashesPatch.alreadyCorrect) {
-    log('Chrome browser-client trusted hash already patched.');
   } else if (trustedBrowserClientHashesPatch.usesBrowserServiceTrustPath) {
     log('Chrome browser-service trusted path is used; browser-client hash patch is not required.');
   } else {
@@ -3160,11 +2538,6 @@ try {
       );
       modified = true;
       settingsRoutePatchedFiles.push(path.relative(tmpDir, filePath));
-    } else if (
-      originalContent.includes(SETTINGS_ROUTE_PATCH_MARKER) ||
-      content.includes(SETTINGS_ROUTE_PATCH_MARKER)
-    ) {
-      settingsRouteAlreadyCorrectFiles.push(path.relative(tmpDir, filePath));
     }
 
     settingsHandlerSeen ||= content.includes('case`show-settings`:{');
@@ -3183,67 +2556,11 @@ try {
       `${settingsRoutePatchedFiles.join(', ')}.`,
     );
   }
-  if (
-    settingsPatchedFiles.length === 0 &&
-    settingsRoutePatchedFiles.length === 0 &&
-    settingsRouteAlreadyCorrectFiles.length > 0
-  ) {
-    log(
-      `Settings IPC handlers already patched in ` +
-      `${settingsRouteAlreadyCorrectFiles.join(', ')}.`,
-    );
-  }
   if (!settingsHandlerSeen) {
     failRequiredPatch('Could not locate the "not implemented" throw for show-settings. ' +
          'Settings patch skipped (the app version may have changed).');
   }
 
-  // A previous portable-startup guard removed the CommonJS namespace wrapper
-  // around the Electron module. That avoided autoUpdater reads, but it also
-  // removed the `.default` export shape used by newer main bundles
-  // (`electronNamespace.default.app`). Restore that wrapper when repatching an
-  // affected build; the actual autoUpdater read is disabled below in Sentry's
-  // breadcrumb setup.
-  const electronNamespaceRestoredFiles = [];
-  const electronNamespaceLegacyRe =
-    /let ([A-Za-z_$][\w$]*)=require\(`electron`\);\/\*codex-offline:electron-namespace-no-auto-updater\*\//g;
-
-  for (const filePath of mainBundleFiles) {
-    let content = fs.readFileSync(filePath, 'utf8');
-    if (!electronNamespaceLegacyRe.test(content)) {
-      electronNamespaceLegacyRe.lastIndex = 0;
-      continue;
-    }
-
-    const helperMatch = content.match(
-      /(?:const|let|var) ([A-Za-z_$][\w$]*)=require\(`\.\/src-[^`]+\.js`\)/,
-    );
-    if (!helperMatch) {
-      electronNamespaceLegacyRe.lastIndex = 0;
-      warn(
-        'Found legacy Electron namespace patch but could not resolve the ' +
-        `namespace helper in ${path.relative(tmpDir, filePath)}.`,
-      );
-      continue;
-    }
-
-    const helperVar = helperMatch[1];
-    electronNamespaceLegacyRe.lastIndex = 0;
-    content = content.replaceAll(
-      electronNamespaceLegacyRe,
-      `let $1=require(\`electron\`);$1=${helperVar}.Hi($1);`,
-    );
-    electronNamespaceLegacyRe.lastIndex = 0;
-    fs.writeFileSync(filePath, content, 'utf8');
-    electronNamespaceRestoredFiles.push(path.relative(tmpDir, filePath));
-  }
-
-  if (electronNamespaceRestoredFiles.length > 0) {
-    log(
-      'Legacy Electron namespace startup guard restored in ' +
-      `${electronNamespaceRestoredFiles.join(', ')}.`,
-    );
-  }
 
   // Note: the former "autoUpdater breadcrumb" needle patch (which rewrote
   // Sentry's `autoUpdater:()=>!0` so it would not read electron.autoUpdater at
@@ -3266,20 +2583,10 @@ try {
     let content = fs.readFileSync(filePath, 'utf8');
     if (content.includes(AUTOMATION_RUNTIME_CWD_PATCH_MARKER)) {
       automationRuntimePatchedFiles.push(path.relative(tmpDir, filePath));
-    } else if (AUTOMATION_RUNTIME_CWD_RE.test(content)) {
+    } else if (AUTOMATION_RUNTIME_TARGET_CWD_RE.test(content)) {
       const patchedContent = content.replace(
-        AUTOMATION_RUNTIME_CWD_RE,
-        AUTOMATION_RUNTIME_CWD_REPLACEMENT,
-      );
-      if (patchedContent !== content) {
-        content = patchedContent;
-        fs.writeFileSync(filePath, content, 'utf8');
-        automationRuntimePatchedFiles.push(path.relative(tmpDir, filePath));
-      }
-    } else if (AUTOMATION_RUNTIME_LEGACY_TARGET_CWD_RE.test(content)) {
-      const patchedContent = content.replace(
-        AUTOMATION_RUNTIME_LEGACY_TARGET_CWD_RE,
-        AUTOMATION_RUNTIME_LEGACY_TARGET_CWD_REPLACEMENT,
+        AUTOMATION_RUNTIME_TARGET_CWD_RE,
+        AUTOMATION_RUNTIME_TARGET_CWD_REPLACEMENT,
       );
       if (patchedContent !== content) {
         content = patchedContent;
@@ -3289,8 +2596,7 @@ try {
     }
 
     if (!content.includes(AUTOMATION_RUNTIME_CWD_PATCH_MARKER) &&
-        (AUTOMATION_RUNTIME_CWD_RE.test(content) ||
-         AUTOMATION_RUNTIME_LEGACY_TARGET_CWD_RE.test(content))) {
+        AUTOMATION_RUNTIME_TARGET_CWD_RE.test(content)) {
       automationRuntimeUnpatchedFiles.push(path.relative(tmpDir, filePath));
     }
   }
@@ -3360,7 +2666,9 @@ try {
     log('Desktop app-server sandbox override patched in ' +
         `${appServerSandboxOverridePatchedFiles.join(', ')}.`);
   } else {
-    log('Desktop app-server sandbox override already patched.');
+    failRequiredPatch(
+      'Could not force the packaged app-server onto the unelevated sandbox backend.',
+    );
   }
 
   // ── Patch 38: Enable Browser Use native pipe config for offline Windows ─
@@ -3381,23 +2689,9 @@ try {
       continue;
     }
 
-    if (WINDOWS_BROWSER_USE_CAPABILITY_LEGACY_RE.test(content)) {
+    if (WINDOWS_BROWSER_USE_CAPABILITY_CANONICAL_RE.test(content)) {
       content = content.replace(
-        WINDOWS_BROWSER_USE_CAPABILITY_LEGACY_RE,
-        'function $1($2,{env:$3=process.env,platform:$4=process.platform}={}){' +
-          'return $4!==`win32`||$3.CODEX_ELECTRON_ENABLE_WINDOWS_COMPUTER_USE!==`1`?$2:' +
-          `{...$2,${DESKTOP_BROWSER_USE_CAPABILITY_PATCH_FIELDS}${WINDOWS_BROWSER_USE_CAPABILITY_PATCH_MARKER}}}`,
-      );
-    } else if (WINDOWS_BROWSER_USE_CAPABILITY_CURRENT_RE.test(content)) {
-      content = content.replace(
-        WINDOWS_BROWSER_USE_CAPABILITY_CURRENT_RE,
-        'function $1($2,{$3}={}){' +
-          'let $6=$5===`win32`&&$4.CODEX_ELECTRON_ENABLE_WINDOWS_COMPUTER_USE===`1`?' +
-          `{...$2,${DESKTOP_BROWSER_USE_CAPABILITY_PATCH_FIELDS}${WINDOWS_BROWSER_USE_CAPABILITY_PATCH_MARKER}}:$2,`,
-      );
-    } else if (WINDOWS_BROWSER_USE_CAPABILITY_V3_RE.test(content)) {
-      content = content.replace(
-        WINDOWS_BROWSER_USE_CAPABILITY_V3_RE,
+        WINDOWS_BROWSER_USE_CAPABILITY_CANONICAL_RE,
         ',$1=$2===`win32`&&$3.CODEX_ELECTRON_ENABLE_WINDOWS_COMPUTER_USE===`1`?' +
           `{...$4,computerUse:!0,computerUseNodeRepl:!0,${DESKTOP_BROWSER_USE_CAPABILITY_PATCH_FIELDS}${WINDOWS_BROWSER_USE_CAPABILITY_PATCH_MARKER}}:$4`,
       );
@@ -3413,8 +2707,6 @@ try {
   if (windowsBrowserUseCapabilityPatched) {
     log('Windows Browser Use capability override patched in ' +
         `${windowsBrowserUseCapabilityPatchedFiles.join(', ')}.`);
-  } else if (windowsBrowserUseCapabilityAlreadyCorrect) {
-    log('Windows Browser Use capability override already patched.');
   } else {
     throw new Error(
       'Could not locate the Windows desktop feature override that enables ' +
@@ -3567,8 +2859,6 @@ try {
   if (featureOverridesConfigNamespacePatched) {
     log('Feature override config namespace preservation patched in ' +
         `${featureOverridesConfigNamespacePatchedFiles.join(', ')}.`);
-  } else if (featureOverridesConfigNamespaceAlreadyCorrect) {
-    log('Feature override config namespace preservation already patched.');
   } else {
     failRequiredPatch(
       'Could not locate feature override config merge function (app version may have changed). ' +
@@ -3660,8 +2950,6 @@ try {
   if (bundledPluginCacheLockNonfatalPatched) {
     log('Bundled plugin cache lock failures are nonfatal on Windows in ' +
         `${bundledPluginCacheLockNonfatalPatchedFiles.join(', ')}.`);
-  } else if (bundledPluginCacheLockNonfatalAlreadyCorrect) {
-    log('Bundled plugin cache lock failure handling already patched.');
   } else {
     warn(
       'Could not locate bundled plugin cache lock failure handling (app version may have changed). ' +
@@ -3697,8 +2985,6 @@ try {
   if (nodeReplDisableSandboxPatched) {
     log('Node REPL sandbox bypass argument patched in ' +
         `${nodeReplDisableSandboxPatchedFiles.join(', ')}.`);
-  } else if (nodeReplDisableSandboxAlreadyCorrect) {
-    log('Node REPL sandbox bypass argument already patched.');
   } else {
     failRequiredPatch(
       'Could not locate Browser Use thread config generation to add ' +
@@ -3712,89 +2998,15 @@ try {
 
   for (const filePath of mainBundleFiles) {
     let content = fs.readFileSync(filePath, 'utf8');
-    if (
-      content.includes(COMPUTER_USE_PLUGIN_ROOT_FALLBACK_PATCH_MARKER) ||
-      content.includes(COMPUTER_USE_RESOURCE_RUNTIME_PATHS_PATCH_MARKER)
-    ) {
+    if (content.includes(COMPUTER_USE_RESOURCE_RUNTIME_PATHS_PATCH_MARKER)) {
       computerUsePluginRootFallbackAlreadyCorrect = true;
       computerUsePluginRootFallbackPatchedFiles.push(path.relative(tmpDir, filePath));
       continue;
     }
 
-    if (content.includes(COMPUTER_USE_PLUGIN_ROOT_FALLBACK_NEEDLE)) {
+    if (COMPUTER_USE_RUNTIME_PATHS_CANONICAL_RE.test(content)) {
       content = content.replace(
-        COMPUTER_USE_PLUGIN_ROOT_FALLBACK_NEEDLE,
-        COMPUTER_USE_PLUGIN_ROOT_FALLBACK_REPLACEMENT,
-      );
-    } else if (COMPUTER_USE_PLUGIN_ROOT_FALLBACK_CURRENT_RE.test(content)) {
-      content = content.replace(
-        COMPUTER_USE_PLUGIN_ROOT_FALLBACK_CURRENT_RE,
-        (
-          match,
-          functionName,
-          codexHomeVar,
-          envVar,
-          marketplaceNameVar,
-          pluginPathNamespace,
-          buildFlavorNamespace,
-          marketplacesVar,
-          pathExistsVar,
-          fsNamespace,
-          marketplaceVar,
-          listMarketplacesFunction,
-          installedPluginVar,
-          pluginEntryVar,
-          computerUsePathsFunction,
-          pluginRootFunction,
-        ) =>
-          `function ${functionName}({codexHome:${codexHomeVar},env:${envVar}=process.env,` +
-          `marketplaceName:${marketplaceNameVar}=${pluginPathNamespace}.or(${buildFlavorNamespace}.M.resolve()),` +
-          `marketplaces:${marketplacesVar},pathExists:${pathExistsVar}=${fsNamespace}.existsSync})` +
-          `{for(let ${marketplaceVar} of ${listMarketplacesFunction}({marketplaceName:${marketplaceNameVar},marketplaces:${marketplacesVar}}))` +
-          `{let ${installedPluginVar}=${marketplaceVar}.plugins.find(${pluginEntryVar}=>${pluginEntryVar}.name===\`computer-use\`&&${pluginEntryVar}.installed&&${pluginEntryVar}.enabled&&${pluginEntryVar}.source.type===\`local\`);` +
-          `if(${installedPluginVar}?.source.type===\`local\`)return ${computerUsePathsFunction}({env:${envVar},installedPluginRoot:${pluginPathNamespace}.${pluginRootFunction}({codexHome:${codexHomeVar},localVersion:${installedPluginVar}.localVersion,marketplaceName:${marketplaceVar}.name,pluginName:${installedPluginVar}.name}),pathExists:${pathExistsVar}});` +
-          `let u=${marketplaceVar}.plugins.find(e=>e.name===\`computer-use\`&&(e.source?.type===\`local\`||e.source?.source===\`local\`)),d=u?.source?.path??null,` +
-          `f=d==null?null:/^(?:[A-Za-z]:[\\\\/]|\\\\\\\\)/.test(d)?d:${marketplaceVar}.path!=null?\`${'${'}String(${marketplaceVar}.path).replace(/[\\\\/]+$/,\`\`)}\\\\${'${'}String(d).replace(/^\\\\.?[\\\\/]/,\`\`)}\`:null;` +
-          `if(f!=null&&${pathExistsVar}(f))return ${computerUsePathsFunction}({env:${envVar},installedPluginRoot:f,pathExists:${pathExistsVar}})}` +
-          COMPUTER_USE_PLUGIN_ROOT_FALLBACK_PATCH_MARKER +
-          `return ${computerUsePathsFunction}({env:${envVar},pathExists:${pathExistsVar}})}`,
-      );
-    } else if (COMPUTER_USE_PLUGIN_ROOT_FALLBACK_CURRENT_RE_V2.test(content)) {
-      content = content.replace(
-        COMPUTER_USE_PLUGIN_ROOT_FALLBACK_CURRENT_RE_V2,
-        (
-          match,
-          functionName,
-          codexHomeVar,
-          envVar,
-          marketplaceNameVar,
-          marketplaceNameDefaultExpr,
-          marketplacesVar,
-          pathExistsVar,
-          fsNamespace,
-          marketplaceVar,
-          listMarketplacesFunction,
-          installedPluginVar,
-          pluginEntryVar,
-          computerUsePathsFunction,
-          pluginPathNamespace,
-          pluginRootFunction,
-        ) =>
-          `function ${functionName}({codexHome:${codexHomeVar},env:${envVar}=process.env,` +
-          `marketplaceName:${marketplaceNameVar}=${marketplaceNameDefaultExpr},` +
-          `marketplaces:${marketplacesVar},pathExists:${pathExistsVar}=${fsNamespace}.existsSync})` +
-          `{for(let ${marketplaceVar} of ${listMarketplacesFunction}({marketplaceName:${marketplaceNameVar},marketplaces:${marketplacesVar}}))` +
-          `{let ${installedPluginVar}=${marketplaceVar}.plugins.find(${pluginEntryVar}=>${pluginEntryVar}.name===\`computer-use\`&&${pluginEntryVar}.installed&&${pluginEntryVar}.enabled&&${pluginEntryVar}.source.type===\`local\`);` +
-          `if(${installedPluginVar}?.source.type===\`local\`)return ${computerUsePathsFunction}({env:${envVar},installedPluginRoot:${pluginPathNamespace}.${pluginRootFunction}({codexHome:${codexHomeVar},localVersion:${installedPluginVar}.localVersion,marketplaceName:${marketplaceVar}.name,pluginName:${installedPluginVar}.name}),pathExists:${pathExistsVar}});` +
-          `let u=${marketplaceVar}.plugins.find(e=>e.name===\`computer-use\`&&(e.source?.type===\`local\`||e.source?.source===\`local\`)),d=u?.source?.path??null,` +
-          `f=d==null?null:/^(?:[A-Za-z]:[\\\\/]|\\\\\\\\)/.test(d)?d:${marketplaceVar}.path!=null?\`${'${'}String(${marketplaceVar}.path).replace(/[\\\\/]+$/,\`\`)}\\\\${'${'}String(d).replace(/^\\\\.?[\\\\/]/,\`\`)}\`:null;` +
-          `if(f!=null&&${pathExistsVar}(f))return ${computerUsePathsFunction}({env:${envVar},installedPluginRoot:f,pathExists:${pathExistsVar}})}` +
-          COMPUTER_USE_PLUGIN_ROOT_FALLBACK_PATCH_MARKER +
-          `return ${computerUsePathsFunction}({env:${envVar},pathExists:${pathExistsVar}})}`,
-      );
-    } else if (COMPUTER_USE_PLUGIN_ROOT_FALLBACK_CURRENT_RE_V3.test(content)) {
-      content = content.replace(
-        COMPUTER_USE_PLUGIN_ROOT_FALLBACK_CURRENT_RE_V3,
+        COMPUTER_USE_RUNTIME_PATHS_CANONICAL_RE,
         `$&${COMPUTER_USE_RESOURCE_RUNTIME_PATHS_PATCH_MARKER}`,
       );
     } else if (
@@ -3817,8 +3029,6 @@ try {
   if (computerUsePluginRootFallbackPatched) {
     log('Computer Use runtime path compatibility patched in ' +
         `${computerUsePluginRootFallbackPatchedFiles.join(', ')}.`);
-  } else if (computerUsePluginRootFallbackAlreadyCorrect) {
-    log('Computer Use plugin root fallback already patched.');
   } else {
     failRequiredPatch(
       'Could not locate Computer Use installed plugin path resolver (app version may have changed). ' +
@@ -3853,102 +3063,6 @@ try {
       computerUseForwardThreadStartDiagnosticsPatchedFiles.push(path.relative(tmpDir, filePath));
       continue;
     }
-    if (content.includes(COMPUTER_USE_FORWARD_THREAD_START_DIAGNOSTICS_PATCH_MARKER)) {
-      let patchedContent = content;
-      if (patchedContent.includes(COMPUTER_USE_THREAD_START_TOOL_SEARCH_LEGACY_CODE)) {
-        patchedContent = patchedContent.replace(
-          COMPUTER_USE_THREAD_START_TOOL_SEARCH_LEGACY_CODE,
-          COMPUTER_USE_THREAD_START_TOOL_SEARCH_CODE,
-        );
-      }
-      if (patchedContent.includes(COMPUTER_USE_THREAD_START_TOOL_SEARCH_JS_REPL_ONLY_CODE)) {
-        patchedContent = patchedContent.replace(
-          COMPUTER_USE_THREAD_START_TOOL_SEARCH_JS_REPL_ONLY_CODE,
-          COMPUTER_USE_THREAD_START_TOOL_SEARCH_CODE,
-        );
-      }
-      if (patchedContent.includes(COMPUTER_USE_THREAD_START_TOOL_SEARCH_TOOL_SUGGEST_ONLY_CODE)) {
-        patchedContent = patchedContent.replace(
-          COMPUTER_USE_THREAD_START_TOOL_SEARCH_TOOL_SUGGEST_ONLY_CODE,
-          COMPUTER_USE_THREAD_START_TOOL_SEARCH_CODE,
-        );
-      }
-      if (patchedContent.includes(COMPUTER_USE_THREAD_START_TOOL_SEARCH_FULL_FLAGS_ONLY_CODE)) {
-        patchedContent = patchedContent.replace(
-          COMPUTER_USE_THREAD_START_TOOL_SEARCH_FULL_FLAGS_ONLY_CODE,
-          COMPUTER_USE_THREAD_START_TOOL_SEARCH_CODE,
-        );
-      }
-      if (!patchedContent.includes(COMPUTER_USE_THREAD_START_TOOL_SEARCH_PATCH_MARKER)) {
-        patchedContent = patchedContent.replace(
-          COMPUTER_USE_FORWARD_THREAD_START_DIAGNOSTICS_PATCH_MARKER,
-          COMPUTER_USE_FORWARD_THREAD_START_DIAGNOSTICS_PATCH_MARKER +
-            COMPUTER_USE_THREAD_START_TOOL_SEARCH_CODE,
-        );
-      }
-      if (!patchedContent.includes(COMPUTER_USE_INPUT_SKILL_PATCH_MARKER)) {
-        patchedContent = patchedContent.replace(
-          COMPUTER_USE_FORWARD_THREAD_START_DIAGNOSTICS_PATCH_MARKER,
-          COMPUTER_USE_FORWARD_THREAD_START_DIAGNOSTICS_PATCH_MARKER +
-            COMPUTER_USE_INPUT_SKILL_INJECTION_CODE,
-        );
-      }
-      if (!patchedContent.includes(
-        COMPUTER_USE_THREAD_START_TOOL_CONTEXT_DIAGNOSTICS_PATCH_MARKER,
-      )) {
-        patchedContent = patchedContent.replace(
-          COMPUTER_USE_INPUT_SKILL_PATCH_MARKER,
-          COMPUTER_USE_INPUT_SKILL_PATCH_MARKER +
-            COMPUTER_USE_THREAD_START_TOOL_CONTEXT_DIAGNOSTICS_CODE,
-        );
-      }
-      if (
-        patchedContent.includes(COMPUTER_USE_FORWARD_INPUT_DIAGNOSTICS_V3_PATCH_MARKER)
-      ) {
-        // Already has the current diagnostics shape. The optional mutations
-        // above upgrade older builds so Computer Use context is observable.
-      } else if (
-        patchedContent.includes(COMPUTER_USE_FORWARD_INPUT_DIAGNOSTICS_V2_PATCH_MARKER)
-      ) {
-        patchedContent = patchedContent.replace(
-          COMPUTER_USE_FORWARD_INPUT_DIAGNOSTICS_V2_SAFE_FIELDS,
-          COMPUTER_USE_FORWARD_INPUT_DIAGNOSTICS_SAFE_FIELDS,
-        );
-        patchedContent = patchedContent.replace(
-          COMPUTER_USE_FORWARD_INPUT_DIAGNOSTICS_V2_PATCH_MARKER,
-          COMPUTER_USE_FORWARD_INPUT_DIAGNOSTICS_V2_PATCH_MARKER +
-            COMPUTER_USE_FORWARD_INPUT_DIAGNOSTICS_V3_PATCH_MARKER,
-        );
-      } else if (patchedContent.includes(COMPUTER_USE_FORWARD_INPUT_DIAGNOSTICS_PATCH_MARKER)) {
-        patchedContent = patchedContent.replace(
-          COMPUTER_USE_FORWARD_INPUT_DIAGNOSTICS_LEGACY_SAFE_FIELDS,
-          COMPUTER_USE_FORWARD_INPUT_DIAGNOSTICS_SAFE_FIELDS,
-        );
-        patchedContent = patchedContent.replace(
-          COMPUTER_USE_FORWARD_INPUT_DIAGNOSTICS_PATCH_MARKER,
-          COMPUTER_USE_FORWARD_INPUT_DIAGNOSTICS_PATCH_MARKER +
-            COMPUTER_USE_FORWARD_INPUT_DIAGNOSTICS_V2_PATCH_MARKER +
-            COMPUTER_USE_FORWARD_INPUT_DIAGNOSTICS_V3_PATCH_MARKER,
-        );
-      } else if (
-        patchedContent.includes(COMPUTER_USE_FORWARD_INPUT_DIAGNOSTICS_LEGACY_NEEDLE)
-      ) {
-        patchedContent = patchedContent.replace(
-          COMPUTER_USE_FORWARD_INPUT_DIAGNOSTICS_LEGACY_NEEDLE,
-          COMPUTER_USE_FORWARD_INPUT_DIAGNOSTICS_LEGACY_REPLACEMENT,
-        );
-      }
-      if (patchedContent !== content) {
-        content = patchedContent;
-        fs.writeFileSync(filePath, content, 'utf8');
-        computerUseForwardThreadStartDiagnosticsPatched = true;
-      } else {
-        computerUseForwardThreadStartDiagnosticsAlreadyCorrect = true;
-      }
-      computerUseForwardThreadStartDiagnosticsPatchedFiles.push(path.relative(tmpDir, filePath));
-      continue;
-    }
-
     if (!content.includes(COMPUTER_USE_FORWARD_THREAD_START_DIAGNOSTICS_NEEDLE)) continue;
 
     content = content.replace(
@@ -3963,8 +3077,6 @@ try {
   if (computerUseForwardThreadStartDiagnosticsPatched) {
     log('Computer Use thread/start forwarding compatibility patched in ' +
         `${computerUseForwardThreadStartDiagnosticsPatchedFiles.join(', ')}.`);
-  } else if (computerUseForwardThreadStartDiagnosticsAlreadyCorrect) {
-    log('Computer Use thread/start forwarding compatibility already patched.');
   } else {
     warn(
       'Could not locate thread/start forwarding code for Computer Use diagnostics. ' +
@@ -3997,91 +3109,12 @@ try {
   if (computerUseMcpStatusDiagnosticsPatched) {
     log('Computer Use MCP status diagnostics patched in ' +
         `${computerUseMcpStatusDiagnosticsPatchedFiles.join(', ')}.`);
-  } else if (computerUseMcpStatusDiagnosticsAlreadyCorrect) {
-    log('Computer Use MCP status diagnostics already patched.');
   } else {
     log(
       'Computer Use MCP status diagnostics not needed for current verifier gates; required Computer Use gates remain enforced.',
     );
   }
 
-  const nodeReplConfigReconcilePatchedFiles = [];
-  let nodeReplConfigReconcilePatched = false;
-  let nodeReplConfigReconcileAlreadyCorrect = false;
-
-  for (const filePath of mainBundleFiles) {
-    let content = fs.readFileSync(filePath, 'utf8');
-    if (content.includes(NODE_REPL_CONFIG_RECONCILE_FINALLY_PATCH_MARKER)) {
-      nodeReplConfigReconcileAlreadyCorrect = true;
-      nodeReplConfigReconcilePatchedFiles.push(path.relative(tmpDir, filePath));
-      continue;
-    }
-
-    if (content.includes(NODE_REPL_CONFIG_RECONCILE_FINAL_STEP)) {
-      content = content.replace(
-        NODE_REPL_CONFIG_RECONCILE_FINAL_STEP,
-        NODE_REPL_CONFIG_RECONCILE_FINAL_STEP_REPLACEMENT,
-      );
-    } else if (NODE_REPL_CONFIG_RECONCILE_FINAL_STEP_CURRENT_RE.test(content)) {
-      content = content.replace(
-        NODE_REPL_CONFIG_RECONCILE_FINAL_STEP_CURRENT_RE,
-        (
-          _match,
-          reconcileFn,
-          appServerConnection,
-          browserSkillVariant,
-          chromeExtensionSyncManagedPluginStore,
-          devRuntimeRepoRoot,
-          marketplaceDescriptorSource,
-          forceInstallPluginNames,
-          installWhenMissingPluginNames,
-          syncInstallStateWithChromeExtensionPluginNames,
-          marketplaceName,
-          resourcesPath,
-          runtimeMarketplaceRoot,
-          descriptorVar,
-          refreshNodeReplConfigFn,
-          platform,
-        ) =>
-          `try{await ${reconcileFn}({appServerConnection:${appServerConnection},` +
-          `browserSkillVariant:${browserSkillVariant},` +
-          `chromeExtensionSyncManagedPluginStore:${chromeExtensionSyncManagedPluginStore},` +
-          `devRuntimeRepoRoot:${devRuntimeRepoRoot},` +
-          `marketplacePluginNames:${marketplaceDescriptorSource}.marketplacePluginNames,` +
-          `forceInstallPluginNames:${forceInstallPluginNames},` +
-          `installWhenMissingPluginNames:${installWhenMissingPluginNames},` +
-          `syncInstallStateWithChromeExtensionPluginNames:${syncInstallStateWithChromeExtensionPluginNames},` +
-          `marketplaceName:${marketplaceName},resourcesPath:${resourcesPath},` +
-          `runtimeMarketplaceRoot:${runtimeMarketplaceRoot}}),await Promise.all(` +
-          `${marketplaceDescriptorSource}.marketplacePluginDescriptors.map(async ${descriptorVar}=>{` +
-          `${descriptorVar}.migrate!=null&&await ${descriptorVar}.migrate({` +
-          `appServerConnection:${appServerConnection},codexHome:e.codexHome,` +
-          `marketplaceName:${marketplaceName},trashItem:e.trashItem})}))}finally{` +
-          `await ${refreshNodeReplConfigFn}({appServerConnection:${appServerConnection},` +
-          `desktopFeatureAvailability:${marketplaceDescriptorSource}.desktopFeatureAvailability,` +
-          `isPackaged:e.isPackaged,platform:${platform},repoRoot:e.repoRoot,` +
-          `resourcesPath:${resourcesPath}})}` +
-          NODE_REPL_CONFIG_RECONCILE_FINALLY_PATCH_MARKER +
-          ';',
-      );
-    } else {
-      continue;
-    }
-    fs.writeFileSync(filePath, content, 'utf8');
-    nodeReplConfigReconcilePatched = true;
-    nodeReplConfigReconcilePatchedFiles.push(path.relative(tmpDir, filePath));
-  }
-
-  if (nodeReplConfigReconcilePatched) {
-    log('Node REPL config reconcile finalizer patched in ' +
-        `${nodeReplConfigReconcilePatchedFiles.join(', ')}.`);
-  } else if (nodeReplConfigReconcileAlreadyCorrect) {
-    log('Node REPL config reconcile finalizer already patched.');
-  } else {
-    log(
-      'Node REPL config reconcile finalizer not needed for this app version; verifier keeps required runtime gates.',
-    );
-  }
 
   const bundledBrowserPluginsPatch = patchBundledBrowserPlugins(mainBundleFiles, {
     chromeDescriptorCurrentPatchedRe: CHROME_DESCRIPTOR_CURRENT_PATCHED_RE,
@@ -4104,8 +3137,6 @@ try {
       'Bundled browser plugins kept in runtime marketplace for offline mode in ' +
       `${bundledBrowserPluginsPatch.patchedFiles.map(filePath => path.relative(tmpDir, filePath)).join(', ')}.`,
     );
-  } else if (bundledBrowserPluginsPatch.alreadyCorrect) {
-    log('Bundled browser plugins runtime marketplace already patched.');
   } else if (!bundledBrowserPluginsPatch.seen) {
     failRequiredPatch(
       'Bundled browser plugin descriptors were not found in main bundles. ' +
@@ -4134,8 +3165,6 @@ try {
       'Bundled runtime plugin materialization preserved for offline mode in ' +
       `${bundledRuntimeMarketplaceFilterPatch.patchedFiles.map(filePath => path.relative(tmpDir, filePath)).join(', ')}.`,
     );
-  } else if (bundledRuntimeMarketplaceFilterPatch.alreadyCorrect) {
-    log('Bundled runtime plugin materialization already patched.');
   } else if (!bundledRuntimeMarketplaceFilterPatch.seen) {
     warn(
       'Bundled runtime marketplace filter was not found. ' +
@@ -4161,7 +3190,9 @@ try {
   // so the old !1 pattern no longer exists and no patch is needed.
 
   const I18N_NEEDLE = '.get(`enable_i18n`,!1)';
-  const I18N_REPLACEMENT = '.get(`enable_i18n`,!0)';
+  const I18N_PATCH_MARKER =
+    contractPatchMarker('/*codex-offline:i18n-default-enabled*/');
+  const I18N_REPLACEMENT = '.get(`enable_i18n`,!0)' + I18N_PATCH_MARKER;
   // Marker present when the upstream code already has the correct default.
   const I18N_ALREADY_CORRECT_MARKER = '.get(`enable_i18n`,!0)';
   const LOCALE_SOURCE_NEEDLE = '.get(`locale_source`,`IDE`)';
@@ -4184,69 +3215,19 @@ try {
   // per-gate asar needles were removed. See
   // docs/plan-b-patch-migration-inventory.md.
 
-  // ── Patch 35: Enable Fast mode speed selector for offline builds ────────
+  // ── Enable the Fast mode speed selector for offline builds ─────────────
   //
-  // Older builds used a Statsig fast_mode gate:
-  //   X?.fast_mode===!0&&authCheck(arg)
-  // Newer builds route the composer/settings Speed selector through a helper:
-  //   function F(e){return I(e).canUseFastMode}
-  // In offline packages the model metadata can fail that availability test
-  // after Fast is selected, hiding the only UI that can switch back to
-  // Standard.  Patch only the selector visibility helper; the service-tier
-  // setter still writes null/"fast" exactly as upstream does.
-  const FAST_MODE_SELECTOR_PATCH_MARKER =
-    contractPatchMarker(FAST_MODE_CONTRACT.selectorPatchMarker);
+  // Upstream gates the selector on ChatGPT auth AND a backend response
+  // (featureRequirements.fast_mode), which excludes API-key and offline users,
+  // so the only UI that can switch back to Standard disappears once Fast is
+  // selected. The service-tier setter still writes null/"fast" as upstream does.
+  //
+  // The older canUseFastMode / serviceTiers shapes this patch used to also
+  // handle no longer occur anywhere in 26.903.8094.0 and were removed.
   const FAST_MODE_AUTH_METHOD_PATCH_MARKER =
     contractPatchMarker(FAST_MODE_CONTRACT.authMethodPatchMarker);
-  const FAST_MODE_SERVICE_TIER_OPTIONS_PATCH_MARKER =
-    contractPatchMarker(FAST_MODE_CONTRACT.serviceTierOptionsPatchMarker);
-  // Matches: X?.fast_mode===!0&&Y(Z)  or  X.fast_mode===!0&&Y(Z)
-  const FAST_MODE_GATE_RE =
-    /[$\w]+(?:\?\.|\.)fast_mode===!0&&[$\w]+\([$\w]+\)/;
-  const FAST_MODE_AVAILABILITY_MARKERS = Array.from(FAST_MODE_CONTRACT.availabilityMarkers);
-  const FAST_MODE_AVAILABILITY_RE =
-    /function\s+([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*)\)\{return\s+[A-Za-z_$][\w$]*\(\2\)\.canUseFastMode\}/;
-  // v26.608+: fast mode availability is gated on ChatGPT auth AND a backend API response
-  // (featureRequirements.fast_mode). API-key users are always excluded. Patch the
-  // isServiceTierAllowed computation to remove the chatgpt-auth requirement and treat a
-  // null backend response as "allowed" (same intent as the old canUseFastMode:!0 patch).
-  const FAST_MODE_SERVICE_TIER_GET_RE =
-    /function\s+([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*),([A-Za-z_$][\w$]*)\)\{return \3==null\?null:\3===`fast`\?([A-Za-z_$][\w$]*)\(\2\):\2\?\.serviceTiers\?\.find\(([A-Za-z_$][\w$]*)=>\5\.id===\3\)\?\?null\}/;
-  const FAST_MODE_SERVICE_TIER_OPTIONS_RE =
-    /function\s+([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*)\)\{return\[\{description:([A-Za-z_$][\w$]*)\.standardDescription,iconKind:null,label:[A-Za-z_$][\w$]*\.standardLabel,tier:null,value:null\},\.\.\.\([A-Za-z_$][\w$]*\?\.serviceTiers\?\?\[\]\)\.map\(([A-Za-z_$][\w$]*)=>\(\{description:([A-Za-z_$][\w$]*)\([A-Za-z_$][\w$]*\),iconKind:([A-Za-z_$][\w$]*)\([A-Za-z_$][\w$]*\.id,[A-Za-z_$][\w$]*\.name\),label:([A-Za-z_$][\w$]*)\([A-Za-z_$][\w$]*\),tier:[A-Za-z_$][\w$]*,value:[A-Za-z_$][\w$]*\.id\}\)\)\]\}/;
-  const FAST_MODE_FAST_TIER_RE =
-    /function\s+([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*)\)\{return \2\?\.serviceTiers\?\.find\(([A-Za-z_$][\w$]*)=>([A-Za-z_$][\w$]*)\(\3\.id,\3\.name\)===`fast`\|\|\3\.name\.trim\(\)\.toLowerCase\(\)===`priority`\)\?\?null\}/;
-  const CONTEXT_USAGE_STATUS_SECTION_KEY =
-    CONTEXT_USAGE_CONTRACT.localStatusSectionStorageKey;
-  const CONTEXT_USAGE_STATUS_SECTION_PATCH_MARKER =
-    contractPatchMarker(CONTEXT_USAGE_CONTRACT.visibilityPatchMarker);
-  const CONTEXT_USAGE_STATUS_SECTION_PATCHED_RE = new RegExp(
-    String.raw`[A-Za-z_$][\w$]*=[$\w]+\(` +
-      '`' +
-      escapeRegExp(CONTEXT_USAGE_STATUS_SECTION_KEY) +
-      '`' +
-      String.raw`,!0${escapeRegExp(CONTEXT_USAGE_STATUS_SECTION_PATCH_MARKER)}\)`,
-  );
-  const CONTEXT_USAGE_STATUS_SECTION_FALSE_RE = new RegExp(
-    String.raw`([A-Za-z_$][\w$]*=[$\w]+\(` +
-      '`' +
-      escapeRegExp(CONTEXT_USAGE_STATUS_SECTION_KEY) +
-      '`' +
-      String.raw`,)!1(\))`,
-  );
-  const CONTEXT_USAGE_STATUS_SECTION_TRUE_RE = new RegExp(
-    String.raw`([A-Za-z_$][\w$]*=[$\w]+\(` +
-      '`' +
-      escapeRegExp(CONTEXT_USAGE_STATUS_SECTION_KEY) +
-      '`' +
-      String.raw`,)!0(\))`,
-  );
   const WORKSPACE_DEPENDENCIES_SETTINGS_PATCH_MARKER =
     contractPatchMarker('/*codex-offline:workspace-dependencies-settings*/');
-  const FEATURE_ENABLEMENT_PRESERVE_UNIFIED_EXEC_PATCH_MARKER =
-    contractPatchMarker('/*codex-offline:feature-enablement-preserve-unified-exec*/');
-  const FEATURE_ENABLEMENT_LOCAL_STATE_RE =
-    /if\(([A-Za-z_$][\w$]*)&&\(0,([A-Za-z_$][\w$]*)\.default\)\(\1,([A-Za-z_$][\w$]*)\)\)return \1;let ([A-Za-z_$][\w$]*)=Object\.entries\(\3\)\.filter\(([A-Za-z_$][\w$]*)\)\.map\(([A-Za-z_$][\w$]*)\);return \4\.length>0&&([A-Za-z_$][\w$]*)\.info\(`Features enabled`,\{safe:\{enabledFeatures:\4\.join\(`, `\)\},sensitive:\{\}\}\),\3/;
 
   const AUTOMATION_DIALOG_CWD_PATCHES = [
     {
@@ -4290,17 +3271,17 @@ try {
     throw new Error('webview/assets directory not found. Package structure may have changed.');
   }
   let legacyPluginRendererPatchesRemoved = 0;
-  let legacyPluginsPagePatchMigrations = 0;
   {
     const webviewJsFiles = listJavaScriptFiles(assetsDir);
     let patchedCount = 0;
     let localeSourcePatched = false;
     let fastModeAuthPatched = false;
-    let fastModeServiceTierPatched = false;
     let rendererKnownStatsigGatePatchCount = 0;
+    var defaultOnStatsigGatePatched = false;
+    var defaultOnStatsigGateSeen = false;
+    var defaultOnStatsigGateAlreadyCorrect = false;
     let sidebarActivitySurfaceSeen = false;
     let sidebarActivityViewPatched = false;
-    const legacyPluginsPagePatchResidualFiles = [];
     let offlineQueryNetworkModePatched = false;
     let offlineMutationNetworkModePatched = false;
     let offlineNetworkModeSurfaceSeen = false;
@@ -4407,18 +3388,6 @@ try {
       }
       sidebarActivityViewPatched ||= sidebarActivityPatch.sidebarCorrect;
 
-      const pluginsPageMigration = migrateLegacyPluginsPageSelection(content);
-      if (pluginsPageMigration.migratedCount > 0) {
-        content = pluginsPageMigration.content;
-        legacyPluginsPagePatchMigrations += pluginsPageMigration.migratedCount;
-        changed = true;
-      }
-      if (
-        pluginsPageMigration.legacyMarkerResidual ||
-        pluginsPageMigration.legacySelectionResidual
-      ) {
-        legacyPluginsPagePatchResidualFiles.push(path.relative(tmpDir, filePath));
-      }
 
       const rendererKnownStatsigGatePatch = patchDirectStatsigGateCalls(
         content,
@@ -4430,6 +3399,19 @@ try {
         rendererKnownStatsigGatePatchCount += rendererKnownStatsigGatePatch.count;
         changed = true;
       }
+      const defaultOnStatsigGatePatch = patchDefaultOnStatsigCheckGate(
+        content,
+        contractPatchMarker('/*codex-offline:default-on-gate-wrapper*/'),
+        DESKTOP_GATE_DENYLIST,
+        require('../web-gateway/gateway/src/ipc/codex/capabilityContractData.cjs').STATSIG_DEFAULT_FEATURE_OVERRIDES,
+      );
+      if (defaultOnStatsigGatePatch.patched) {
+        content = defaultOnStatsigGatePatch.content;
+        defaultOnStatsigGatePatched = true;
+        changed = true;
+      }
+      defaultOnStatsigGateSeen ||= defaultOnStatsigGatePatch.seen;
+      defaultOnStatsigGateAlreadyCorrect ||= defaultOnStatsigGatePatch.alreadyCorrect;
       const offlineNetworkModePatch = patchOfflineNetworkModeDefaults(
         content,
         OFFLINE_QUERY_NETWORK_MODE_PATCH_MARKER,
@@ -4479,7 +3461,6 @@ try {
       log(`Webview assets patched in ${patchedCount} files` +
         (localeSourcePatched ? ' (locale_source)' : '') +
         (fastModeAuthPatched ? ' (fast-mode auth)' : '') +
-        (fastModeServiceTierPatched ? ' (fast-mode service-tier)' : '') +
         (rendererKnownStatsigGatePatchCount > 0 ? ` (renderer gates: ${rendererKnownStatsigGatePatchCount})` : '') +
         '.');
     } else {
@@ -4488,8 +3469,6 @@ try {
     if (computerUseNodeReplDynamicToolPatchedFiles.length > 0) {
       log('Computer Use node_repl.js dynamic tool exposed in ' +
         `${computerUseNodeReplDynamicToolPatchedFiles.join(', ')}.`);
-    } else if (computerUseNodeReplDynamicToolAlreadyCorrect) {
-      log('Computer Use node_repl.js dynamic tool exposure already patched.');
     } else {
       throw new Error(
         'Could not locate renderer dynamic tools list to expose Computer Use node_repl.js.',
@@ -4498,8 +3477,6 @@ try {
     if (computerUseNodeReplDynamicToolCallPatchedFiles.length > 0) {
       log('Computer Use node_repl.js dynamic tool call bridge patched in ' +
         `${computerUseNodeReplDynamicToolCallPatchedFiles.join(', ')}.`);
-    } else if (computerUseNodeReplDynamicToolCallAlreadyCorrect) {
-      log('Computer Use node_repl.js dynamic tool call bridge already patched.');
     } else {
       throw new Error(
         'Could not locate renderer dynamic tool call handler for Computer Use node_repl.js.',
@@ -4508,8 +3485,6 @@ try {
     if (archivedThreadsPartialListPatchedFiles.length > 0) {
       log('Archived threads partial list fallback patched in ' +
         `${archivedThreadsPartialListPatchedFiles.join(', ')}.`);
-    } else if (archivedThreadsPartialListAlreadyCorrect) {
-      log('Archived threads partial list fallback already patched.');
     } else {
       throw new Error(
         'Could not locate renderer archived thread list pagination to patch.',
@@ -4518,8 +3493,6 @@ try {
     if (archivedSettingsOfflineVisibilityPatchedFiles.length > 0) {
       log('Archived settings offline local visibility patched in ' +
         `${archivedSettingsOfflineVisibilityPatchedFiles.join(', ')}.`);
-    } else if (archivedSettingsOfflineVisibilityAlreadyCorrect) {
-      log('Archived settings offline local visibility already patched.');
     } else {
       throw new Error(
         'Could not locate archived settings panel isError to keep local ' +
@@ -4529,8 +3502,6 @@ try {
     if (workspaceDependenciesSettingsPatchedFiles.length > 0) {
       log('Workspace Dependencies settings gate patched in ' +
         `${workspaceDependenciesSettingsPatchedFiles.join(', ')}.`);
-    } else if (workspaceDependenciesSettingsAlreadyCorrect) {
-      log('Workspace Dependencies settings gate already patched.');
     } else if (workspaceDependenciesSettingsSeen) {
       failRequiredPatch(
         'Could not locate the imported Workspace Dependencies settings gate.',
@@ -4547,12 +3518,6 @@ try {
     } else if (!sidebarActivityViewPatched) {
       failRequiredPatch(
         'Could not statically enable the sidebar Activity priority surface.',
-      );
-    }
-    if (legacyPluginsPagePatchResidualFiles.length > 0) {
-      failRequiredPatch(
-        'Could not migrate legacy plugin-page gate patches in ' +
-          `${legacyPluginsPagePatchResidualFiles.join(', ')}.`,
       );
     }
     if (!offlineNetworkModeSurfaceSeen) {
@@ -4574,8 +3539,6 @@ try {
     if (modelDisplayNamePatchedFiles.length > 0) {
       log('Missing model display names now fall back to formatted model IDs in ' +
         `${modelDisplayNamePatchedFiles.join(', ')}.`);
-    } else if (modelDisplayNameAlreadyCorrect) {
-      log('Missing model display-name fallback already patched.');
     } else {
       failRequiredPatch(
         'Could not locate the renderer Custom model-label fallback to show the model ID.',
@@ -4584,8 +3547,6 @@ try {
     if (ultraReasoningEffortPatchedFiles.length > 0) {
       log('Ultra reasoning effort enabled for Max-capable models in ' +
         `${ultraReasoningEffortPatchedFiles.join(', ')}.`);
-    } else if (ultraReasoningEffortAlreadyCorrect) {
-      log('Ultra reasoning effort availability already patched.');
     } else if (ultraReasoningEffortSurfaceSeen) {
       failRequiredPatch(
         'Could not patch the renderer model filter to expose Ultra for Max-capable models.',
@@ -4601,13 +3562,12 @@ try {
       `Removed ${legacyPluginRendererPatchesRemoved} legacy renderer plugin-service injections.`,
     );
   }
-  if (legacyPluginsPagePatchMigrations > 0) {
-    log(
-      `Migrated ${legacyPluginsPagePatchMigrations} legacy plugin-page gate patches ` +
-        'to the unified plugins page.',
-    );
-  }
   log('Renderer Statsig gates handled by static surface patches plus init.cjs runtime fallback.');
+  if (!defaultOnStatsigGateSeen) {
+    warn('Central Statsig checkGate seam was not found; unknown gates will use the known-gate fallback.');
+  } else if (defaultOnStatsigGateAlreadyCorrect || defaultOnStatsigGatePatched) {
+    log('Unknown desktop renderer gates use the central default-on Statsig seam.');
+  }
 
   // Surface drift first (so optional misses are always visible), then fail the
   // build before repacking if any required patch did not apply, so an upstream

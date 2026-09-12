@@ -937,83 +937,39 @@ function Repair-EncodedNodeModuleEntries {
     return $repaired
 }
 
-function Shorten-SkyTslibDependencyPath {
-    param([Parameter(Mandatory = $true)][string]$CuaNodeRoot)
+function Assert-PristineAppSource {
+    # patch-app-asar.mjs only accepts an unpatched Store payload: it keeps a
+    # single shape per patch and has no re-patch path. A source-app left over
+    # from an earlier local build can still carry codex-offline markers, which
+    # would otherwise be staged and patched a second time.
+    param([Parameter(Mandatory = $true)][string]$AppDir)
 
-    $skyDistRoot = Join-Path $CuaNodeRoot 'bin/node_modules/@oai/sky/dist'
-    $cacheRoots = @(
-        foreach ($relativeCacheRoot in @('js-dependency-cache', 'node_modules/.pnpm')) {
-            $candidate = Join-Path $skyDistRoot $relativeCacheRoot
-            if (Test-Path -LiteralPath $candidate -PathType Container) {
-                $candidate
+    $asarPath = Join-Path $AppDir 'resources/app.asar'
+    if (-not (Test-Path -LiteralPath $asarPath)) {
+        throw "Pristine source check: app.asar was not found at $asarPath."
+    }
+
+    $marker = 'codex-offline:'
+    $markerLength = $marker.Length
+    $stream = [System.IO.File]::OpenRead($asarPath)
+    try {
+        $buffer = New-Object byte[] (1MB)
+        $carry = ''
+        while (($read = $stream.Read($buffer, 0, $buffer.Length)) -gt 0) {
+            $window = $carry + [System.Text.Encoding]::ASCII.GetString($buffer, 0, $read)
+            if ($window.Contains($marker)) {
+                throw "Pristine source check failed: $asarPath already contains codex-offline patch markers. The patcher only accepts an unpatched Store payload; delete the cached source export and re-extract the Store bundle."
             }
+            # Keep the tail so a marker split across two reads is still seen.
+            $keep = [Math]::Min($window.Length, $markerLength)
+            $carry = $window.Substring($window.Length - $keep)
         }
-    )
-    if ($cacheRoots.Count -eq 0) {
-        return 0
     }
-
-    $cachedTslibFiles = @(
-        foreach ($cacheRoot in $cacheRoots) {
-            Get-ChildItem -LiteralPath $cacheRoot -Recurse -File -Filter 'tslib.es6.js'
-        }
-    )
-    if ($cachedTslibFiles.Count -ne 1) {
-        throw "Expected exactly one cached Sky tslib.es6.js, found $($cachedTslibFiles.Count)."
+    finally {
+        $stream.Dispose()
     }
-
-    $shortTslibPath = Join-Path $skyDistRoot 'js-deps/tslib.es6.js'
-    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $shortTslibPath) | Out-Null
-    Copy-Item -LiteralPath $cachedTslibFiles[0].FullName -Destination $shortTslibPath -Force
-
-    $utf8WithoutBom = New-Object System.Text.UTF8Encoding($false)
-    $referenceCount = 0
-    foreach ($jsFile in Get-ChildItem -LiteralPath $skyDistRoot -Recurse -File -Filter '*.js') {
-        $source = Get-Content -LiteralPath $jsFile.FullName -Raw
-        $matches = @([regex]::Matches(
-            $source,
-            '[^"'']*(?:js-dependency-cache|node_modules/\.pnpm)[^"'']*tslib/tslib\.es6\.js'
-        ))
-        if ($matches.Count -eq 0) {
-            continue
-        }
-
-        $shortImport = Get-RelativePath -BasePath $jsFile.Directory.FullName -PathValue $shortTslibPath
-        if (-not $shortImport.StartsWith('.')) {
-            $shortImport = './' + $shortImport
-        }
-        foreach ($match in $matches) {
-            $source = $source.Replace($match.Value, $shortImport)
-            $referenceCount++
-        }
-        [System.IO.File]::WriteAllText($jsFile.FullName, $source, $utf8WithoutBom)
-    }
-
-    if ($referenceCount -eq 0) {
-        throw 'Sky tslib cache exists but no JavaScript imports reference it.'
-    }
-
-    $resolvedSkyDistRoot = [System.IO.Path]::GetFullPath($skyDistRoot) + [System.IO.Path]::DirectorySeparatorChar
-    foreach ($cacheRoot in $cacheRoots) {
-        $resolvedCacheRoot = [System.IO.Path]::GetFullPath($cacheRoot)
-        if (-not $resolvedCacheRoot.StartsWith($resolvedSkyDistRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
-            throw "Refusing to remove Sky cache outside its dist directory: $resolvedCacheRoot"
-        }
-        $cacheRootItem = Get-Item -LiteralPath $resolvedCacheRoot -Force
-        if (($cacheRootItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
-            throw "Refusing to recursively remove Sky cache reparse point: $resolvedCacheRoot"
-        }
-        $nestedReparsePoint = Get-ChildItem -LiteralPath $resolvedCacheRoot -Force -Recurse |
-            Where-Object { ($_.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0 } |
-            Select-Object -First 1
-        if ($null -ne $nestedReparsePoint) {
-            throw "Refusing to recursively remove Sky cache containing reparse point: $($nestedReparsePoint.FullName)"
-        }
-        Remove-Item -LiteralPath $resolvedCacheRoot -Recurse -Force
-    }
-
-    return $referenceCount
 }
+
 
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot = [System.IO.Path]::GetFullPath((Join-Path $scriptRoot '..'))
@@ -1104,6 +1060,9 @@ New-Item -ItemType Directory -Force -Path $packageRoot | Out-Null
 $internalRoot = Join-Path $packageRoot '_internal'
 New-Item -ItemType Directory -Force -Path $internalRoot | Out-Null
 
+Assert-PristineAppSource -AppDir (Join-Path $sourceExportRoot 'app')
+Write-BuildTrace 'Source payload verified unpatched.'
+
 Write-BuildTrace 'App payload copied to _internal.'
 Copy-Item -Path (Join-Path $sourceExportRoot 'app') -Destination (Join-Path $internalRoot 'app') -Recurse -Force
 Copy-Item -Path (Join-Path $scriptRoot 'bootstrap-codex-skills.ps1') -Destination (Join-Path $internalRoot 'bootstrap-codex-skills.ps1') -Force
@@ -1125,6 +1084,7 @@ if (Test-Path $desktopPatchesSource) {
   )) {
     New-Item -ItemType Directory -Force -Path $desktopPatchesDest | Out-Null
     Copy-Item -Path (Join-Path $desktopPatchesSource '*') -Destination $desktopPatchesDest -Recurse -Force
+    Copy-Item -Path (Join-Path $repoRoot 'web-gateway\gateway\src\ipc\codex\capabilityContractData.cjs') -Destination (Join-Path $desktopPatchesDest 'capabilityContractData.cjs') -Force
   }
   Write-BuildTrace 'Desktop patches copied to _internal/patches/ and app/patches/.'
 } else {
@@ -1150,10 +1110,6 @@ if (@($encodedScopeRepairs).Count -gt 0) {
 $encodedCuaNodeRepairs = Repair-EncodedNodeModuleEntries -RootPath (Join-Path $internalRoot 'app/resources/cua_node')
 if (@($encodedCuaNodeRepairs).Count -gt 0) {
     Write-BuildTrace "Repaired encoded scoped node_modules in cua_node ($(@($encodedCuaNodeRepairs).Count))."
-}
-$shortenedSkyTslibReferences = Shorten-SkyTslibDependencyPath -CuaNodeRoot (Join-Path $internalRoot 'app/resources/cua_node')
-if ($shortenedSkyTslibReferences -gt 0) {
-    Write-BuildTrace "Shortened Sky tslib dependency imports ($shortenedSkyTslibReferences)."
 }
 $encodedAsarUnpackedRepairs = Repair-EncodedNodeModuleEntries -RootPath (Join-Path $internalRoot 'app/resources/app.asar.unpacked')
 if (@($encodedAsarUnpackedRepairs).Count -gt 0) {

@@ -176,7 +176,7 @@ test("package verification requires both model availability patches", () => {
   const verifier = fs.readFileSync(verifyScriptPath, "utf8");
 
   assert.ok(contract.DESKTOP_ASAR_PATCH_MARKERS.includes(marker));
-  assert.match(verifier, /requiredPatchMarker\('\/\*codex-offline:model-id-display-name-fallback\*\/'\)/);
+  assert.match(verifier, /patchMarker\('\/\*codex-offline:model-id-display-name-fallback\*\/'\)/);
   assert.match(verifier, /desktopModelAvailabilityMarkers/);
   assert.match(verifier, /STATSIG_MODEL_AVAILABILITY_CONFIG = '107580212'/);
   assert.match(verifier, /result\.key === STATSIG_MODEL_AVAILABILITY_CONFIG/);
@@ -228,11 +228,14 @@ test("models-api.json is generated as a single release artifact with Astra, GPT-
   assert.match(builderSource, /DEEPSEEK_SETUP_URL/);
   assert.match(builderSource, /GPT_56_SLUGS/);
   assert.match(builderSource, /OPENAI_CUSTOM_PROVIDER_PATCH/);
-  assert.match(builderSource, /deepseek-v4-flash/);
+  assert.match(builderSource, /deepseek-flash/);
   assert.match(builderSource, /deepseek-v4-pro/);
   assert.match(builderSource, /tool_mode: null/);
-  assert.match(builderSource, /supports_search_tool !== true/);
-  assert.match(builderSource, /web_search_tool_type !== "text"/);
+  // Capabilities are asserted per model, so a later upstream flip on one model
+  // cannot be averaged away by a blanket expectation.
+  assert.match(builderSource, /DEEPSEEK_EXPECTED_CAPABILITIES/);
+  assert.match(builderSource, /supports_search_tool !== expected.supports_search_tool/);
+  assert.match(builderSource, /web_search_tool_type !== expected.web_search_tool_type/);
 
   assert.match(verifierSource, /Expected exactly one models-api\.json asset/);
   assert.match(verifierSource, /API model catalog does not contain any models/);

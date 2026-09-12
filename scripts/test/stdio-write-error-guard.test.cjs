@@ -24,7 +24,7 @@ function loadGuardConstants() {
     "\n// Bootstrap snippet injected",
   );
   return Function(
-    `"use strict";\n${source}\nreturn { STDIO_WRITE_ERROR_GUARD_MARKER, LEGACY_EPIPE_GUARD, EPIPE_GUARD };`,
+    `"use strict";\n${source}\nreturn { STDIO_WRITE_ERROR_GUARD_MARKER, EPIPE_GUARD };`,
   )();
 }
 
@@ -72,61 +72,4 @@ test("stdio guard suppresses synchronous EPIPE and EOF only", () => {
   });
   applyGuard(EPIPE_GUARD, stdout, createStream());
   assert.throws(() => stdout.write("preserved"), otherError);
-});
-
-test("refresh upgrades the legacy guard in an already patched main entry", () => {
-  const {
-    STDIO_WRITE_ERROR_GUARD_MARKER,
-    LEGACY_EPIPE_GUARD,
-    EPIPE_GUARD,
-  } = loadGuardConstants();
-  const refreshSource = sourceSlice(
-    "function refreshMainEntryPatch(filePath) {",
-    "\nfunction listJavaScriptFiles(dirPath) {",
-  );
-  const refreshMainEntryPatch = Function(
-    "fs",
-    "PATCH_MARKER",
-    "COMPUTER_USE_ENV_DEFAULT",
-    "MSIX_UPDATER_BINDING_STUB",
-    "PATCH_BOOTSTRAP_REQUIRE",
-    "STDIO_WRITE_ERROR_GUARD_MARKER",
-    "LEGACY_EPIPE_GUARD",
-    "EPIPE_GUARD",
-    `"use strict";\n${refreshSource}\nreturn refreshMainEntryPatch;`,
-  )(
-    fs,
-    "/* codex-offline:windowsStore-patch */",
-    "",
-    "",
-    "",
-    STDIO_WRITE_ERROR_GUARD_MARKER,
-    LEGACY_EPIPE_GUARD,
-    EPIPE_GUARD,
-  );
-
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-offline-stdio-"));
-  const mainEntryPath = path.join(tempDir, "early-bootstrap.js");
-  try {
-    fs.writeFileSync(
-      mainEntryPath,
-      [
-        "/* codex-offline:windowsStore-patch */",
-        "CODEX_ELECTRON_ENABLE_WINDOWS_COMPUTER_USE",
-        "_codexOfflineMsixStub",
-        LEGACY_EPIPE_GUARD,
-        "_codexOfflineD",
-        "upstream();",
-      ].join("\n"),
-      "utf8",
-    );
-
-    assert.equal(refreshMainEntryPatch(mainEntryPath), true);
-    const refreshed = fs.readFileSync(mainEntryPath, "utf8");
-    assert.equal(refreshed.includes(LEGACY_EPIPE_GUARD), false);
-    assert.equal(refreshed.includes(EPIPE_GUARD), true);
-    assert.equal(refreshed.includes(STDIO_WRITE_ERROR_GUARD_MARKER), true);
-  } finally {
-    fs.rmSync(tempDir, { recursive: true, force: true });
-  }
 });
