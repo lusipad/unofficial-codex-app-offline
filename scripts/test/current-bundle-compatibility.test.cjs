@@ -45,6 +45,22 @@ function verifierSourceSlice(startNeedle, endNeedle) {
   return verifierScriptSource.slice(start, end);
 }
 
+test("portable extraction path budget is the guard against deep dependency paths", () => {
+  // The Sky tslib shortening was retired when upstream flattened that layout in
+  // 26.908 and the payload fit the budget without it. This check is what catches
+  // a future bundle that reintroduces deep paths.
+  assert.ok(verifierScriptSource.includes("$portableZipEntryMaxLength = 200"));
+  assert.match(
+    verifierScriptSource,
+    /\$longestPortableZipEntry\.Length -gt \$portableZipEntryMaxLength\)\s*\{\s*throw/,
+    "exceeding the extraction budget must fail the build, not warn",
+  );
+  assert.ok(
+    !buildScriptSource.includes("Shorten-SkyTslibDependencyPath"),
+    "the retired shortening should not linger in the build script",
+  );
+});
+
 test("26.715 settings IPC keeps its native config handler while patching settings routes", () => {
   const needleSource = sourceSlice(
     "  // 26.825: open-config-toml has its own Electron implementation.",
@@ -453,42 +469,6 @@ test("26.810 Chrome ambient network patch avoids minified parameter collisions",
   assert.match(patchedFixture, /function zn\(t\)\{let _codexOfflineAmbientNetworkValue=/);
 });
 
-test("P1 release guard rejects Sky tslib cache roots that contain junctions before recursive deletion", () => {
-  const functionStart = buildScriptSource.indexOf("function Shorten-SkyTslibDependencyPath {");
-  const functionEnd = buildScriptSource.indexOf("\n\n$scriptRoot =", functionStart);
-  assert.notEqual(functionStart, -1, "Shorten-SkyTslibDependencyPath is missing");
-  assert.notEqual(functionEnd, -1, "Shorten-SkyTslibDependencyPath terminator is missing");
-
-  const helperSource = buildScriptSource.slice(functionStart, functionEnd);
-  const removeIndex = helperSource.indexOf("Remove-Item -LiteralPath $resolvedCacheRoot -Recurse -Force");
-  assert.notEqual(removeIndex, -1, "Sky tslib cache removal is missing");
-
-  const reparseGuardIndex = helperSource.search(
-    /Get-Item -LiteralPath \$resolvedCacheRoot[\s\S]*?ReparsePoint[\s\S]*?throw/i,
-  );
-  assert.notEqual(
-    reparseGuardIndex,
-    -1,
-    "cache root itself must fail-closed when it is a reparse point",
-  );
-  assert.ok(
-    reparseGuardIndex < removeIndex,
-    "cache root reparse-point guard must run before recursive deletion",
-  );
-
-  const descendantGuardIndex = helperSource.search(
-    /Get-ChildItem -LiteralPath \$resolvedCacheRoot[\s\S]*?-Recurse[\s\S]*?ReparsePoint[\s\S]*?throw/i,
-  );
-  assert.notEqual(
-    descendantGuardIndex,
-    -1,
-    "cache descendants must fail-closed when a nested reparse point is present",
-  );
-  assert.ok(
-    descendantGuardIndex < removeIndex,
-    "descendant reparse-point guard must run before recursive deletion",
-  );
-});
 
 test("26.721 Computer Use accepts resource-based Windows runtime paths", () => {
   const regexSource = sourceSlice(
@@ -1077,29 +1057,7 @@ test("26.730 packaging repairs the encoded Statsig global module filenames", () 
   assert.ok(verifierScriptSource.includes("'%24_StatsigGlobal.*'"));
 });
 
-test("26.803 packaging shortens the Sky tslib dependency cache path", () => {
-  assert.ok(buildScriptSource.includes("function Shorten-SkyTslibDependencyPath"));
-  assert.ok(buildScriptSource.includes("'js-deps/tslib.es6.js'"));
-  assert.ok(buildScriptSource.includes("'js-dependency-cache'"));
-  assert.ok(
-    buildScriptSource.includes(
-      "Shorten-SkyTslibDependencyPath -CuaNodeRoot (Join-Path $internalRoot 'app/resources/cua_node')",
-    ),
-  );
-  assert.ok(
-    verifierScriptSource.includes(
-      "'_internal\\app\\resources\\cua_node\\bin\\node_modules\\@oai\\sky\\dist\\js-deps\\tslib.es6.js'",
-    ),
-  );
-});
 
-test("26.810 packaging shortens the Sky pnpm tslib dependency path", () => {
-  assert.ok(buildScriptSource.includes("'node_modules/.pnpm'"));
-  assert.ok(
-    buildScriptSource.includes("(?:js-dependency-cache|node_modules/\\.pnpm)"),
-  );
-  assert.ok(verifierScriptSource.includes("'node_modules\\.pnpm'"));
-});
 
 test("portable ZIP keeps entries relative to the package root", () => {
   assert.match(

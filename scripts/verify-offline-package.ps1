@@ -417,7 +417,6 @@ try {
         '_internal\app\ChatGPT.exe',
         '_internal\app\resources\app.asar',
         '_internal\app\resources\codex.exe',
-        '_internal\app\resources\cua_node\bin\node_modules\@oai\sky\dist\js-deps\tslib.es6.js',
          '_internal\patches\init.cjs',
          '_internal\patches\capabilityContractData.cjs',
          '_internal\patches\plugin-service-compat.cjs',
@@ -1113,31 +1112,6 @@ try {
             $computerUseTransportPath = Join-Path $computerUseSkyRoot 'dist\project\cua\sky_js\src\targets\windows\internal\helper_transport.js'
             if (-not (Test-Path $computerUseTransportPath -PathType Leaf)) {
                 throw 'Bundled computer-use plugin is missing the Windows helper transport module.'
-            }
-            $computerUseSkyDistRoot = Join-Path $computerUseSkyRoot 'dist'
-            $computerUseShortTslibPath = Join-Path $computerUseSkyDistRoot 'js-deps\tslib.es6.js'
-            if (-not (Test-Path $computerUseShortTslibPath -PathType Leaf)) {
-                throw 'Bundled computer-use runtime is missing its MAX_PATH-safe tslib dependency.'
-            }
-            foreach ($longCacheRelativePath in @('js-dependency-cache', 'node_modules\.pnpm')) {
-                if (Test-Path (Join-Path $computerUseSkyDistRoot $longCacheRelativePath) -PathType Container) {
-                    throw "Bundled computer-use runtime still contains the long Sky dependency cache path: $longCacheRelativePath"
-                }
-            }
-            $computerUseSkyJavaScript = @(
-                Get-ChildItem -LiteralPath $computerUseSkyDistRoot -Recurse -Filter '*.js' -File
-            )
-            $shortTslibImports = @(
-                $computerUseSkyJavaScript | Select-String -SimpleMatch 'js-deps/tslib.es6.js'
-            )
-            if ($shortTslibImports.Count -eq 0) {
-                throw 'Bundled computer-use runtime does not import its MAX_PATH-safe tslib dependency.'
-            }
-            $longTslibImports = @(
-                $computerUseSkyJavaScript | Select-String -Pattern 'js-dependency-cache|node_modules/\.pnpm'
-            )
-            if ($longTslibImports.Count -gt 0) {
-                throw 'Bundled computer-use runtime still imports the long Sky dependency cache path.'
             }
         }
     }
