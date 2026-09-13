@@ -21,6 +21,7 @@ const { createTerminalIpcHandlers } = require("./terminal");
 const { createWorkerIpcHandlers } = require("./worker");
 const { createViewMessageHandlers } = require("./viewMessages");
 const { createGitIpcHandlers } = require("./git");
+const { createPendingWorktreeHandlers } = require("./pendingWorktrees");
 const { createAppServerBridge } = require("./appServerBridge");
 const { createChatgptBackendIpcHandlers } = require("./chatgptBackend");
 const { createFetchIpcHandlers } = require("./fetchIpc");
@@ -61,6 +62,42 @@ const CODEX_ASSET_ROOTS = [
 ];
 const DEBUG_LOGS = process.env.CODEX_WEB_DEBUG === "1" || process.env.CODEX_WEB_DEBUG === "true";
 
+/**
+ * 26.908 起项目由 app-server 管理（project/list），路径可以在磁盘任意位置，
+ * 不限于 Desktop workspace roots。git worker 等本地 IPC 的 allowed-roots 校验
+ * 必须把这些已注册项目路径也视为合法，否则项目页所有 git 查询都返回 null。
+ */
+const APP_SERVER_PROJECT_ROOTS = new Set();
+
+/** Desktop globalState 的 local-projects 注册表（renderer 项目列表的数据源）中的全部 rootPaths。 */
+function desktopLocalProjectRoots() {
+  const projects = desktopState.getDesktopGlobalStateValue("local-projects");
+  if (!projects || typeof projects !== "object" || Array.isArray(projects)) return [];
+  const roots = [];
+  for (const project of Object.values(projects)) {
+    if (!project || typeof project !== "object" || !Array.isArray(project.rootPaths)) continue;
+    for (const root of project.rootPaths) {
+      if (typeof root === "string" && root.trim()) roots.push(root.trim());
+    }
+  }
+  return roots;
+}
+
+/** 从 project/list、project/read、project/create 等响应中提取 rootPaths 并登记。 */
+function registerAppServerProjectRoots(result) {
+  if (!result || typeof result !== "object") return;
+  const projects = [];
+  if (Array.isArray(result.projects)) projects.push(...result.projects);
+  if (Array.isArray(result.data)) projects.push(...result.data);
+  if (result.project && typeof result.project === "object") projects.push(result.project);
+  for (const project of projects) {
+    if (!project || typeof project !== "object" || !Array.isArray(project.rootPaths)) continue;
+    for (const root of project.rootPaths) {
+      if (typeof root === "string" && root.trim()) APP_SERVER_PROJECT_ROOTS.add(root.trim());
+    }
+  }
+}
+
 function payloadShape(payload) {
   if (payload === null) return "null";
   if (Array.isArray(payload)) return `array(${payload.length})`;
@@ -84,6 +121,8 @@ const APP_SERVER_METHOD_ALIASES = new Map([
 ]);
 const SHARED_OBJECT_SNAPSHOT = new Map([
   ["host_config", { id: "local", kind: "local" }],
+  // 桌面主进程启动即发布 pending_worktrees 数组；Web 端没有 pending worktree，但缺省必须是 [] 而不是 null。
+  ["pending_worktrees", []],
 ]);
 const GLOBAL_STATE = new Map([
   ["QUEUED_FOLLOW_UPS", {}],
@@ -105,32 +144,96 @@ const PERSISTED_STATE = {};
 const SETTINGS_STATE = {};
 const DESKTOP_VIEW_NOOP_MESSAGE_TYPES = new Set([
   "app-shell-shortcut-state-changed",
+  "avatar-overlay-close",
+  "avatar-overlay-drag-end",
+  "avatar-overlay-drag-move",
+  "avatar-overlay-drag-release",
+  "avatar-overlay-drag-start",
+  "avatar-overlay-element-size-changed",
+  "avatar-overlay-keyboard-interaction-changed",
   "avatar-overlay-open-state-request",
+  "avatar-overlay-pointer-interaction-changed",
+  "browser-sidebar-annotation-multi-select-enabled-changed",
+  "browser-use-session-route-capture",
+  "browser-sidebar-command",
+  "browser-sidebar-comment-overlay-annotation-selection-hover-state",
+  "browser-sidebar-comment-overlay-annotation-selection-modifier-state",
+  "browser-sidebar-comment-overlay-annotation-selection-pointer-state",
+  "browser-sidebar-comment-overlay-close",
+  "browser-sidebar-comment-overlay-delete",
+  "browser-sidebar-comment-overlay-design-scrub-changed",
+  "browser-sidebar-comment-overlay-mounted",
+  "browser-sidebar-comment-overlay-preview-open-changed",
+  "browser-sidebar-comment-overlay-remove-annotation-selection",
+  "browser-sidebar-comment-overlay-submit",
+  "browser-sidebar-comment-overlay-tweaks-open-changed",
+  "browser-sidebar-design-overlay-delete",
+  "browser-sidebar-design-overlay-update",
   "browser-sidebar-owner-sync",
+  "browser-sidebar-site-annotation-api-enabled-changed",
+  "browser-sidebar-sync",
+  "browser-sidebar-tweaks-enabled-changed",
+  "browser-sidebar-webview-destroyed",
+  "browser-use-cursor-arrived",
   "browser-use-non-local-sites-allowed-changed",
+  "checkout-webview-presentation-changed",
+  "codex-app-server-restart",
   "codex-runtimes-config-changed",
   "desktop-notification-hide",
-  "electron-desktop-features-changed",
+  "electron-add-new-workspace-root-option",
+  "electron-app-state-snapshot-response",
   "electron-app-state-snapshot-trigger",
+  "electron-avatar-overlay-feedback-diagnostics-changed",
   "electron-avatar-overlay-restore-ready",
+  "electron-desktop-features-changed",
+  "electron-onboarding-skip-workspace",
+  "electron-pick-workspace-root-option",
   "electron-set-badge-count",
   "electron-set-window-mode",
+  "electron-sparkle-gates-changed",
   "electron-window-focus-request",
+  "electron-window-zoom-changed",
+  "global-dictation-close",
+  "global-dictation-completed",
+  "global-dictation-dismiss",
   "global-dictation-enabled-changed",
+  "global-dictation-failed",
+  "global-dictation-force-lock-changed",
+  "global-dictation-in-app-started",
+  "global-dictation-pointer-interaction-changed",
+  "global-dictation-record-history-item",
+  "global-dictation-recording-stopped",
+  "global-dictation-renderer-ready",
   "heartbeat-automation-thread-state-changed",
   "heartbeat-automations-enabled-changed",
   "hotkey-window-enabled-changed",
+  "inbox-automation-runs-mark-all-read",
+  "inbox-item-set-read-state",
+  "inbox-items-create",
   "keyboard-layout-map-changed",
   "local-thread-activity-changed",
   "mac-menu-bar-enabled-changed",
+  "open-browser-in-main-window",
+  "open-config-toml",
+  "open-current-main-window",
+  "open-in-browser",
+  "open-in-main-window",
+  "open-in-new-window",
   "power-save-blocker-set",
   "query-cache-invalidate",
   "ready",
+  "remote-hosted-pip-active-thread-changed",
+  "set-primary-runtime-install-release",
   "set-telemetry-user",
   "shared-object-unsubscribe",
+  "show-settings",
+  "subagent-thread-full-fidelity-changed",
   "thread-stream-state-changed",
+  "toggle-trace-recording",
   "tray-menu-threads-changed",
+  "update-diff-if-open",
   "view-focused",
+  "workspace-settings-webview-presentation-changed",
 ]);
 
 /** 只有 statsig initialize 需�?patch，其�?ChatGPT 后端请求不能误改�?*/
@@ -211,6 +314,7 @@ workspaceIpc = createWorkspaceIpcHandlers({
   setDesktopGlobalStateValue: desktopState.setDesktopGlobalStateValue,
   getGlobalStateValue: desktopState.getGlobalStateValue,
   normalizeWorkspacePath: workspaceRuntime.normalizeWorkspacePath,
+  getAdditionalAllowedRoots: () => [...desktopLocalProjectRoots(), ...APP_SERVER_PROJECT_ROOTS],
 });
 const localFiles = createLocalFileIpcHandlers({
   codexHome: CODEX_HOME,
@@ -241,6 +345,12 @@ function makeHandlers({ appServer, broadcast, logger, isClientConnected }) {
     isWithinAllowedRoots: workspaceIpc.isWithinAllowedRoots,
     parseWorkspaceRoots: workspaceIpc.parseWorkspaceRoots,
   });
+  const pendingWorktrees = createPendingWorktreeHandlers({
+    broadcast,
+    logger,
+    sharedObjectSnapshot: SHARED_OBJECT_SNAPSHOT,
+    codexHome: CODEX_HOME,
+  });
   const workerIpc = createWorkerIpcHandlers({
     broadcast,
     logger,
@@ -264,6 +374,7 @@ function makeHandlers({ appServer, broadcast, logger, isClientConnected }) {
     filterUnsupportedFeatureEnablements,
     patchCodexConfigResult,
     patchExperimentalFeatureListResult,
+    onAppServerProjectRoots: registerAppServerProjectRoots,
   });
 
   /** �?invoke context 中取浏览�?clientId�?*/
@@ -310,6 +421,7 @@ function makeHandlers({ appServer, broadcast, logger, isClientConnected }) {
     patchCodexConfigResult,
     patchConfigRequirementsResult,
     payloadShape,
+    pendingWorktrees,
     persistedState: PERSISTED_STATE,
     runDetached,
     sharedObjectSnapshot: SHARED_OBJECT_SNAPSHOT,
@@ -556,6 +668,16 @@ function makeHandlers({ appServer, broadcast, logger, isClientConnected }) {
       }
       case "paths-exist":
         return workspaceIpc.pathsExist(payload);
+      case "worktree-set-owner-thread":
+        // renderer settle worktree 会话后回写归属；写入 worktree 的 git config，供 resolve-worktree-for-thread 匹配。
+        return gitIpc.setWorktreeOwnerThreadForPayload(payload);
+      case "ensure-directory": {
+        // renderer 发消息前会确保本地目录存在，等价桌面端宿主行为；目录创建是幂等的。
+        const dirPath =
+          payload && typeof payload === "object" && typeof payload.path === "string" ? payload.path : "";
+        if (dirPath) require("fs").mkdirSync(dirPath, { recursive: true });
+        return null;
+      }
       case "workspace-directory-entries": {
         return workspaceIpc.listWorkspaceDirectoryEntries(payload);
       }
@@ -718,7 +840,8 @@ function makeHandlers({ appServer, broadcast, logger, isClientConnected }) {
       case "git-origins":
         return { origins: [] };
       case "inbox-items":
-        return { items: [] };
+        // 26.908 起 renderer 必须读到 unreadRunCounts.unreadRuns，缺字段会直接进错误边界。
+        return { items: [], unreadRunCounts: { total: 0, automationIds: [], unreadRuns: [] } };
       case "ambient-suggestions":
         return {
           file: workspaceRuntime.buildEmptyAmbientSuggestionsFile(
@@ -749,8 +872,10 @@ function makeHandlers({ appServer, broadcast, logger, isClientConnected }) {
         } catch {}
         return result;
       }
-      case "codex-home":
-        return path.join(os.homedir(), ".codex");
+      case "codex-home": {
+        const codexHome = path.join(os.homedir(), ".codex");
+        return { codexHome, worktreesSegment: path.join(codexHome, "worktrees") };
+      }
       case "home-directory":
         return { homeDirectory: os.homedir() };
       case "claude-code-import-status":
@@ -807,6 +932,17 @@ function makeHandlers({ appServer, broadcast, logger, isClientConnected }) {
         return { availableShells: process.platform === "win32" ? ["powershell", "commandPrompt"] : [] };
       case "settings:get":
         return desktopState.getSettingValue(payload, { readCodexConfig: appServerBridge.readCodexConfig });
+      // 26.908 renderer 改用 get-setting/get-settings/set-setting 通道读取宿主设置。
+      case "get-setting":
+        return { value: await desktopState.getSettingValue(payload, { readCodexConfig: appServerBridge.readCodexConfig }) };
+      case "get-settings":
+        return {
+          configuredValues: {},
+          values: await desktopState.getSettingValue(null, { readCodexConfig: appServerBridge.readCodexConfig }),
+        };
+      case "set-setting":
+        await desktopState.setSettingValue(payload, { callAppServer: appServerBridge.callAppServer });
+        return { success: true };
       case "settings:set":
         return desktopState.setSettingValue(payload, { callAppServer: appServerBridge.callAppServer });
       case "list-archived-threads":

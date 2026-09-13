@@ -10,6 +10,7 @@ function createViewMessageHandlers(deps) {
   const SHARED_OBJECT_SNAPSHOT = deps.sharedObjectSnapshot;
   const PERSISTED_STATE = deps.persistedState;
   const appServerBridge = deps.appServerBridge;
+  const pendingWorktrees = deps.pendingWorktrees;
   const desktopState = deps.desktopState;
   const payloadShape = deps.payloadShape;
   const fetchIpc = deps.fetchIpc;
@@ -166,6 +167,9 @@ function createViewMessageHandlers(deps) {
           broadcast({ channel: "electron-desktop-features-changed", payload: features });
         }
         return true;
+      }
+      if (String(payload.type || "").startsWith("pending-worktree-")) {
+        return pendingWorktrees.handlePendingWorktreeMessage(payload);
       }
       if (DESKTOP_VIEW_NOOP_MESSAGE_TYPES.has(String(payload.type || ""))) {
         // 这些是 Desktop 主进程/系统 UI 状态同步消息。Web 没有对应原生窗口、

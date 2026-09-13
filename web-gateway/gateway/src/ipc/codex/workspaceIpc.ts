@@ -15,6 +15,7 @@ function createWorkspaceIpcHandlers(deps) {
   const setDesktopGlobalStateValue = deps.setDesktopGlobalStateValue;
   const getGlobalStateValue = deps.getGlobalStateValue;
   const normalizeWorkspacePath = deps.normalizeWorkspacePath;
+  const getAdditionalAllowedRoots = deps.getAdditionalAllowedRoots;
 
   /** 解析允许暴露给 Web 的 workspace roots，优先环境变量，其次复用 Desktop 状态。 */
   function parseWorkspaceRoots() {
@@ -54,7 +55,11 @@ function createWorkspaceIpcHandlers(deps) {
   function isWithinAllowedRoots(filePath) {
     const candidate = realpathSafe(filePath);
     if (!candidate) return false;
-    for (const root of [...parseWorkspaceRoots(), ...CODEX_ASSET_ROOTS]) {
+    for (const root of [
+      ...parseWorkspaceRoots(),
+      ...CODEX_ASSET_ROOTS,
+      ...(typeof getAdditionalAllowedRoots === "function" ? getAdditionalAllowedRoots() : []),
+    ]) {
       const rootReal = realpathSafe(root);
       if (!rootReal) continue;
       const rel = path.relative(rootReal, candidate);
