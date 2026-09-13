@@ -930,9 +930,12 @@ function patchUltraReasoningEffortAvailability(content) {
   let next = content.replace(capabilityRe, capabilityReplacement);
 
   const [efforts, includeUltra, model, effort] = modelEffortsMatch.slice(1);
+  // ultra 只对 OpenAI 的 gpt-* 模型合成：第三方目录模型（如 deepseek-*）的 API
+  // 会把 ultra 当作 thinking 模式并要求回传 reasoning_text，codex 不会回传，
+  // 第二轮起必报错，所以不能给它们暴露这个档位（issue #114）。
   const modelEffortsReplacement =
     `let ${efforts}=((` +
-    `${includeUltra}=!0),${model}.supportedReasoningEfforts` +
+    `${includeUltra}=!0),/^gpt-/.test(${model}.model)&&${model}.supportedReasoningEfforts` +
     `.some(({reasoningEffort:${effort}})=>${effort}===\`max\`)&&!` +
     `${model}.supportedReasoningEfforts.some(({reasoningEffort:${effort}})=>` +
     `${effort}===\`ultra\`)?[...${model}.supportedReasoningEfforts,` +

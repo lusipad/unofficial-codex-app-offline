@@ -159,7 +159,7 @@ const DESKTOP_ASAR_PATCH_MARKERS = Object.freeze(
 | `default-on-gate-wrapper` | `checkGate` 路径未知 gate 默认启用 |
 | `sidebar-activity-view` | 变量 gate ID 的旁路 |
 | `workspace-dependencies-settings` | 变量 gate ID 的旁路 |
-| `ultra-reasoning-effort` | 上游 `filter(e!=='ultra')` → 放行并在仅支持 `max` 时合成 ultra 条目 |
+| `ultra-reasoning-effort` | 上游 `filter(e!=='ultra')` → 放行并仅为 `gpt-*` 模型在仅支持 `max` 时合成 ultra 条目（第三方目录模型不合成，issue #114） |
 | `settings-route-map` | 上游对 `show-settings` 抛 "not implemented" → 实现路由 |
 
 另需纳入契约的两项：`stdio-write-error-guard-v2`（当前在 verify 中硬编码字面量）、`enable_i18n` 默认值补丁（当前完全无 marker，`assert` 用 `negative`）。

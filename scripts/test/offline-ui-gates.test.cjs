@@ -591,6 +591,14 @@ test("ultra reasoning effort stays available for models that already support max
           { reasoningEffort: "max", description: "max effort" },
         ],
       },
+      {
+        model: "deepseek-flash",
+        hidden: false,
+        isDefault: false,
+        supportedReasoningEfforts: [
+          { reasoningEffort: "max", description: "max effort" },
+        ],
+      },
     ],
     useHiddenModels: false,
   });
@@ -599,6 +607,12 @@ test("ultra reasoning effort stays available for models that already support max
   assert.deepEqual(
     result.models[0].supportedReasoningEfforts.map((item) => item.reasoningEffort),
     ["max", "ultra"],
+  );
+  // issue #114：第三方目录模型不合成 ultra（其 API 的 thinking 模式要求回传
+  // reasoning_text，codex 不会回传，第二轮起必报错）。
+  assert.deepEqual(
+    result.models[1].supportedReasoningEfforts.map((item) => item.reasoningEffort),
+    ["max"],
   );
 
   const secondPass = patchUltraReasoningEffortAvailability(patched.content);

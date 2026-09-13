@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-09-13
+
+### 中文
+
+- 修复 DeepSeek + Ultra 组合报错 `The reasoning_text in the thinking mode must be passed back to the API`（issue #114）：`ultra-reasoning-effort` 补丁此前会给所有声明 `max` 的模型合成 Ultra 档位，第三方目录模型（`deepseek-flash` 声明 low/high/max）也因此暴露出 Ultra；DeepSeek 把 ultra 当作 thinking 模式并要求后续请求回传 `reasoning_text`，而 codex 不会回传，第二轮起必报错。现在合成仅限 `gpt-*` 模型（ultra 是 OpenAI 侧能力，GPT-6-Astra/Ultra 组合已实测验证），第三方目录模型保持其目录声明的档位。
+
+### English
+
+- Fixed the DeepSeek + Ultra combination failing with `The reasoning_text in the thinking mode must be passed back to the API` (issue #114): the `ultra-reasoning-effort` patch used to synthesize an Ultra entry for every model advertising `max`, which exposed Ultra for third-party catalog models too (`deepseek-flash` declares low/high/max). DeepSeek treats ultra as thinking mode and requires `reasoning_text` echoed back on subsequent requests, which codex never sends, so every turn after the first fails. Synthesis is now limited to `gpt-*` models (ultra is an OpenAI-side capability, validated end to end with GPT-6-Astra/Ultra); third-party catalog models keep exactly the efforts their catalog declares.
+
 ## 2026-09-12
 
 ### 中文

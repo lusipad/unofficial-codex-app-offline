@@ -469,7 +469,7 @@ const DESKTOP_ASAR_PATCHES = Object.freeze([
     tier: "required",
     assert: "marker",
     evidence:
-      "26.903.8094.0: upstream filters the ultra reasoning effort out of the selector; the patch keeps it and synthesizes an entry for models that advertise max but not ultra.",
+      "26.903.8094.0: upstream filters the ultra reasoning effort out of the selector; the patch keeps it and synthesizes an entry for gpt-* models that advertise max but not ultra. Third-party catalog models (e.g. deepseek-*) are skipped: their APIs treat ultra as thinking mode and demand reasoning_text echoed back, which codex never sends (issue #114).",
     reverify: "Check whether the supportedReasoningEfforts filter still excludes ultra.",
   }),
   Object.freeze({
