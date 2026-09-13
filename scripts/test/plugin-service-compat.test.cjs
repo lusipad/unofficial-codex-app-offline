@@ -32,15 +32,9 @@ function loadFetchIpc(compat) {
   const localRequire = (request) => {
     if (request === "./pluginServiceCompat.cjs") return compat;
     if (request === "./IGatewayCodexIpcPort")
-      return require(path.join(
-        repoRoot,
-        "web-gateway",
-        "gateway",
-        "dist",
-        "ipc",
-        "codex",
-        "IGatewayCodexIpcPort.js",
-      ));
+      // 哨兵只用于 vscode://codex/* 分支的恒等比较，本测试不经过该分支；
+      // 用内联 stub 保持测试自包含，不依赖 gateway 先编译出 dist。
+      return { UNHANDLED_CODEX_CHANNEL: Symbol("UNHANDLED_CODEX_CHANNEL") };
     return require(request);
   };
   Function("require", "module", "exports", source)(
