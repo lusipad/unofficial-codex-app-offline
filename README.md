@@ -16,6 +16,9 @@
 
 构建时自动拉取 [openai/skills](https://github.com/openai/skills)，离线 seed 打包；首次 Setup 仅安装基础 profile，其余技能留在包内按需同步。
 
+> [!TIP]
+> **只想装官方原版、不需要离线重打包？** 官方 Codex 的 MSIX 现在可以直接安装，无需 Store 客户端即可拿到 CDN 直链 → 见 [只要官方原版：MSIX 直链下载](#msix-直链下载)。
+
 ## 快速开始
 
 ### Windows 完整包
@@ -87,6 +90,8 @@ bash start.sh
 ```
 
 LAN / 公网模式务必设密码。浏览器 UI 控制的是 gateway 所在机器的文件和进程，不要暴露到不受信网络。
+
+<a id="msix-直链下载"></a>
 
 ### 只要官方原版：MSIX 直链下载
 
@@ -228,6 +233,9 @@ Two ways to use Codex, sharing the same offline skill seed:
 - **Desktop**: Unofficial offline portable repack of the OpenAI Codex Windows app — extract and run, no Store or Microsoft account required.
 - **Browser** (Web Gateway): A local web server that lets you use Codex from any browser. The gateway serves the frontend UI and proxies requests to a locally installed `@openai/codex` CLI. Architecture is **"Codex CLI as backend, browser as frontend"** — hence cross-platform.
 
+> [!TIP]
+> **Only want the official app, without this offline repack?** The official Codex MSIX now installs directly — grab the CDN link without the Store client → see [Official MSIX via direct link](#msix-direct-link).
+
 ### Quick Start
 
 **Windows full package:** Download `*-portable.zip` from [Releases](../../releases), extract, run `Setup Codex.cmd` once, then `Codex.cmd` for desktop mode. For browser mode: install Node.js 18+, then run `Codex Web.cmd` and open `http://127.0.0.1:3737`. You can also use the matching `*-setup.exe`; its optional custom-model task is unchecked by default, and later unchecking or uninstalling removes only the installer-managed catalog while preserving providers, API keys, and other settings.
@@ -242,6 +250,8 @@ bash setup-linux.sh
 bash setup-linux.sh status
 bash setup-linux.sh update
 ```
+
+<a id="msix-direct-link"></a>
 
 ### Official MSIX via direct link
 
