@@ -345,6 +345,7 @@ jobs:
           $lines.Add("")
           $lines.Add("## Assets")
           $lines.Add("")
+          $lines.Add("- ``OpenAI.Codex-x64.msix`` (pristine official MSIX; one-click install of the unmodified app)")
           $lines.Add("- portable zip")
           $lines.Add("- setup exe")
           $lines.Add("- bundled skills zip")

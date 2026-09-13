@@ -1,4 +1,4 @@
-﻿[CmdletBinding()]
+[CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)][string]$BundleUrl,
     [string]$Destination = 'build/source-app',
@@ -141,6 +141,12 @@ try {
     Copy-Item -Path $appSourcePath -Destination (Join-Path $destinationRoot 'app') -Recurse -Force
     Copy-Item -Path $manifestPath -Destination (Join-Path $metadataPath 'AppxManifest.xml') -Force
 
+    # Preserve the pristine x64 package archive so the build can publish it as a
+    # release asset (one-click official MSIX download linked from the README).
+    $packageArchiveExtension = [System.IO.Path]::GetExtension($packageArchivePath).ToLowerInvariant()
+    $preservedArchiveName = 'OpenAI.Codex-x64' + $packageArchiveExtension
+    Copy-Item -Path $packageArchivePath -Destination (Join-Path $metadataPath $preservedArchiveName) -Force
+
     [xml]$manifest = Get-Content -Path $manifestPath -Raw
     $identity = $manifest.Package.Identity
 
@@ -155,6 +161,7 @@ try {
         sourceMode = 'rg_adguard'
         sourceBundleUrl = $BundleUrl
         sourceFileName = $downloadName
+        sourcePackageArchivePath = "metadata/$preservedArchiveName"
         sourceSha1 = if ([string]::IsNullOrWhiteSpace($ExpectedSha1)) { $null } else { $ExpectedSha1.ToLowerInvariant() }
     }
 

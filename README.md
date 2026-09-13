@@ -17,7 +17,7 @@
 构建时自动拉取 [openai/skills](https://github.com/openai/skills)，离线 seed 打包；首次 Setup 仅安装基础 profile，其余技能留在包内按需同步。
 
 > [!TIP]
-> **只想装官方原版、不需要离线重打包？** 官方 Codex 的 MSIX 现在可以直接安装，无需 Store 客户端即可拿到 CDN 直链 → 见 [只要官方原版：MSIX 直链下载](#msix-直链下载)。
+> **只想装官方原版、不需要离线重打包？** → **[点击直接下载官方 MSIX](https://github.com/lusipad/unofficial-codex-app-offline/releases/latest/download/OpenAI.Codex-x64.msix)**（未做任何修改，双击即可安装）。更多方式见 [只要官方原版：MSIX 直链下载](#msix-直链下载)。
 
 ## 快速开始
 
@@ -95,20 +95,20 @@ LAN / 公网模式务必设密码。浏览器 UI 控制的是 gateway 所在机�
 
 ### 只要官方原版：MSIX 直链下载
 
-官方 Codex 的 MSIX 现在可以直接安装。如果不需要本项目的离线重打包，只想装官方版本，可以绕过 Store 客户端直接拿 CDN 直链。
+官方 Codex 的 MSIX 现在可以直接安装。如果不需要本项目的离线重打包，只想装官方版本：
 
-**方法一（网页）**：打开 [store.rg-adguard.net](https://store.rg-adguard.net)，左侧类型选 `PackageFamilyName`，输入 `OpenAI.Codex_2p2nqsd0c76g0`，通道选 `Retail`，点 ✔。在结果表格里下载最新的 `OpenAI.Codex_<版本号>_x64__2p2nqsd0c76g0.msix`（ARM 设备选 `_arm64_` 那个；链接带时效，表格里同时给出 SHA1 可校验）。
+**一键直链（推荐）**：**[下载 OpenAI.Codex-x64.msix](https://github.com/lusipad/unofficial-codex-app-offline/releases/latest/download/OpenAI.Codex-x64.msix)** —— 随每次发布同步为最新官方版本，文件未做任何修改（SHA256 见同一 release 的 `SHA256SUMS.txt`）。下载后双击安装，或用 PowerShell：
 
-**方法二（脚本）**：本仓库的解析脚本直接输出直链 JSON（含全部候选与 SHA1）：
+```powershell
+Add-AppxPackage .\OpenAI.Codex-x64.msix
+```
+
+**备用方式一（网页）**：打开 [store.rg-adguard.net](https://store.rg-adguard.net)，左侧类型选 `PackageFamilyName`，输入 `OpenAI.Codex_2p2nqsd0c76g0`，通道选 `Retail`，点 ✔。在结果表格里下载最新的 `OpenAI.Codex_<版本号>_x64__2p2nqsd0c76g0.msix`（ARM 设备选 `_arm64_` 那个；链接带时效，表格里同时给出 SHA1 可校验）。
+
+**备用方式二（脚本）**：本仓库的解析脚本直接输出直链 JSON（含全部候选与 SHA1）：
 
 ```powershell
 node scripts/resolve-store-bundle-url.mjs --package-family-name OpenAI.Codex_2p2nqsd0c76g0
-```
-
-**安装**：双击 `.msix`，或用 PowerShell：
-
-```powershell
-Add-AppxPackage .\OpenAI.Codex_*.msix
 ```
 
 > `store.rg-adguard.net` 是第三方解析服务，可能失效；失效时脚本会自动回退到 Playwright 浏览器流程。
@@ -234,7 +234,7 @@ Two ways to use Codex, sharing the same offline skill seed:
 - **Browser** (Web Gateway): A local web server that lets you use Codex from any browser. The gateway serves the frontend UI and proxies requests to a locally installed `@openai/codex` CLI. Architecture is **"Codex CLI as backend, browser as frontend"** — hence cross-platform.
 
 > [!TIP]
-> **Only want the official app, without this offline repack?** The official Codex MSIX now installs directly — grab the CDN link without the Store client → see [Official MSIX via direct link](#msix-direct-link).
+> **Only want the official app, without this offline repack?** → **[Download the official MSIX directly](https://github.com/lusipad/unofficial-codex-app-offline/releases/latest/download/OpenAI.Codex-x64.msix)** (unmodified; double-click to install). More options in [Official MSIX via direct link](#msix-direct-link).
 
 ### Quick Start
 
@@ -255,20 +255,20 @@ bash setup-linux.sh update
 
 ### Official MSIX via direct link
 
-The official Codex MSIX now installs directly. If you only want the official app without this offline repack, you can grab the CDN link without the Store client.
+The official Codex MSIX now installs directly. If you only want the official app without this offline repack:
 
-**Option 1 (web):** open [store.rg-adguard.net](https://store.rg-adguard.net), pick `PackageFamilyName` on the left, enter `OpenAI.Codex_2p2nqsd0c76g0`, select the `Retail` ring, and click ✔. Download the latest `OpenAI.Codex_<version>_x64__2p2nqsd0c76g0.msix` from the results table (pick `_arm64_` on ARM devices; links expire, and the table also lists the SHA1 for verification).
+**One-click link (recommended):** **[Download OpenAI.Codex-x64.msix](https://github.com/lusipad/unofficial-codex-app-offline/releases/latest/download/OpenAI.Codex-x64.msix)** — refreshed to the latest official version with every release, unmodified (see `SHA256SUMS.txt` in the same release). Double-click to install, or via PowerShell:
 
-**Option 2 (script):** this repo's resolver prints the link as JSON (all candidates plus SHA1):
+```powershell
+Add-AppxPackage .\OpenAI.Codex-x64.msix
+```
+
+**Fallback 1 (web):** open [store.rg-adguard.net](https://store.rg-adguard.net), pick `PackageFamilyName` on the left, enter `OpenAI.Codex_2p2nqsd0c76g0`, select the `Retail` ring, and click ✔. Download the latest `OpenAI.Codex_<version>_x64__2p2nqsd0c76g0.msix` from the results table (pick `_arm64_` on ARM devices; links expire, and the table also lists the SHA1 for verification).
+
+**Fallback 2 (script):** this repo's resolver prints the link as JSON (all candidates plus SHA1):
 
 ```powershell
 node scripts/resolve-store-bundle-url.mjs --package-family-name OpenAI.Codex_2p2nqsd0c76g0
-```
-
-**Install:** double-click the `.msix`, or via PowerShell:
-
-```powershell
-Add-AppxPackage .\OpenAI.Codex_*.msix
 ```
 
 > `store.rg-adguard.net` is a third-party resolver and may go down; the script then falls back to a Playwright browser flow automatically.

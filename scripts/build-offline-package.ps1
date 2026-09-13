@@ -1,4 +1,4 @@
-﻿[CmdletBinding()]
+[CmdletBinding()]
 param(
     [string]$ConfigPath = 'config/offline-package.json',
     [switch]$SkipInstaller,
@@ -1314,6 +1314,16 @@ if ($LASTEXITCODE -ne 0) {
 }
 Copy-Item -LiteralPath $bundledModelCatalog -Destination $modelCatalogAsset -Force
 $assets.Add($modelCatalogAsset) | Out-Null
+
+# Publish the pristine official MSIX as a stable-named asset so the README can
+# offer a one-click /releases/latest/download/ link. Only rg_adguard imports
+# preserve the archive; the installed_store source mode has nothing to publish.
+$preservedMsix = Join-Path $sourceExportRoot 'metadata\OpenAI.Codex-x64.msix'
+if (Test-Path $preservedMsix) {
+    $msixAsset = Join-Path $artifactRoot 'OpenAI.Codex-x64.msix'
+    Copy-Item -LiteralPath $preservedMsix -Destination $msixAsset -Force
+    $assets.Add($msixAsset) | Out-Null
+}
 
 Write-BuildTrace 'Creating archives.'
 # Keep portable entries relative to the package root. The custom writer also
