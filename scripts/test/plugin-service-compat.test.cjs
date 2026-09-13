@@ -31,6 +31,16 @@ function loadFetchIpc(compat) {
   const loaded = { exports: {} };
   const localRequire = (request) => {
     if (request === "./pluginServiceCompat.cjs") return compat;
+    if (request === "./IGatewayCodexIpcPort")
+      return require(path.join(
+        repoRoot,
+        "web-gateway",
+        "gateway",
+        "dist",
+        "ipc",
+        "codex",
+        "IGatewayCodexIpcPort.js",
+      ));
     return require(request);
   };
   Function("require", "module", "exports", source)(

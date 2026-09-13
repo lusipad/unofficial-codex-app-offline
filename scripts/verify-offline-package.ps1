@@ -1,4 +1,4 @@
-﻿[CmdletBinding()]
+[CmdletBinding()]
 param(
     [string]$BuildMetadataPath = 'build-metadata.json',
     [string]$ConfigPath = 'config/offline-package.json',
@@ -709,7 +709,7 @@ try {
 
     $webGatewayServerPath = Join-Path $portableRoot '_internal\web\gateway\dist\server.js'
     $webGatewayServerContent = Get-Content -Path $webGatewayServerPath -Raw
-    foreach ($needle in @('codex-web-worked-for=1', 'max-age=31536000, immutable')) {
+    foreach ($needle in @('max-age=31536000, immutable')) {
         if (-not $webGatewayServerContent.Contains($needle)) {
             throw "Web gateway server is missing expected official asset cache marker: $needle"
         }
@@ -718,9 +718,17 @@ try {
         throw 'Web gateway server still disables browser cache for patched official JS assets.'
     }
 
+    $webGatewayAssetPatchesPath = Join-Path $portableRoot '_internal\web\gateway\dist\official\assetPatches.js'
+    $webGatewayAssetPatchesContent = Get-Content -Path $webGatewayAssetPatchesPath -Raw
+    foreach ($needle in @('codex-web-worked-for=1', 'connect-app-host')) {
+        if (-not $webGatewayAssetPatchesContent.Contains($needle)) {
+            throw "Web gateway asset patches are missing expected marker: $needle"
+        }
+    }
+
     $webGatewayGitPath = Join-Path $portableRoot '_internal\web\gateway\dist\ipc\codex\git.js'
     $webGatewayGitContent = Get-Content -Path $webGatewayGitPath -Raw
-    foreach ($needle in @('codex-worktrees', 'isMainWorktree')) {
+    foreach ($needle in @('codex-worktrees', 'list-worktrees', 'resolve-worktree-for-thread')) {
         if (-not $webGatewayGitContent.Contains($needle)) {
             throw "Web gateway git worker is missing expected worktree marker: $needle"
         }
@@ -844,7 +852,7 @@ try {
 
         $webZipServerPath = Join-Path $webRoot 'gateway\dist\server.js'
         $webZipServerContent = Get-Content -Path $webZipServerPath -Raw
-        foreach ($needle in @('codex-web-worked-for=1', 'max-age=31536000, immutable')) {
+        foreach ($needle in @('max-age=31536000, immutable')) {
             if (-not $webZipServerContent.Contains($needle)) {
                 throw "Web zip gateway server is missing expected official asset cache marker: $needle"
             }
@@ -853,9 +861,17 @@ try {
             throw 'Web zip gateway server still disables browser cache for patched official JS assets.'
         }
 
+        $webZipAssetPatchesPath = Join-Path $webRoot 'gateway\dist\official\assetPatches.js'
+        $webZipAssetPatchesContent = Get-Content -Path $webZipAssetPatchesPath -Raw
+        foreach ($needle in @('codex-web-worked-for=1', 'connect-app-host')) {
+            if (-not $webZipAssetPatchesContent.Contains($needle)) {
+                throw "Web zip gateway asset patches are missing expected marker: $needle"
+            }
+        }
+
         $webZipGitPath = Join-Path $webRoot 'gateway\dist\ipc\codex\git.js'
         $webZipGitContent = Get-Content -Path $webZipGitPath -Raw
-        foreach ($needle in @('codex-worktrees', 'isMainWorktree')) {
+        foreach ($needle in @('codex-worktrees', 'list-worktrees', 'resolve-worktree-for-thread')) {
             if (-not $webZipGitContent.Contains($needle)) {
                 throw "Web zip git worker is missing expected worktree marker: $needle"
             }

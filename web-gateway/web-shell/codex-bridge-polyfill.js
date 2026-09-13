@@ -1638,6 +1638,19 @@
   w.__codexWebPayloadShape = payloadShape;
   scheduleModelListPreload();
 
+  /** gateway 重启后代号变化时自动刷新页面，避免旧页面继续跑过期代码（sessionStorage 防刷新循环）。 */
+  function maybeReloadForServerGeneration(payload) {
+    const expected = cfg && cfg.serverGeneration;
+    const actual = payload && payload.generation;
+    if (!expected || !actual || actual === expected) return;
+    const markerKey = "codex-web:reloaded-for-generation";
+    try {
+      if (w.sessionStorage.getItem(markerKey) === actual) return;
+      w.sessionStorage.setItem(markerKey, actual);
+    } catch {}
+    w.location.reload();
+  }
+
   /** 建立到 gateway 的 WebSocket，接收 app-server/业务广播事件。 */
   function connect() {
     if (!cfg.gatewayWsUrl || !("WebSocket" in w)) return;
@@ -1661,6 +1674,10 @@
       try {
         const msg = JSON.parse(event.data);
         if (msg && typeof msg.channel === "string") {
+          if (msg.channel === "codex-web:server-hello") {
+            maybeReloadForServerGeneration(msg.payload);
+            return;
+          }
           if (shouldClearModelListCache(msg.channel, msg.payload)) {
             clearModelListCache();
           }

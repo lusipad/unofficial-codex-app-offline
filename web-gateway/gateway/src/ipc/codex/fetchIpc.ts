@@ -5,6 +5,13 @@ const path = require("path");
 const {
   pluginServiceFallbackForError,
 } = require("./pluginServiceCompat.cjs");
+const { UNHANDLED_CODEX_CHANNEL } = require("./IGatewayCodexIpcPort");
+
+/** 宿主侧纯 fire-and-forget 设置项：Web 端没有对应宿主能力，按成功 ACK（null）即可。 */
+const BENIGN_HOST_SETTING_ENDPOINTS = new Set([
+  "set-remote-wsl-connections-enabled",
+  "global-dictation-hotkey-state",
+]);
 
 function createFetchIpcHandlers(deps) {
   const broadcast = deps.broadcast;
@@ -27,7 +34,11 @@ function createFetchIpcHandlers(deps) {
         responseType: "success",
         status,
         headers: { "content-type": "application/json; charset=utf-8" },
-        bodyJsonString: JSON.stringify(value),
+        // JSON.stringify(undefined) 会得到 undefined，经 WebSocket 序列化后键被丢弃，
+        // renderer 端 JSON.parse(undefined) 会直接抛错；统一归一为 "null"。
+        // JSON.stringify 对 Symbol/function 也会返回 undefined，同样归一为 "null"。
+        bodyJsonString:
+          value === undefined ? "null" : (JSON.stringify(value) ?? "null"),
       },
     }, targetClientId));
   }
@@ -150,6 +161,21 @@ function createFetchIpcHandlers(deps) {
         // renderer 把部分 Electron 行为编码成 vscode://codex/...，这里再转回业务 IPC。
         const endpoint = url.slice("vscode://codex/".length);
         const value = await invokeCodexChannel(endpoint, body, context);
+        if (value === UNHANDLED_CODEX_CHANNEL) {
+          if (BENIGN_HOST_SETTING_ENDPOINTS.has(endpoint)) {
+            broadcastFetchResponse(requestId, null, 200, targetClientId);
+            return true;
+          }
+          // 未知端点不能静默吞掉：明确报错，避免 renderer 拿到无法解析的响应。
+          broadcastFetchError(
+            requestId,
+            new Error(`Unsupported Codex fetch endpoint: ${endpoint}`),
+            501,
+            targetClientId,
+            { url }
+          );
+          return false;
+        }
         if (
           endpoint === "open-file" &&
           value &&

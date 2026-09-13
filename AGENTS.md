@@ -34,6 +34,7 @@ Codex Offline - 离线版 Codex AI 编程助手 Web Gateway。
 ## 关键文件地图
 
 - Gateway IPC 与 App-Server 适配：`web-gateway/gateway/src/ipc/codex/`
+- 官方 renderer 响应期补丁（Web 端运行时兼容，锚定语义、失配告警并失败关闭）：`web-gateway/gateway/src/official/assetPatches.ts`
 - Gateway 回归测试：`web-gateway/gateway/test/`
 - 插件服务共享兼容契约：`scripts/desktop-patches/plugin-service-compat.cjs`
 - 桌面运行时薄适配：`scripts/desktop-patches/init.cjs`

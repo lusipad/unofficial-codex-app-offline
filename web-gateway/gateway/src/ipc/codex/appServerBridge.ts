@@ -11,6 +11,7 @@ function createAppServerBridge(deps) {
   const filterUnsupportedFeatureEnablements = deps.filterUnsupportedFeatureEnablements;
   const patchCodexConfigResult = deps.patchCodexConfigResult;
   const patchExperimentalFeatureListResult = deps.patchExperimentalFeatureListResult;
+  const onAppServerProjectRoots = deps.onAppServerProjectRoots;
 
   /** renderer 需要这个时间才能把历史折叠摘要显示成“已处理 xs”。 */
   function isFiniteNumber(value) {
@@ -81,6 +82,64 @@ function createAppServerBridge(deps) {
     return /failed to list apps|connectors\/directory\/list|status 403 forbidden|app-server request timed out .*app\/list/i.test(message);
   }
 
+  /**
+   * codex-app-tools 插件的 codex_app MCP server 传输（command/args/env）由桌面主进程注入；
+   * Web 端没有该传输，renderer 回显的 config 快照里只剩 enabled_tools 碎片，
+   * app-server 合并后会报 \"failed to load configuration: invalid transport in mcp_servers.codex_app\"。
+   * 这里剔除不完整的 codex_app 覆盖项；带 command/url 的完整定义保持不变。
+   */
+  const CODEX_APP_MCP_DOTTED_PREFIXES = [
+    "mcp_servers.codex_app.",
+    "plugins.codex-app-tools@openai-bundled.mcp_servers.codex_app.",
+  ];
+
+  function sanitizeCodexAppMcpConfig(config) {
+    if (!config || typeof config !== "object" || Array.isArray(config)) return config;
+    let sanitized = config;
+    let changed = false;
+    const ensureMutable = () => {
+      if (!changed) {
+        sanitized = { ...config };
+        changed = true;
+      }
+    };
+    for (const prefix of CODEX_APP_MCP_DOTTED_PREFIXES) {
+      const keys = Object.keys(sanitized).filter((key) => key.startsWith(prefix));
+      if (keys.length === 0) continue;
+      const hasTransport = keys.some(
+        (key) => key === `${prefix}command` || key === `${prefix}url`
+      );
+      if (hasTransport) continue;
+      ensureMutable();
+      for (const key of keys) delete sanitized[key];
+    }
+    const nested = sanitized.mcp_servers;
+    if (nested && typeof nested === "object" && !Array.isArray(nested)) {
+      const codexApp = nested.codex_app;
+      if (
+        codexApp &&
+        typeof codexApp === "object" &&
+        !Array.isArray(codexApp) &&
+        typeof codexApp.command !== "string" &&
+        typeof codexApp.url !== "string"
+      ) {
+        ensureMutable();
+        const nextServers = { ...nested };
+        delete nextServers.codex_app;
+        sanitized = { ...sanitized, mcp_servers: nextServers };
+      }
+    }
+    return sanitized;
+  }
+
+  /** 携带 config 覆盖的方法：renderer 会把 get-settings 快照整体回传，需要统一清洗。 */
+  const CONFIG_OVERRIDE_METHODS = new Set([
+    "thread/start",
+    "thread/resume",
+    "thread/fork",
+    "turn/start",
+  ]);
+
   /** 转发业务请求到 app-server，并统一记录失败日志。 */
   async function callAppServer(method, payload) {
     const appServerMethod = APP_SERVER_METHOD_ALIASES.get(method) || method;
@@ -99,6 +158,17 @@ function createAppServerBridge(deps) {
         return { enablement: {} };
       }
     }
+    if (
+      CONFIG_OVERRIDE_METHODS.has(appServerMethod) &&
+      appServerPayload &&
+      typeof appServerPayload === "object" &&
+      appServerPayload.config
+    ) {
+      appServerPayload = {
+        ...appServerPayload,
+        config: sanitizeCodexAppMcpConfig(appServerPayload.config),
+      };
+    }
     try {
       const rawResult = await appServer.request(appServerMethod, appServerPayload);
       const patchedResult =
@@ -108,6 +178,14 @@ function createAppServerBridge(deps) {
               typeof patchExperimentalFeatureListResult === "function"
             ? patchExperimentalFeatureListResult(rawResult)
             : rawResult;
+      if (
+        /^project\/(list|read|create|import|update)$/.test(appServerMethod) &&
+        typeof onAppServerProjectRoots === "function"
+      ) {
+        try {
+          onAppServerProjectRoots(patchedResult);
+        } catch {}
+      }
       return enrichWorkedForAppServerResult(appServerMethod, patchedResult);
     } catch (error) {
       if (appServerMethod === "app/list" && isOptionalAppDirectoryFailure(error)) {

@@ -109,6 +109,34 @@ function createGitIpcHandlers(deps) {
 
   /** 读取仓库默认分支配置；没有配置时按 git 旧默认值 master 兜底。 */
   function gitDefaultBranchForRoot(gitRoot) {
+    // 对齐桌面语义：优先远端 HEAD，其次当前分支，再退到本地分支列表（偏好 main/master）。
+    try {
+      const ref = execFileSync("git", ["-C", gitRoot, "symbolic-ref", "--short", "refs/remotes/origin/HEAD"], {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+      }).trim();
+      const branch = ref.replace(/^[^/]+\//, "");
+      if (branch) return branch;
+    } catch {}
+    try {
+      const current = execFileSync("git", ["-C", gitRoot, "branch", "--show-current"], {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+      }).trim();
+      if (current) return current;
+    } catch {}
+    try {
+      const branches = execFileSync("git", ["-C", gitRoot, "branch", "--format=%(refname:short)"], {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+      })
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean);
+      if (branches.includes("main")) return "main";
+      if (branches.includes("master")) return "master";
+      if (branches.length > 0) return branches[0];
+    } catch {}
     try {
       const branch = execFileSync("git", ["-C", gitRoot, "config", "--get", "init.defaultBranch"], {
         encoding: "utf8",
@@ -116,7 +144,8 @@ function createGitIpcHandlers(deps) {
       }).trim();
       if (normalizeBranchName(branch)) return normalizeBranchName(branch);
     } catch {}
-    return "master";
+    // 空仓库/未知时返回 null，renderer 侧按 main 兜底。
+    return null;
   }
 
   /** current-branch IPC 的本地实现。 */
@@ -343,9 +372,9 @@ function createGitIpcHandlers(deps) {
 
   function gitDefaultBranchForPayload(payload) {
     const target = resolveGitTargetPath(payload);
-    if (!target) return { branch: "master", defaultBranch: "master" };
+    if (!target) return { branch: null, defaultBranch: null };
     const gitRoot = findGitRoot(target);
-    if (!gitRoot) return { root: realpathSafe(target) || path.resolve(target), branch: "master", defaultBranch: "master" };
+    if (!gitRoot) return { root: realpathSafe(target) || path.resolve(target), branch: null, defaultBranch: null };
     const branch = gitDefaultBranchForRoot(gitRoot);
     return { root: gitRoot, gitRoot, branch, defaultBranch: branch };
   }
@@ -498,21 +527,48 @@ function createGitIpcHandlers(deps) {
     }
   }
 
+  /** 扫描 worktree 目录对应的主仓库根（对齐桌面 worker 的 gitDir 契约）。 */
+  function gitCommonRootForWorktreeDir(dir) {
+    const result = runQuietCommand("git", ["-C", dir, "rev-parse", "--path-format=absolute", "--git-common-dir"], 1500);
+    if (!result.ok || !result.stdout) return null;
+    const commonDir = path.normalize(result.stdout.trim());
+    if (!commonDir) return null;
+    return path.basename(commonDir) === ".git" ? path.dirname(commonDir) : commonDir;
+  }
+
+  // 26.908 桌面 worker 契约（Khe）：扫描 worktreesRoot 下两级目录，
+  // 返回 {dir, gitDir}；renderer 按 gitDir 分组、按 dir 统计会话。
   function codexWorktreesForPayload(payload) {
-    const target = resolveGitTargetPath(payload);
-    if (!target) return { worktrees: [] };
-    const gitRoot = findGitRoot(target);
-    if (!gitRoot) return { worktrees: [] };
-    return {
-      worktrees: [
-        {
-          path: gitRoot,
-          root: gitRoot,
-          branch: currentGitBranchForRoot(gitRoot),
-          isMainWorktree: true,
-        },
-      ],
-    };
+    const rootParam =
+      payload && typeof payload === "object" && typeof payload.worktreesRoot === "string"
+        ? payload.worktreesRoot.trim()
+        : "";
+    const worktreesRoot = rootParam || path.join(require("os").homedir(), ".codex", "worktrees");
+    const worktrees = [];
+    let parents = [];
+    try {
+      parents = fs.readdirSync(worktreesRoot, { withFileTypes: true });
+    } catch {
+      return { worktrees };
+    }
+    for (const parent of parents) {
+      if (!parent.isDirectory()) continue;
+      const parentPath = path.join(worktreesRoot, parent.name);
+      let entries = [];
+      try {
+        entries = fs.readdirSync(parentPath, { withFileTypes: true });
+      } catch {
+        continue;
+      }
+      for (const entry of entries) {
+        if (!entry.isDirectory()) continue;
+        const dir = path.join(parentPath, entry.name);
+        // 链接 worktree 的 .git 是指向主仓库的文本文件，普通仓库是目录，二者都算。
+        if (!fs.existsSync(path.join(dir, ".git"))) continue;
+        worktrees.push({ dir, gitDir: gitCommonRootForWorktreeDir(dir) || dir });
+      }
+    }
+    return { worktrees };
   }
 
   /** 解析 git status --porcelain 输出为 renderer 更容易消费的结构。 */
@@ -585,6 +641,21 @@ function createGitIpcHandlers(deps) {
   }
 
   /** 执行本机命令并只返回结果，stdout/stderr 不落日志，避免泄露用户环境细节。 */
+  /** 读取仓库 git config；键不存在或仓库无效时返回 null（对齐桌面 worker 行为）。 */
+  function gitConfigValueForScope(root, scopeArgs, key) {
+    if (!findGitRoot(root)) return null;
+    try {
+      const out = execFileSync("git", ["-C", root, "config", ...scopeArgs, "--get", key], {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+        timeout: 2000,
+      });
+      return out || null;
+    } catch {
+      return null;
+    }
+  }
+
   function runQuietCommand(command, args, timeoutMs) {
     try {
       return {
@@ -616,6 +687,125 @@ function createGitIpcHandlers(deps) {
   }
 
 
+
+  /** git worktree list --porcelain 的结构化解析，供 list-worktrees / resolve-worktree-for-thread 使用。 */
+  function gitWorktreeListForRoot(gitRoot) {
+    const result = runQuietCommand("git", ["-C", gitRoot, "worktree", "list", "--porcelain"], 5000);
+    if (!result.ok || !result.stdout) return [];
+    const worktrees = [];
+    let current = null;
+    for (const line of result.stdout.split(/\r?\n/)) {
+      if (line.startsWith("worktree ")) {
+        current = { path: line.slice(9).trim(), head: null, branch: null, detached: false };
+        worktrees.push(current);
+      } else if (line.startsWith("HEAD ") && current) {
+        current.head = line.slice(5).trim();
+      } else if (line.startsWith("branch ") && current) {
+        current.branch = line.slice(7).trim().replace(/^refs\/heads\//, "");
+      } else if (line === "detached" && current) {
+        current.detached = true;
+      }
+    }
+    return worktrees;
+  }
+
+  /** list-worktrees：对齐桌面 getWorktrees，非仓库返回空数组。 */
+  function listWorktreesForPayload(payload) {
+    const target = resolveGitTargetPath(payload);
+    const gitRoot = target ? findGitRoot(target) : null;
+    if (!gitRoot) return { worktrees: [] };
+    return { worktrees: gitWorktreeListForRoot(gitRoot) };
+  }
+
+  function gitConfigGet(dir, key) {
+    const result = runQuietCommand("git", ["-C", dir, "config", "--get", key], 1500);
+    return result.ok && result.stdout.trim() ? result.stdout.trim() : null;
+  }
+
+  function gitConfigSet(dir, key, value) {
+    return runQuietCommand("git", ["-C", dir, "config", key, value], 1500).ok;
+  }
+
+  function gitHasUncommittedChanges(gitRoot) {
+    const result = runQuietCommand("git", ["-C", gitRoot, "status", "--porcelain"], 5000);
+    return !!(result.ok && result.stdout.trim());
+  }
+
+  /** resolve-worktree-for-thread：cwd 已在 linked worktree 中直接复用；否则按 owner 元数据匹配 conversationId。 */
+  function resolveWorktreeForThreadPayload(payload) {
+    const params = payload && typeof payload === "object" && payload.params && typeof payload.params === "object" ? payload.params : payload;
+    const fallback = { worktreeGitRoot: null, worktreeWorkspaceRoot: null, hasUncommittedChanges: false };
+    const cwd = params && typeof params.cwd === "string" ? params.cwd : "";
+    if (!cwd) return fallback;
+    const gitRoot = findGitRoot(cwd);
+    if (!gitRoot) return fallback;
+    const dotGit = path.join(gitRoot, ".git");
+    const isLinkedWorktree = fs.existsSync(dotGit) && !fs.statSync(dotGit).isDirectory();
+    if (isLinkedWorktree) {
+      return {
+        worktreeGitRoot: gitRoot,
+        worktreeWorkspaceRoot: realpathSafe(cwd) || path.resolve(cwd),
+        hasUncommittedChanges: gitHasUncommittedChanges(gitRoot),
+      };
+    }
+    const conversationId = params && typeof params.conversationId === "string" ? params.conversationId : "";
+    if (conversationId) {
+      for (const worktree of gitWorktreeListForRoot(gitRoot)) {
+        if (path.resolve(worktree.path) === path.resolve(gitRoot)) continue;
+        if (gitConfigGet(worktree.path, "codex.ownerThreadId") === conversationId) {
+          return {
+            worktreeGitRoot: worktree.path,
+            worktreeWorkspaceRoot: worktree.path,
+            hasUncommittedChanges: gitHasUncommittedChanges(worktree.path),
+          };
+        }
+      }
+    }
+    return fallback;
+  }
+
+  /** managed-worktree-state：对齐桌面 Mge 的 available/gone 主路径；snapshot 恢复暂不实现。 */
+  function managedWorktreeStateForPayload(payload) {
+    const params = payload && typeof payload === "object" && payload.params && typeof payload.params === "object" ? payload.params : payload;
+    const worktreePath = params && typeof params.worktreePath === "string" ? params.worktreePath : "";
+    try {
+      if (worktreePath && fs.statSync(worktreePath).isDirectory()) return { kind: "available" };
+    } catch {}
+    return { kind: "gone" };
+  }
+
+  /** delete-worktree：git worktree remove --force；worktree 参数兼容 {dir, gitDir} 或裸路径。 */
+  function deleteWorktreeForPayload(payload) {
+    const params = payload && typeof payload === "object" && payload.params && typeof payload.params === "object" ? payload.params : payload;
+    const worktree = params ? params.worktree : null;
+    const dir =
+      typeof worktree === "string"
+        ? worktree
+        : worktree && typeof worktree === "object"
+          ? worktree.dir || worktree.path || ""
+          : "";
+    if (!dir) return { success: false, worktreeId: null };
+    const gitDir = worktree && typeof worktree === "object" && typeof worktree.gitDir === "string" ? worktree.gitDir : dir;
+    const result = runQuietCommand("git", ["-C", gitDir, "worktree", "remove", "--force", dir], 30000);
+    return { success: result.ok, worktreeId: dir };
+  }
+
+  /** worktree-set-owner-thread fetch 端点：把会话归属写进 worktree 的 git config。 */
+  function setWorktreeOwnerThreadForPayload(payload) {
+    const params = payload && typeof payload === "object" && payload.params && typeof payload.params === "object" ? payload.params : payload;
+    const worktree = params ? params.worktree : null;
+    const dir =
+      typeof worktree === "string"
+        ? worktree
+        : worktree && typeof worktree === "object"
+          ? worktree.dir || worktree.path || worktree.worktreeGitRoot || ""
+          : "";
+    const conversationId = params && typeof params.conversationId === "string" ? params.conversationId : "";
+    if (!dir || !conversationId) return null;
+    gitConfigSet(dir, "codex.ownerThreadId", conversationId);
+    return null;
+  }
+
   /** Git worker 的业务方法分发，复用本文件中的本地 git 实现。 */
   function handleGitWorkerMethod(method, params) {
     switch (method) {
@@ -645,6 +835,14 @@ function createGitIpcHandlers(deps) {
         return gitSubmodulePathsForPayload(params);
       case "codex-worktrees":
         return codexWorktreesForPayload(params);
+      case "list-worktrees":
+        return listWorktreesForPayload(params);
+      case "resolve-worktree-for-thread":
+        return resolveWorktreeForThreadPayload(params);
+      case "managed-worktree-state":
+        return managedWorktreeStateForPayload(params);
+      case "delete-worktree":
+        return deleteWorktreeForPayload(params);
       case "recent-branches":
       case "search-branches": {
         const result = recentBranchesForPayload(params);
@@ -664,6 +862,28 @@ function createGitIpcHandlers(deps) {
         return checkoutGitBranchForPayload(params);
       case "base-branch":
         return baseBranchForPayload(params);
+      // 26.908 renderer 新增：live-query 订阅。Web 端没有 worker 推送通道，ACK 即可
+      //（renderer 成败走同一回调）。
+      case "subscribe-live-query":
+        return true;
+      // 26.908 新增：git 可用性探测，与桌面 worker 的 {available} 契约一致。
+      case "availability":
+        return { available: runQuietCommand("git", ["--version"], 1500).ok };
+      // 26.908 新增：按 scope 读 git config；缺仓库或键时返回 null（同桌面 worker）。
+      case "config-value": {
+        const configTarget = resolveGitTargetPath(params);
+        const configScope = params && typeof params.scope === "string" ? params.scope : "";
+        const scopeArgs = ["local", "global", "system", "worktree"].includes(configScope)
+          ? [`--${configScope}`]
+          : [];
+        const configKey = params && typeof params.key === "string" ? params.key : "";
+        if (!configTarget || !configKey) return { value: null };
+        return { value: gitConfigValueForScope(configTarget, scopeArgs, configKey) };
+      }
+      // 26.908 新增：review 摘要。Gateway 没有 review 管线，返回桌面 worker 仓库不可用时的
+      // 契约形态，renderer 按“不可评审”正常渲染而不是反复重试。
+      case "review-summary":
+        return { type: "error", source: params && params.source, failureReason: "repository_unavailable" };
       default:
         throw new Error(`Unsupported git worker method: ${method}`);
     }
@@ -680,6 +900,7 @@ function createGitIpcHandlers(deps) {
     gitStatusForPayload,
     handleGitWorkerMethod,
     recentBranchesForPayload,
+    setWorktreeOwnerThreadForPayload,
   };
 }
 

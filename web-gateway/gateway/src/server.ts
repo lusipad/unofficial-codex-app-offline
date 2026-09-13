@@ -26,6 +26,12 @@ const {
 const { GatewayIpcPort } = require("./ipc/GatewayIpcPort");
 const { GatewayWebClient } = require("./ipc/GatewayWebClient");
 const { ensureOfficialBundle } = require("./official/LocalCodexBundleProvider");
+const {
+  OFFICIAL_ASSET_PATCH_QUERY,
+  officialAssetPatchQuery,
+  shouldPatchOfficialAsset,
+  patchOfficialAsset,
+} = require("./official/assetPatches");
 
 const PROJECT_ROOT = path.resolve(__dirname, "../..");
 const WEB_SHELL_DIR = path.join(PROJECT_ROOT, "web-shell");
@@ -48,11 +54,9 @@ const AUTH_TOKEN_TTL_MS = Math.max(
 const DEBUG_LOGS = process.env.CODEX_WEB_DEBUG === "1" || process.env.CODEX_WEB_DEBUG === "true";
 const IPC_SLOW_LOG_MS = Number(process.env.CODEX_WEB_SLOW_LOG_MS || 750);
 const LOCAL_FILE_TOKEN_TTL_MS = Math.max(1_000, Number(process.env.CODEX_WEB_LOCAL_FILE_TOKEN_TTL_MS || 5 * 60 * 1000));
-const OFFICIAL_ASSET_PATCH_QUERY = "codex-web-worked-for=1";
 const DISABLE_SERVER_PATCH_CACHE = process.env.CODEX_WEB_DISABLE_SERVER_PATCH_CACHE === "1";
 const SERVER_PATCH_CACHE_MAX_ENTRIES = 256;
 let officialBundle = null;
-let hasWarnedWorkedForPatchMiss = false;
 const officialAssetPatchCache = new Map();
 const htmlResponseCache = new Map();
 // AsyncLocalStorage 用来把当前请求的 clientId/remoteAddress 传入更深层的 IPC handler。
@@ -323,10 +327,6 @@ function readBody(req) {
   });
 }
 
-function officialAssetPatchQuery() {
-  return OFFICIAL_ASSET_PATCH_QUERY;
-}
-
 function authenticatedScriptSrc(src, authToken = "") {
   if (!PERSIST_AUTH_TOKEN && authToken) return `${src}?token=${encodeURIComponent(authToken)}`;
   return src;
@@ -353,7 +353,7 @@ function patchOfficialAssetUrls(rawHtml, authToken = "") {
   return rawHtml
     .replace(
       /((?:src|href)=["']\/official\/assets\/[^"'?#]+\.js)(["'])/g,
-      (_match, prefix, quote) => `${prefix}?${officialAssetPatchQuery(authToken)}${quote}`
+      (_match, prefix, quote) => `${prefix}?${officialAssetPatchQuery()}${quote}`
     );
 }
 
@@ -458,138 +458,16 @@ function isAppShellRoute(req, pathname) {
   return !accept || accept.includes("text/html") || accept.includes("*/*");
 }
 
-/** 所有官方 JS 都可能包含相对 import，需要统一加 query，避免新旧模块图混用。 */
-function shouldPatchOfficialAsset(reqPath) {
-  return /^\/official\/assets\/[^/]+\.js$/.test(reqPath);
-}
-
-/** JS module graph 内的相对 import 也要带同一个 query，否则会出现同一 chunk 两份实例。 */
-function patchOfficialJsModuleSpecifiers(source, authToken = "") {
-  return source.replace(
-    /((?:from|import)\s*(?:\(\s*)?)(["'`])(\.\/[^"'`?#]+\.js)\2/g,
-    (_match, prefix, quote, specifier) => `${prefix}${quote}${specifier}?${officialAssetPatchQuery(authToken)}${quote}`
-  );
-}
-
-/** 恢复历史 turn 时旧 renderer 转换漏了 firstTurnWorkItemStartedAtMs，导致折叠摘要退回“上 x 条消息”。 */
-function patchAppServerManagerSignalsChunk(source) {
-  const alreadyPatched =
-    /turnStartedAtMs:([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*)\.startedAt\),firstTurnWorkItemStartedAtMs:\1\(\2\.firstTurnWorkItemStartedAt\?\?\2\.startedAt\),finalAssistantStartedAtMs:\1\(\2\.completedAt\)/;
-  if (alreadyPatched.test(source)) return source;
-  const historyTurnShape =
-    /(turnStartedAtMs:([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*)\.startedAt\),)(?:durationMs:[^,]+,)?(finalAssistantStartedAtMs:\2\(\3\.completedAt\),status:\3\.status)/;
-  if (!historyTurnShape.test(source)) {
-    if (!hasWarnedWorkedForPatchMiss) {
-      hasWarnedWorkedForPatchMiss = true;
-      console.warn("[gateway] app-server-manager worked-for patch skipped: current bundle shape did not match");
-    }
-    return source;
-  }
-  return source.replace(historyTurnShape, (_match, prefix, secondsToMs, turnVar, suffix) =>
-    `${prefix}firstTurnWorkItemStartedAtMs:${secondsToMs}(${turnVar}.firstTurnWorkItemStartedAt??${turnVar}.startedAt),${suffix}`
-  );
-}
-
-/** Settings 页面已打包，但官方 renderer 在 Statsig 不可用时会隐藏入口。 */
-function patchSettingsGateChunk(source) {
-  return source.replace(/([,;]\s*[A-Za-z_$][\w$]*\s*=)\s*[$A-Za-z_][\w$]*\(`4166894088`\)/g, "$1!0");
-}
-
-/** Settings 里能选语言不代表 i18n provider 会加载语言包；Web 端默认按系统语言启用。 */
-function patchI18nDefaultsChunk(source) {
-  return source
-    .replaceAll(".get(`enable_i18n`,!1)", ".get(`enable_i18n`,!0)")
-    .replaceAll(".get(`locale_source`,`IDE`)", ".get(`locale_source`,`SYSTEM`)");
-}
-
-/** Web 环境下 RPC 初始化使用的 Electron MessagePort 不可用，替换为 mock services。 */
-function patchRpcInitChunk(source) {
-  // 替换 async function de(){...} 为直接提供 mock services 的版本
-  // 原始: var Q,$;async function de(){Q=ue(),$=await Q.services}export{$ as n,de as r,Q as t};
-  // Mock: 跳过 MessageChannel，直接暴露 mock services
-  if (/async function de\(\)\{Q=ue\(\),\$=await Q\.services\}/.test(source)) {
-    return source.replace(
-      /async function de\(\)\{Q=ue\(\),\$=await Q\.services\}/,
-      "async function de(){Q={services:Promise.resolve({" +
-      "hotkeyWindowHotkeys:{" +
-      "dismiss:function(){},transitionDone:function(){},setEnabled:function(){},open:function(){}" +
-      "}," +
-      "notifications:{" +
-      "dispatchMessage:function(){},show:function(){},hide:function(){}" +
-      "}," +
-      "primaryRuntime:{ensurePrimaryRuntimeInstalled:function(){return Promise.resolve()}," +
-      "  getPrimaryRuntimeInstallState:function(){return Promise.resolve({state:'installed'})}}," +
-      "codexMicro:{getMicroStatus:function(){return Promise.resolve({available:false})}}," +
-      "projectWritableRoots:{clearRoots:function(){return Promise.resolve()}," +
-      "  getWritableRoots:function(){return Promise.resolve([])}," +
-      "  setWritableRoots:function(){return Promise.resolve()}," +
-      "  roots:[]}" +
-      "})},$=await Q.services}"
-    );
-  }
-  return source;
-}
-
-/** Web 环境下 RPC 调用被 mock 替换，ma() 现在会立即 resolve。 */
-function patchAppMainRpcInitChunk(source) {
-  // ma() 现在调用的是被 patchRpcInitChunk mock 过的 de()，会立即 resolve
-  return source;
-}
-
-/** 工作树页面依赖完整 RPC 客户端，在 Web 环境下因 mock 不完整而崩溃。
-  * 将 worktree query 的 queryFn 替换为返回空数据的 mock，避免页面崩溃。 */
-function patchWorktreesSettingsChunk(source) {
-  return source.replace(
-    /e\(`git`\)\.request\(\{method:`codex-worktrees`[^)]*\)/g,
-    "Promise.resolve({worktrees:[],pinnedWorktrees:[]})"
-  );
-}
-
-/** 个性化页面中 codex-agents-md 查询依赖 RPC 客户端，mock 不可用时显示错误。
-  * 将查询替换为空 mock，显示"暂无自定义指令"而非错误。 */
-function patchPersonalizationSettingsChunk(source) {
-  // 替换 Me=C(S,`codex-agents-md`,e=>({params:{hostId:e},staleTime:O.FIVE_SECONDS}))
-  // 为 mock，注意嵌套括号需要用 .+? 配合末尾的 })) 来精确匹配
-  return source.replace(
-    /,Me=C\(S,`codex-agents-md`,e=>\(\{params:\{hostId:e\},staleTime:O\.FIVE_SECONDS\}\)\)/,
-    ",Me={data:{instructions:\"\"},isLoading:false,isFetching:false}"
-  );
-}
-
-/** 对官方 chunk 做响应期 patch，不落盘改 vendor/官方构建产物。 */
-function patchOfficialAsset(reqPath, data, authToken = "") {
-  if (!shouldPatchOfficialAsset(reqPath)) return data;
-  const source = data.toString("utf-8");
-  const withPatchedImports = patchOfficialJsModuleSpecifiers(source, authToken);
-  const withSettingsGate = patchSettingsGateChunk(withPatchedImports);
-  const withI18nDefaults = patchI18nDefaultsChunk(withSettingsGate);
-  const withAppServerPatch = /\/app-server-manager-signals-[^/]+\.js$/.test(reqPath)
-    ? patchAppServerManagerSignalsChunk(withI18nDefaults)
-    : withI18nDefaults;
-  const withRpcMock = /\/rpc-[^/]+\.js$/.test(reqPath)
-    ? patchRpcInitChunk(withAppServerPatch)
-    : withAppServerPatch;
-  const withWorktreesMock = /\/use-codex-worktrees-[^/]+\.js$/.test(reqPath)
-    ? patchWorktreesSettingsChunk(withRpcMock)
-    : withRpcMock;
-  const withPersonalizationMock = /\/personalization-settings-[^/]+\.js$/.test(reqPath)
-    ? patchPersonalizationSettingsChunk(withWorktreesMock)
-    : withWorktreesMock;
-  const patched = /\/app-main-[^/]+\.js$/.test(reqPath)
-    ? patchAppMainRpcInitChunk(withPersonalizationMock)
-    : withPersonalizationMock;
-  return Buffer.from(patched, "utf-8");
-}
 
 function readStaticResponseBody(file, reqPath, identity, authToken = "") {
   if (!shouldPatchOfficialAsset(reqPath)) return fs.readFileSync(file);
   if (DISABLE_SERVER_PATCH_CACHE) {
-    return patchOfficialAsset(reqPath, fs.readFileSync(file), authToken);
+    return patchOfficialAsset(reqPath, fs.readFileSync(file));
   }
   const cacheKey = `${reqPath}:${file}:${identity.size}:${identity.mtimeMs}:${OFFICIAL_ASSET_PATCH_QUERY}`;
   const cached = officialAssetPatchCache.get(cacheKey);
   if (cached) return cached;
-  const data = patchOfficialAsset(reqPath, fs.readFileSync(file), authToken);
+  const data = patchOfficialAsset(reqPath, fs.readFileSync(file));
   officialAssetPatchCache.set(cacheKey, data);
   limitMapSize(officialAssetPatchCache, SERVER_PATCH_CACHE_MAX_ENTRIES);
   return data;
@@ -842,6 +720,9 @@ function cachedModelListForWebConfig(appServer) {
   };
 }
 
+/** 每次 gateway 进程启动生成一个代号；旧页面重连后代号不一致时自动刷新，避免继续跑旧代码。 */
+const SERVER_GENERATION = `${process.pid}-${Date.now()}`;
+
 /** 创建 WebSocket hub，负责浏览器连接管理和 gateway 事件分发。 */
 function createWsHub(server, getGatewayIpcPort) {
   if (!WebSocketServer) {
@@ -896,6 +777,13 @@ function createWsHub(server, getGatewayIpcPort) {
           if (message && message.type === "hello" && clientId) {
             ws.__codexWebClientId = clientId;
             clientsById.set(clientId, ws);
+            // 告知页面当前 gateway 代号；页面代号不一致说明它还在跑旧代码，触发自动刷新。
+            try {
+              ws.send(JSON.stringify({
+                channel: "codex-web:server-hello",
+                payload: { generation: SERVER_GENERATION },
+              }));
+            } catch {}
             const gatewayIpcPort = getGatewayIpcPort && getGatewayIpcPort();
             if (gatewayIpcPort) {
               gatewayIpcPort.attachGatewayClient(new GatewayWebClient({ clientId, socket: ws }));
@@ -1113,6 +1001,7 @@ async function createGateway() {
   authToken,
   authExpiresAtMs,
   persistAuthToken,
+  serverGeneration: ${JSON.stringify(SERVER_GENERATION)},
 	  workspaceRoots: ${JSON.stringify(gatewayConfig.workspaceRoots)},
 	  homeDir: ${JSON.stringify(gatewayConfig.homeDir)},
 	  appServer: ${JSON.stringify(appServer.getMode())},

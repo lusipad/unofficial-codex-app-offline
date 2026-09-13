@@ -88,6 +88,26 @@ bash start.sh
 
 LAN / 公网模式务必设密码。浏览器 UI 控制的是 gateway 所在机器的文件和进程，不要暴露到不受信网络。
 
+### 只要官方原版：MSIX 直链下载
+
+官方 Codex 的 MSIX 现在可以直接安装。如果不需要本项目的离线重打包，只想装官方版本，可以绕过 Store 客户端直接拿 CDN 直链。
+
+**方法一（网页）**：打开 [store.rg-adguard.net](https://store.rg-adguard.net)，左侧类型选 `PackageFamilyName`，输入 `OpenAI.Codex_2p2nqsd0c76g0`，通道选 `Retail`，点 ✔。在结果表格里下载最新的 `OpenAI.Codex_<版本号>_x64__2p2nqsd0c76g0.msix`（ARM 设备选 `_arm64_` 那个；链接带时效，表格里同时给出 SHA1 可校验）。
+
+**方法二（脚本）**：本仓库的解析脚本直接输出直链 JSON（含全部候选与 SHA1）：
+
+```powershell
+node scripts/resolve-store-bundle-url.mjs --package-family-name OpenAI.Codex_2p2nqsd0c76g0
+```
+
+**安装**：双击 `.msix`，或用 PowerShell：
+
+```powershell
+Add-AppxPackage .\OpenAI.Codex_*.msix
+```
+
+> `store.rg-adguard.net` 是第三方解析服务，可能失效；失效时脚本会自动回退到 Playwright 浏览器流程。
+
 ## 包内结构
 
 ```
@@ -142,7 +162,7 @@ pwsh -NoProfile -File ./scripts/build-offline-package.ps1
 ### 构建流程
 
 1. 解析 Microsoft Store 上 `OpenAI.Codex` 最新 Retail 版 CDN 链接
-2. 下载 `.msixbundle`，提取 x64 应用载荷
+2. 下载 x64 `.msix`（旧列表为 `.msixbundle` 时先提取其中的 x64 应用载荷）
 3. 给 `app.asar` 打补丁（脱离 MSIX、绕 feature gate、路径修复等）
 4. 拉取官方 skills、下载 primary runtime 插件、Chrome 扩展
 5. 编译 web-gateway TypeScript
@@ -222,6 +242,26 @@ bash setup-linux.sh
 bash setup-linux.sh status
 bash setup-linux.sh update
 ```
+
+### Official MSIX via direct link
+
+The official Codex MSIX now installs directly. If you only want the official app without this offline repack, you can grab the CDN link without the Store client.
+
+**Option 1 (web):** open [store.rg-adguard.net](https://store.rg-adguard.net), pick `PackageFamilyName` on the left, enter `OpenAI.Codex_2p2nqsd0c76g0`, select the `Retail` ring, and click ✔. Download the latest `OpenAI.Codex_<version>_x64__2p2nqsd0c76g0.msix` from the results table (pick `_arm64_` on ARM devices; links expire, and the table also lists the SHA1 for verification).
+
+**Option 2 (script):** this repo's resolver prints the link as JSON (all candidates plus SHA1):
+
+```powershell
+node scripts/resolve-store-bundle-url.mjs --package-family-name OpenAI.Codex_2p2nqsd0c76g0
+```
+
+**Install:** double-click the `.msix`, or via PowerShell:
+
+```powershell
+Add-AppxPackage .\OpenAI.Codex_*.msix
+```
+
+> `store.rg-adguard.net` is a third-party resolver and may go down; the script then falls back to a Playwright browser flow automatically.
 
 ### Building from Source
 

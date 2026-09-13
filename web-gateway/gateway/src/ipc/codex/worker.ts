@@ -31,6 +31,9 @@ function createWorkerIpcHandlers(deps) {
 
     const request = payload.request;
     const method = String(request.method || "");
+    if (process.env.CODEX_WEB_DEBUG && deps.logger) {
+      deps.logger.warn(`[worker:${workerId}] method=${method}`);
+    }
     try {
       const value =
         workerId === "git"
@@ -39,6 +42,11 @@ function createWorkerIpcHandlers(deps) {
               throw new Error(`Unsupported worker: ${workerId}`);
             })();
       respondToWorkerRequest(workerId, request, { type: "ok", value });
+      if (process.env.CODEX_WEB_DEBUG && deps.logger) {
+        deps.logger.warn(
+          `[worker:${workerId}] ${method} params=${JSON.stringify(request.params || {}).slice(0, 200)} -> ${JSON.stringify(value === undefined ? null : value).slice(0, 200)}`
+        );
+      }
     } catch (error) {
       deps.logger && deps.logger.warn(`[worker:${workerId}] request failed: ${method}`, error);
       respondToWorkerRequest(workerId, request, {

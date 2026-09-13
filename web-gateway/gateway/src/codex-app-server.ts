@@ -78,6 +78,10 @@ function createJsonRpcClient(sendFn) {
 }
 
 function shellQuote(value) {
+  // spawn(..., { shell: true }) 在 Windows 走 cmd.exe，只认双引号；单引号是 POSIX shell 语法。
+  if (process.platform === "win32") {
+    return `"${String(value).replace(/"/g, '""')}"`;
+  }
   return `'${String(value).replace(/'/g, "'\\''")}'`;
 }
 
