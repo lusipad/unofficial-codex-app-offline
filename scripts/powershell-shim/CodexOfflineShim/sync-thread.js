@@ -38,8 +38,11 @@ const desktopCols = desktopDb
   .prepare("PRAGMA table_info(threads)")
   .all()
   .map((r) => r.name);
-const common = desktopCols.filter((c) => cliCols.includes(c));
-const colList = common.join(", ");
+const isSafeIdentifier = (c) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(c);
+const common = desktopCols.filter(
+  (c) => cliCols.includes(c) && isSafeIdentifier(c)
+);
+const colList = common.map((c) => `"${c}"`).join(", ");
 const placeholders = common.map(() => "?").join(", ");
 
 // Find CLI threads not yet in Desktop DB
