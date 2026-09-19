@@ -21,6 +21,16 @@
  *    place; an A/B launch test showed the offline package starts fine without
  *    either.  Both were removed.
  *
+ * 1b. Turn off the Windows app-contained core gate
+ *    26.915 added codexWindowsAppContainedCore to the bundle's package.json.
+ *    While it reads "1" the bootstrap calls the native updater's
+ *    getCurrentPackageFamily() before importing the main app; outside MSIX that
+ *    throws "The process has no package identity." and the surrounding catch
+ *    tears down every window, so the package launches to nothing.  A pristine
+ *    26.915 payload reproduces this with zero patches applied.  The offline
+ *    package is not an app-contained core build, so the manifest is made to say
+ *    so, which also selects the `bundled` core it actually ships.
+ *
  * 2. Implement "show-settings" and "open-config-toml" IPC handlers
  *    The Electron build throws "not implemented" for these messages.  We
  *    replace the throw with real handlers: show-settings reloads the window
@@ -283,6 +293,43 @@ function resolveMainEntry(extractDir) {
   ];
   return candidates.find(fs.existsSync) ?? null;
 }
+
+// ── Windows app-contained core gate ──────────────────────────────────────────
+//
+// 26.915 added `codexWindowsAppContainedCore` to the bundle's package.json.
+// While it reads "1" the main-process bootstrap enters an MSIX-only branch
+// that calls the native updater's getCurrentPackageFamily() *before* importing
+// the main app. Outside an MSIX container that native call throws "The process
+// has no package identity."; the optional chain in front of it only guards a
+// missing addon, not a throwing one, so the surrounding catch tears down every
+// window and the app never starts. A pristine 26.915 payload reproduces this
+// with zero offline patches applied.
+//
+// The offline package genuinely is not an app-contained core build: it has no
+// package identity and ships its own bundled core. Declaring that in the very
+// manifest the gate reads is the honest fix, and it also keeps the runtime on
+// the `bundled` core-selection path it actually ships. The field name is a
+// stable semantic anchor, so this survives bundle re-minification.
+const WINDOWS_APP_CONTAINED_CORE_FIELD = 'codexWindowsAppContainedCore';
+
+function disableWindowsAppContainedCore(manifestText) {
+  const manifest = JSON.parse(manifestText);
+  const current = manifest[WINDOWS_APP_CONTAINED_CORE_FIELD];
+
+  if (current === undefined) {
+    return { status: 'missing', text: manifestText };
+  }
+  if (current === '0') {
+    return { status: 'already-correct', text: manifestText };
+  }
+  if (current !== '1') {
+    return { status: 'unexpected', text: manifestText, current };
+  }
+
+  manifest[WINDOWS_APP_CONTAINED_CORE_FIELD] = '0';
+  return { status: 'patched', text: `${JSON.stringify(manifest, null, 2)}\n` };
+}
+// ── End windows app-contained core ──
 
 const COMPUTER_USE_ENV_DEFAULT =
   'if(process.env.CODEX_ELECTRON_ENABLE_WINDOWS_COMPUTER_USE==null){' +
@@ -1839,6 +1886,33 @@ try {
 
   patchFile(mainEntry);
   log('Main entry bootstrap applied.');
+
+  // Turn off the app-contained core gate before anything else: while it is on,
+  // the bootstrap throws before it ever imports the main app, so every other
+  // patch in this file is unreachable at runtime.
+  const manifestPath = path.join(tmpDir, 'package.json');
+  const containedCore = disableWindowsAppContainedCore(
+    fs.readFileSync(manifestPath, 'utf8'),
+  );
+  if (containedCore.status === 'patched') {
+    fs.writeFileSync(manifestPath, containedCore.text, 'utf8');
+    log('Windows app-contained core gate disabled in package.json.');
+  } else if (containedCore.status === 'already-correct') {
+    log('Windows app-contained core gate is already disabled.');
+  } else if (containedCore.status === 'missing') {
+    failRequiredPatch(
+      `package.json no longer declares ${WINDOWS_APP_CONTAINED_CORE_FIELD}. ` +
+      'Re-check whether the main-process bootstrap still calls the native ' +
+      'updater getCurrentPackageFamily() before importing the main app; if it ' +
+      'does, this package would launch to nothing outside MSIX.',
+    );
+  } else {
+    failRequiredPatch(
+      `package.json declares an unexpected ${WINDOWS_APP_CONTAINED_CORE_FIELD} ` +
+      `value ${JSON.stringify(containedCore.current)}; refusing to guess what ` +
+      'the MSIX-only bootstrap branch does with it.',
+    );
+  }
 
   const chromeBrowserClientHash = patchChromePluginScripts(path.resolve(appDir));
 

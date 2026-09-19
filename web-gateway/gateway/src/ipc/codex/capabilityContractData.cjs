@@ -230,6 +230,16 @@ const DESKTOP_ASAR_KNOWN_GATE_IDS = Object.freeze([
 // See docs/superpowers/specs/2026-09-11-desktop-patch-boundary-design.md.
 const DESKTOP_ASAR_PATCHES = Object.freeze([
   Object.freeze({
+    marker: "/*codex-offline:windows-app-contained-core-off*/",
+    kind: "patch",
+    tier: "required",
+    assert: "negative",
+    evidence:
+      "26.915.4065.0: package.json gained codexWindowsAppContainedCore:\"1\". With it on, the main-process bootstrap calls the native updater's getCurrentPackageFamily() before importing the main app; outside MSIX that throws \"The process has no package identity.\", the bootstrap catch destroys every window, and the app launches to nothing. A pristine 26.915 payload reproduces this with zero patches applied, and clearing the field restores a passing direct-launch smoke.",
+    reverify:
+      "Check whether package.json still carries the field and whether the bootstrap still calls getCurrentPackageFamily() unguarded ahead of the main import.",
+  }),
+  Object.freeze({
     marker: "/*codex-offline:windows-browser-use-capability*/",
     kind: "patch",
     tier: "required",

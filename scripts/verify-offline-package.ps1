@@ -2077,6 +2077,27 @@ if (i18nDefaultResiduals.length > 0) {
     i18nDefaultResiduals.join(', ')
   );
 }
+// 26.915 app-contained core gate. While package.json declares it as "1" the
+// main-process bootstrap calls the native updater getCurrentPackageFamily()
+// before importing the main app; outside MSIX that throws and the app launches
+// to nothing. Asserted against the manifest rather than a minified call site.
+const APP_CONTAINED_CORE_MARKER = patchMarker('/*codex-offline:windows-app-contained-core-off*/');
+let appContainedCoreValue;
+try {
+  appContainedCoreValue = JSON.parse(
+    asar.extractFile(asarPath, 'package.json').toString('utf8')
+  ).codexWindowsAppContainedCore;
+} catch (error) {
+  throw new Error(`Could not read package.json out of the asar: ${error.message}`);
+}
+if (appContainedCoreValue === '1') {
+  reportPatchMiss(
+    APP_CONTAINED_CORE_MARKER,
+    'package.json still declares codexWindowsAppContainedCore="1"; the desktop ' +
+    'bootstrap would call the native updater getCurrentPackageFamily() before ' +
+    'importing the main app and the package would launch to nothing outside MSIX.'
+  );
+}
 console.log(`[verify-offline-package] Verified app.asar patches in ${path.basename(asarPath)}`);
 '@
 

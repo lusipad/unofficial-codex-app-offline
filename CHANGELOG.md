@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-09-19
+
+### 中文
+
+- 修复 `26.915.4065.0` 离线包启动即白屏、CI `build-offline-package` 在 `Verify offline bundle` 连续失败的问题（issue #116）：上游 `26.915` 给 bundle 的 `package.json` 新增了 `codexWindowsAppContainedCore: "1"`，主进程 bootstrap 因此进入一条仅 MSIX 成立的分支，在 import 主应用**之前**调用原生更新器的 `getCurrentPackageFamily()`；脱离 MSIX 容器时该原生调用抛 `The process has no package identity.`（调用点前的可选链只挡插件加载失败，挡不住调用本身抛错），外层 catch 随即销毁所有窗口，主应用从未启动。离线包本就不是 app-contained core（没有包标识、自带 bundled core），因此补丁把该字段置为 `"0"`，同时让运行时回到它实际附带的 `bundled` 核心选择路径。补丁锚定 manifest 字段名而非压缩标识符，可跨重新压缩存活；字段缺失或出现未知值时补丁器失败关闭，验证器另加一条反向断言拒绝仍带 `"1"` 的包。
+- 定位说明（便于下次复现）：日志里最显眼的 `[sparkle] Failed to set up updater` 调用栈**不是**根因——它栈顶是 catch 内的 `startUpdaterAfterStartupFailure`，属二次失败，且 `initializeUpdaterOnce` 自带 try/catch 本就把它兜住；`phase=bootstrap-import-main` 也只是进入 try 前赋好的常量标签，并不代表失败发生在 import。用零补丁的官方原始载荷直启即可复现同样的失败，这条基线排除了本项目补丁的嫌疑，剩下的原始异常要靠给 bootstrap 的 catch 插桩才能打出来。
+- 验证：对 `26.915.4065.0` 全补丁包运行 `offline-direct-launch-smoke.mjs` 通过（app-server 与窗口均 ready）；把该字段改回 `"1"` 后验证器如期失败关闭。
+
+### English
+
+- Fixed the `26.915.4065.0` offline package launching to nothing, which failed CI `build-offline-package` at `Verify offline bundle` on every retry (issue #116): upstream `26.915` added `codexWindowsAppContainedCore: "1"` to the bundle's `package.json`, which sends the main-process bootstrap down an MSIX-only branch that calls the native updater's `getCurrentPackageFamily()` *before* importing the main app. Outside an MSIX container that native call throws `The process has no package identity.` — the optional chain in front of it only guards a missing addon, not a throwing one — so the surrounding catch destroys every window and the main app never starts. The offline package genuinely is not an app-contained core build (no package identity, ships its own bundled core), so the patch declares the field as `"0"`, which also keeps the runtime on the `bundled` core-selection path it actually ships. The patch anchors on the manifest field name rather than a minified identifier, so it survives re-minification; a missing field or an unexpected value fails the build closed, and the verifier gained a negative assertion that rejects any package still shipping `"1"`.
+- Debugging note for next time: the prominent `[sparkle] Failed to set up updater` stack in the logs is **not** the root cause — its top frame is `startUpdaterAfterStartupFailure`, invoked from inside the catch, and `initializeUpdaterOnce` already swallows that failure on its own. Likewise `phase=bootstrap-import-main` is a constant label assigned before the try block, not evidence that the import is where it broke. A pristine, zero-patch official payload reproduces the identical failure, which clears this project's patches; recovering the actual exception requires instrumenting the bootstrap catch.
+- Verified: `offline-direct-launch-smoke.mjs` passes against a fully patched `26.915.4065.0` package (both app-server and window reach ready), and the verifier fails closed as expected once the field is flipped back to `"1"`.
+
 ## 2026-09-13
 
 ### 中文
