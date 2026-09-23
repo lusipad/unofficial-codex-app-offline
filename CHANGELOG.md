@@ -1,5 +1,23 @@
 # Changelog
 
+## 2026-09-23
+
+### 中文
+
+- 修复 CI `build-offline-package` 在 `26.917.6896.0` 上连续三次重试全部失败的问题（issue #119）。上游 26.917 同时让两处静态补丁的语义锚点漂移，补丁器按设计失败关闭，构建停在 `Build offline bundle`：
+  1. **Chrome native pipe**：`browser-service.mjs` 把桥接查找、「桥不可用」错误和 socket 连接从传输类的 `static async create` 整体移进了一个共享 async 工厂（auth broker 与本机凭据读取两个调用点也复用它），`create` 里只剩一行委托，原来匹配连接流程的两种 `create` 形态同时失配，抛 `Could not locate Chrome browser-client native pipe transport to add Windows fallback.`。现按 single-shape 规则重写为当前形态：先用桥接 getter、不可用消息函数和 `createConnection` 这三个语义符号定位那个工厂（仅用于取压缩后的工厂名与传输类名），补丁**仍然只落在 browser-use 发现流程真正调用的传输类 `create` 上**，共享工厂保持原样——Windows 下 auth broker 的 socket 同样由 `${browser-use 前缀}-${uuid}` 生成，改工厂会把它们一起从特权桥改道到 `node:net` 直连。
+  2. **Windows Browser Use 能力覆盖**：上游把 `computerUseNodeRepl` 从能力对象里彻底删除（该键已不在 bundle 任何位置，能力 schema 里也没有了），并把 win32 分支收回成解析函数开头的 `let` 绑定；原正则要求 `,` 前缀且含 `computerUseNodeRepl:!0`，因此失配并抛 `Could not locate the Windows desktop feature override that enables node_repl.`。现按新形态重写，替换串改为直接展开共享契约的 `DESKTOP_BROWSER_USE_CAPABILITY_KEYS`，不再重复写死 `computerUse`/`computerUseNodeRepl`（此前会生成重复键）。
+- 定位说明（便于下次复现）：① CI 只会报**第一处**失配，第二处要把完整构建跑到底才会暴露——只修第一处并不能让 CI 转绿；② MSIX 本身就是 ZIP，用 HTTP Range 先读尾部 EOCD、再读中央目录、最后只取目标条目，约 6 MB 就能从 792 MB 的官方包里取出 `browser-service.mjs` 复现匹配失败，无需整包下载；③ 本地 `build/source-app` 缓存可能是旧版本且已被打过补丁，必须以 `Assert-PristineAppSource` 认可的新导出为准，不要用旧 stage 目录推断新版本形态。
+- 验证：`node --test ./scripts/test/*.test.cjs` 全绿；对 `26.917.6896.0` 跑通完整离线包构建（`build-offline-package.ps1`，补丁器报 `all patches applied or already correct`）并通过 `verify-offline-package.ps1`。
+
+### English
+
+- Fixed CI `build-offline-package` failing all three retries on `26.917.6896.0` (issue #119). Upstream 26.917 drifted two static-patch anchors at once, so the patcher failed closed and the build stopped at `Build offline bundle`:
+  1. **Chrome native pipe**: `browser-service.mjs` moved the bridge lookup, the unavailable-bridge error and the socket connect out of the transport class's `static async create` and into one shared async factory that the auth-broker and native-credential call sites reuse, leaving `create` a one-line delegate. Both `create` shapes that carried the connect flow stopped matching, raising `Could not locate Chrome browser-client native pipe transport to add Windows fallback.` The needle is rewritten to the single current shape: the factory is located by three semantic symbols (bridge getter, unavailable-message function, `createConnection`) purely to recover the minified factory and transport-class names, and the patch **still lands only on the transport `create` that browser-use discovery calls**, leaving the shared factory alone — on Windows the auth-broker socket is generated as `${browser-use prefix}-${uuid}` too, so patching the factory would divert those sockets off the privileged bridge onto a direct `node:net` connect.
+  2. **Windows Browser Use capability override**: upstream deleted `computerUseNodeRepl` outright (the key is gone from the whole bundle, including the capability schema) and folded the win32 branch back into the resolver's opening `let` binding. The old regex required a `,` prefix and `computerUseNodeRepl:!0`, so it missed and raised `Could not locate the Windows desktop feature override that enables node_repl.` It is rewritten against the new shape, and the replacement now expands the shared contract's `DESKTOP_BROWSER_USE_CAPABILITY_KEYS` instead of restating `computerUse`/`computerUseNodeRepl` (which previously emitted duplicate keys).
+- Debugging notes for next time: (1) CI only reports the **first** miss — the second one surfaces only when a full build runs to completion, so fixing the first does not turn CI green; (2) an MSIX is a ZIP, so reading the trailing EOCD, then the central directory, then just the wanted entries over HTTP range requests pulls `browser-service.mjs` out of the 792 MB official package in about 6 MB, which is enough to reproduce the match failure without downloading the whole bundle; (3) a local `build/source-app` cache can be an older version that is already patched — trust a fresh export that `Assert-PristineAppSource` accepts rather than inferring the new shape from an old stage directory.
+- Verified: `node --test ./scripts/test/*.test.cjs` all green; a full offline package build of `26.917.6896.0` completes (`build-offline-package.ps1`, patcher reports `all patches applied or already correct`) and passes `verify-offline-package.ps1`.
+
 ## 2026-09-19
 
 ### 中文

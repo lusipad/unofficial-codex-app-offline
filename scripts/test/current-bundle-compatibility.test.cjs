@@ -116,30 +116,73 @@ test("26.727 archive verifier accepts the current isError prop layout", () => {
   );
 });
 
-test("26.721 Chrome native pipe patch accepts an inline createConnection return", () => {
+test("26.917 Chrome native pipe patch identifies the factory but needles the transport", () => {
+  // 26.917 moved the bridge lookup out of the transport class and into a
+  // shared async factory, so the `static async create` needle no longer
+  // carries the connect flow. The factory is only used to learn the minified
+  // names; the needle stays on the transport that browser-use discovery calls.
   const matchSource = sourceSlice(
-    "    const createWithConnectionMatch =",
+    "    const transportFactoryMatch =",
     "\n\n    if (!content.includes(helperNeedle)",
   );
   const matchTransport = Function(
     "content",
     "nativePipeSymbols",
     "escapeRegExp",
-    `"use strict";\n${matchSource}\nreturn { createWithConnectionMatch, createWithInlineConnectionMatch, createNeedleMatch };`,
+    `"use strict";\n${matchSource}\nreturn { transportFactoryMatch, createNeedleMatch };`,
   );
-  const fixture =
-    "static async create(t){let r=Ru();if(r==null)throw new Error(jh());" +
-    "return new e(await r.createConnection(t))}";
+  const factory =
+    "async function yf(t,e,r){let n=AZ();if(n==null)throw new Error(r??EZ());" +
+    "return new Yo(await n.createConnection(t),e)}";
+  const create = "static async create(e){return await yf(e,{decodeMessage:WM})}";
   const result = matchTransport(
-    fixture,
-    { bridgeGetter: "Ru", unavailableMessage: "jh" },
+    `var bf=class extends Yo{constructor(e){super(e,{decodeMessage:WM})}${create}};${factory}`,
+    { bridgeGetter: "AZ", unavailableMessage: "EZ" },
     value => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
   );
 
-  assert.equal(result.createWithConnectionMatch, null);
-  assert.ok(result.createWithInlineConnectionMatch);
-  assert.equal(result.createNeedleMatch[0], fixture);
-  assert.deepEqual(result.createNeedleMatch.slice(1), ["t", "r", "e"]);
+  assert.ok(result.transportFactoryMatch, "the shared transport factory must be located");
+  assert.equal(result.transportFactoryMatch[0], factory);
+  assert.deepEqual(result.transportFactoryMatch.slice(1), ["yf", "t", "e", "r", "n", "Yo"]);
+
+  assert.ok(result.createNeedleMatch, "the delegating transport create must be located");
+  assert.equal(result.createNeedleMatch[0], create);
+  assert.deepEqual(result.createNeedleMatch.slice(1), ["e", "{decodeMessage:WM}"]);
+});
+
+test("26.917 Chrome native pipe replacement leaves the shared factory to the auth broker", () => {
+  const replacementSource = sourceSlice(
+    "    const createReplacement =",
+    "\n\n    content = content",
+  );
+  const buildReplacement = Function(
+    "pipeArg",
+    "transportClass",
+    "transportOptions",
+    "transportFactory",
+    "nativePipeDirectPatchMarker",
+    `"use strict";\n${replacementSource}\nreturn createReplacement;`,
+  );
+  const replacement = buildReplacement(
+    "e",
+    "Yo",
+    "{decodeMessage:WM}",
+    "yf",
+    "/*marker*/",
+  );
+
+  // Only the browser-use transport takes the direct node:net path. The shared
+  // factory is left alone so the auth-broker sockets — which can carry the
+  // same `codex-browser-use` pipe prefix — keep using the privileged bridge.
+  assert.match(
+    replacement,
+    /^static async create\(e\)\{if\(_codexOfflineShouldUseNativePipeFallback\(e\)\)\{/,
+  );
+  assert.match(
+    replacement,
+    /let _codexOfflineConnection=await _codexOfflineCreateNativePipeConnection\(e\);return new Yo\(_codexOfflineConnection,\{decodeMessage:WM\}\)\}/,
+  );
+  assert.ok(replacement.endsWith("return await yf(e,{decodeMessage:WM})}/*marker*/"));
 });
 
 test("26.803 Chrome native pipe patch accepts additional node:os imports", () => {
@@ -1114,4 +1157,51 @@ test("26.730 verifier rejects a UTF-8 BOM in the bundled marketplace manifest", 
     verifierScriptSource,
     /\$bytes = \[System\.IO\.File\]::ReadAllBytes\(\$Path\)[\s\S]*\$bytes\[0\] -eq 0xEF[\s\S]*\$bytes\[1\] -eq 0xBB[\s\S]*\$bytes\[2\] -eq 0xBF/,
   );
+});
+
+test("26.917 Windows Browser Use capability override matches the reduced upstream object", () => {
+  // Upstream dropped `computerUseNodeRepl` from the availability object (the
+  // key is gone from the whole bundle) and folded the win32 branch back into
+  // the opening `let` of the resolver, so the override only has `computerUse`
+  // to widen and must re-emit a statement rather than a continued binding.
+  const regexSource = sourceSlice(
+    "  const WINDOWS_BROWSER_USE_CAPABILITY_CANONICAL_RE =",
+    "\n  const NODE_REPL_FEATURE_ENABLED_PATCH_MARKER =",
+  );
+  const applySource = sourceSlice(
+    "    if (WINDOWS_BROWSER_USE_CAPABILITY_CANONICAL_RE.test(content)) {",
+    "\n    } else {",
+  );
+  const capabilityKeys = require(
+    path.join(repoRoot, "web-gateway", "gateway", "src", "ipc", "codex", "capabilityContractData.cjs"),
+  ).DESKTOP_BROWSER_USE_CAPABILITY_KEYS;
+  const marker = "/*codex-offline:windows-browser-use-capability*/";
+  const apply = Function(
+    "content",
+    "DESKTOP_BROWSER_USE_CAPABILITY_PATCH_FIELDS",
+    "WINDOWS_BROWSER_USE_CAPABILITY_PATCH_MARKER",
+    `"use strict";\n${regexSource}\n${applySource}\n}\nreturn content;`,
+  );
+
+  const fixture =
+    "function Ar(e,{buildFlavor:t=a.in.resolve(),env:n=w.default.env,platform:r=w.default.platform}={})" +
+    "{let i=r===`win32`&&n.CODEX_ELECTRON_ENABLE_WINDOWS_COMPUTER_USE===`1`?{...e,computerUse:!0}:e," +
+    "o=t===a.in.Dev?Mte(n):null;return o==null?{...i}:{...i,...o}}";
+  const patched = apply(
+    fixture,
+    capabilityKeys.map(key => `${key}:!0`).join(","),
+    marker,
+  );
+
+  assert.notEqual(patched, fixture, "the 26.917 capability override must match");
+  assert.match(
+    patched,
+    /\{let i=r===`win32`&&n\.CODEX_ELECTRON_ENABLE_WINDOWS_COMPUTER_USE===`1`\?\{\.\.\.e,/,
+    "the override must stay a `let` statement, not a dangling comma binding",
+  );
+  for (const key of capabilityKeys) {
+    assert.ok(patched.includes(`${key}:!0`), `${key} must be forced on`);
+  }
+  assert.ok(patched.includes(marker));
+  assert.ok(patched.endsWith("}:e,o=t===a.in.Dev?Mte(n):null;return o==null?{...i}:{...i,...o}}"));
 });

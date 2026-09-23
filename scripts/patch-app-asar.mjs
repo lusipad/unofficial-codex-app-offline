@@ -1289,54 +1289,44 @@ function patchChromeBrowserClient(filePath) {
       `function _codexOfflineShouldUseNativePipeFallback(t){return ${nativePipeSymbols.platform}()==="win32"&&typeof t=="string"&&t.startsWith(${nativePipeSymbols.pipePrefix}("win32"))}` +
       nativePipeHelpersWithoutTimeout +
       nativePipeFallbackPatchMarker;
-    const createWithConnectionMatch = content.match(
+    // The bridge lookup, the unavailable-bridge error and the socket connect
+    // now live in one shared async factory instead of inside the transport
+    // class.  Identify the factory by those symbols, then patch only the
+    // browser-use transport that delegates to it: the auth-broker call sites
+    // share the factory and their sockets can carry the same pipe prefix, so
+    // patching the factory would divert them off the privileged bridge too.
+    const transportFactoryMatch = content.match(
       new RegExp(
-        `static async create\\(([A-Za-z_$][\\w$]*)\\)\\{` +
+        `async function ([A-Za-z_$][\\w$]*)\\(([A-Za-z_$][\\w$]*),([A-Za-z_$][\\w$]*),([A-Za-z_$][\\w$]*)\\)\\{` +
         `let ([A-Za-z_$][\\w$]*)=${escapeRegExp(nativePipeSymbols.bridgeGetter)}\\(\\);` +
-        `if\\(\\2!=null\\)\\{let ([A-Za-z_$][\\w$]*)=await \\2\\.createConnection\\(\\1\\);` +
-        `return new ([A-Za-z_$][\\w$]*)\\(\\3\\)\\}` +
-        `throw new Error\\(${escapeRegExp(nativePipeSymbols.unavailableMessage)}\\(\\)\\)\\}`,
+        `if\\(\\5==null\\)throw new Error\\(\\4\\?\\?${escapeRegExp(nativePipeSymbols.unavailableMessage)}\\(\\)\\);` +
+        `return new ([A-Za-z_$][\\w$]*)\\(await \\5\\.createConnection\\(\\2\\),\\3\\)\\}`,
       ),
     );
-    const createWithInlineConnectionMatch = content.match(
-      new RegExp(
-        `static async create\\(([A-Za-z_$][\\w$]*)\\)\\{` +
-        `let ([A-Za-z_$][\\w$]*)=${escapeRegExp(nativePipeSymbols.bridgeGetter)}\\(\\);` +
-        `if\\(\\2==null\\)throw new Error\\(${escapeRegExp(nativePipeSymbols.unavailableMessage)}\\(\\)\\);` +
-        `return new ([A-Za-z_$][\\w$]*)\\(await \\2\\.createConnection\\(\\1\\)\\)\\}`,
-      ),
-    );
-    const createNeedleMatch = createWithConnectionMatch ?? createWithInlineConnectionMatch;
+    const createNeedleMatch = transportFactoryMatch
+      ? content.match(
+        new RegExp(
+          `static async create\\(([A-Za-z_$][\\w$]*)\\)\\{` +
+          `return await ${escapeRegExp(transportFactoryMatch[1])}\\(\\1,(\\{[^{}]*\\})\\)\\}`,
+        ),
+      )
+      : null;
 
-    if (!content.includes(helperNeedle) || !createNeedleMatch) {
+    if (!content.includes(helperNeedle) || !transportFactoryMatch || !createNeedleMatch) {
       throw new Error(
         'Could not locate Chrome browser-client native pipe transport to add Windows fallback.',
       );
     }
 
-    const [
-      createNeedle,
-      pipeArg,
-      bridgeVar,
-      thirdCapture,
-      fourthCapture,
-    ] = createNeedleMatch;
-    const connectionVar = createWithConnectionMatch
-      ? thirdCapture
-      : '_codexOfflineConnection';
-    const constructorVar = createWithConnectionMatch
-      ? fourthCapture
-      : thirdCapture;
+    const transportFactory = transportFactoryMatch[1];
+    const transportClass = transportFactoryMatch[6];
+    const [createNeedle, pipeArg, transportOptions] = createNeedleMatch;
     const createReplacement =
       `static async create(${pipeArg}){` +
       `if(_codexOfflineShouldUseNativePipeFallback(${pipeArg})){` +
-      `let ${bridgeVar}=await _codexOfflineCreateNativePipeConnection(${pipeArg});` +
-      `return new ${constructorVar}(${bridgeVar})}` +
-      `let ${bridgeVar}=${nativePipeSymbols.bridgeGetter}();` +
-      `if(${bridgeVar}!=null){` +
-      `let ${connectionVar}=await _codexOfflineBridgeCreateConnection(${bridgeVar},${pipeArg});` +
-      `return new ${constructorVar}(${connectionVar})}` +
-      `throw new Error(${nativePipeSymbols.unavailableMessage}())}` +
+      `let _codexOfflineConnection=await _codexOfflineCreateNativePipeConnection(${pipeArg});` +
+      `return new ${transportClass}(_codexOfflineConnection,${transportOptions})}` +
+      `return await ${transportFactory}(${pipeArg},${transportOptions})}` +
       nativePipeDirectPatchMarker;
 
     content = content
@@ -1988,11 +1978,12 @@ try {
   ];
   const WINDOWS_BROWSER_USE_CAPABILITY_PATCH_MARKER =
     contractPatchMarker('/*codex-offline:windows-browser-use-capability*/');
-  // v26.608+ introduced a multi-step let chain: darwin/win32-cu checks precede the CODEX env check.
-  // The CODEX_ELECTRON_ENABLE_WINDOWS_COMPUTER_USE assignment is no longer the first let; it is
-  // preceded by a comma rather than being immediately after the opening brace.
+  // 26.917 collapsed the multi-step let chain back into a single opening
+  // binding and dropped `computerUseNodeRepl` from the capability object —
+  // upstream no longer declares that key anywhere, so the override only has
+  // `computerUse` to widen.
   const WINDOWS_BROWSER_USE_CAPABILITY_CANONICAL_RE =
-    /,([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)===`win32`&&([A-Za-z_$][\w$]*)\.CODEX_ELECTRON_ENABLE_WINDOWS_COMPUTER_USE===`1`\?\{\.\.\.([A-Za-z_$][\w$]*),computerUse:!0,computerUseNodeRepl:!0\}:\4(?=,)/;
+    /let ([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)===`win32`&&([A-Za-z_$][\w$]*)\.CODEX_ELECTRON_ENABLE_WINDOWS_COMPUTER_USE===`1`\?\{\.\.\.([A-Za-z_$][\w$]*),computerUse:!0\}:\4(?=,)/;
   const NODE_REPL_FEATURE_ENABLED_PATCH_MARKER =
     contractPatchMarker('/*codex-offline:node-repl-feature-enabled*/');
   const NODE_REPL_FEATURE_CONFIG_CURRENT_RE =
@@ -2769,8 +2760,8 @@ try {
     if (WINDOWS_BROWSER_USE_CAPABILITY_CANONICAL_RE.test(content)) {
       content = content.replace(
         WINDOWS_BROWSER_USE_CAPABILITY_CANONICAL_RE,
-        ',$1=$2===`win32`&&$3.CODEX_ELECTRON_ENABLE_WINDOWS_COMPUTER_USE===`1`?' +
-          `{...$4,computerUse:!0,computerUseNodeRepl:!0,${DESKTOP_BROWSER_USE_CAPABILITY_PATCH_FIELDS}${WINDOWS_BROWSER_USE_CAPABILITY_PATCH_MARKER}}:$4`,
+        'let $1=$2===`win32`&&$3.CODEX_ELECTRON_ENABLE_WINDOWS_COMPUTER_USE===`1`?' +
+          `{...$4,${DESKTOP_BROWSER_USE_CAPABILITY_PATCH_FIELDS}${WINDOWS_BROWSER_USE_CAPABILITY_PATCH_MARKER}}:$4`,
       );
     } else {
       continue;
