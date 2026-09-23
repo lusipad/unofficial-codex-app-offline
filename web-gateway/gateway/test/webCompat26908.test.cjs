@@ -362,8 +362,10 @@ test("pending-worktree-create runs git worktree add and drives the shared-object
   execFileSync("git", ["-C", repo, "add", "."]);
   execFileSync("git", ["-C", repo, "commit", "-m", "init"]);
 
-  // CODEX_HOME 在模块加载时已定型，worktree 会落在真实 ~/.codex/worktrees 下，测试末尾负责清理。
-  const expectedRoot = path.join(os.homedir(), ".codex", "worktrees");
+  // CODEX_HOME 在模块加载时已定型（GatewayCodexIpcPort.ts 同款回退链），
+  // worktree 会落在 $CODEX_HOME/worktrees 下，测试末尾负责清理。
+  const codexHome = process.env.CODEX_HOME || path.join(os.homedir(), ".codex");
+  const expectedRoot = path.join(codexHome, "worktrees");
   const { handlers, broadcasts } = makeTestHandlers();
 
   const request = {

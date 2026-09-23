@@ -1,7 +1,13 @@
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
+const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
+
+// CODEX_HOME 在模块加载时定型。归档会话读写落在 $CODEX_HOME/.codex-global-state.json，
+// 且每次读写都重新读盘；用真实 ~/.codex 时，正在运行的 Codex Desktop 随时可能
+// 重写该文件，让归档回读随机丢失（整套件高负载下必现）。指向临时目录让测试自闭。
+process.env.CODEX_HOME = fs.mkdtempSync(path.join(os.tmpdir(), "codex-gateway-test-"));
 
 const contract = require("../dist/ipc/codex/capabilityContract.js");
 const {
@@ -267,31 +273,47 @@ test("source data contract covers direct exe asar patch surfaces", () => {
     assert.ok(contractData.DESKTOP_ASAR_KNOWN_GATE_IDS.includes(gateId), gateId);
   }
 
-  for (const marker of [
-    "/*codex-offline:windows-browser-use-capability*/",
-    "/*codex-offline:node-repl-feature-enabled*/",
-    "/*codex-offline:feature-overrides-preserve-mcp-config*/",
-    "/*codex-offline:feature-enablement-preserve-unified-exec*/",
-    "/*codex-offline:bundled-plugin-cache-lock-nonfatal*/",
-    "/*codex-offline:node-repl-disable-sandbox*/",
-    "/*codex-offline:node-repl-tool-search-feature*/",
-    "/*codex-offline:computer-use-plugin-root-fallback*/",
-    "/*codex-offline:computer-use-resource-runtime-paths*/",
-    "/*codex-offline:computer-use-input-mention*/",
-    "/*codex-offline:computer-use-input-mention-v2*/",
-    "/*codex-offline:computer-use-input-skill*/",
-    "/*codex-offline:computer-use-thread-start-tool-search*/",
-    "/*codex-offline:computer-use-node-repl-dynamic-tool*/",
-    "/*codex-offline:computer-use-node-repl-dynamic-tool-call*/",
-    "/*codex-offline:archived-threads-partial-list*/",
-    "/*codex-offline:archived-threads-cache-fallback*/",
-    "/*codex-offline:bundled-browser-plugins-no-force-reload*/",
-    "/*codex-offline:fast-mode-auth-method*/",
-    "/*codex-offline:renderer-known-statsig-gates*/",
-    "/*codex-offline:unified-plugins-page*/",
-  ]) {
-    assert.ok(contractData.DESKTOP_ASAR_PATCH_MARKERS.includes(marker), marker);
-  }
+  // 完整在册补丁清单（含 zero-change sentinel）。contract 是唯一事实来源，
+  // 这里锁定经评审的清单本体：新增/下线补丁记录都必须同步更新这份列表。
+  assert.deepEqual(
+    [...contractData.DESKTOP_ASAR_PATCH_MARKERS],
+    [
+      "/*codex-offline:windows-app-contained-core-off*/",
+      "/*codex-offline:windows-browser-use-capability*/",
+      "/*codex-offline:node-repl-feature-enabled*/",
+      "/*codex-offline:feature-overrides-preserve-mcp-config*/",
+      "/*codex-offline:bundled-plugin-cache-lock-nonfatal*/",
+      "/*codex-offline:node-repl-disable-sandbox*/",
+      "/*codex-offline:node-repl-tool-search-feature*/",
+      "/*codex-offline:computer-use-resource-runtime-paths*/",
+      "/*codex-offline:computer-use-input-skill*/",
+      "/*codex-offline:computer-use-thread-start-tool-search*/",
+      "/*codex-offline:computer-use-node-repl-dynamic-tool*/",
+      "/*codex-offline:computer-use-node-repl-dynamic-tool-call*/",
+      "/*codex-offline:archived-threads-partial-list*/",
+      "/*codex-offline:archived-threads-cache-fallback*/",
+      "/*codex-offline:archived-settings-offline-local-visibility*/",
+      "/*codex-offline:bundled-browser-plugins-no-force-reload*/",
+      "/*codex-offline:bundled-runtime-plugins*/",
+      "/*codex-offline:fast-mode-auth-method*/",
+      "/*codex-offline:plugins-api-key-nav*/",
+      "/*codex-offline:plugins-api-key-route*/",
+      "/*codex-offline:renderer-known-statsig-gates*/",
+      "/*codex-offline:sidebar-activity-view*/",
+      "/*codex-offline:workspace-dependencies-settings*/",
+      "/*codex-offline:worktree-head-ref*/",
+      "/*codex-offline:model-id-display-name-fallback*/",
+      "/*codex-offline:offline-query-network-mode*/",
+      "/*codex-offline:offline-mutation-network-mode*/",
+      "/*codex-offline:ultra-reasoning-effort*/",
+      "/*codex-offline:codex-mobile-auth-relogin*/",
+      "/*codex-offline:default-on-gate-wrapper*/",
+      "/*codex-offline:settings-route-map*/",
+      "/*codex-offline:locale-source-default*/",
+      "/*codex-offline:stdio-write-error-guard-v2*/",
+      "/*codex-offline:i18n-default-enabled*/",
+    ]
+  );
 });
 
 test("offline contract keeps import and remote connection settings available", () => {
@@ -422,7 +444,14 @@ test("archived thread listing avoids workspace scans", () => {
   const patcherSource = fs.readFileSync(path.join(repoRoot, "scripts", "patch-app-asar.mjs"), "utf8");
   const verifierSource = fs.readFileSync(path.join(repoRoot, "scripts", "verify-offline-package.ps1"), "utf8");
 
-  assert.ok(patcherSource.includes("useStateDbOnly:${archived}?!0:${useStateDbOnly}"));
+  // 26.831 起上游把 archived 加载器固化成 useStateDbOnly:!0（archived 查询恒真，
+  // 见 patch-app-asar.mjs 的 needle）；更早的形态是按 archived 参数三元取值。
+  // 与 verify-offline-package.ps1 的判定保持一致，两种形态都满足
+  // "归档查询不扫描工作区"，允许随上游形态漂移。
+  const forcesStateDbOnly =
+    /useStateDbOnly:[A-Za-z_$][\w$]*\?!0:[A-Za-z_$][\w$]*/.test(patcherSource) ||
+    patcherSource.includes("useStateDbOnly:!0");
+  assert.ok(forcesStateDbOnly, "archived thread queries must force useStateDbOnly");
   assert.ok(verifierSource.includes("Archived thread list does not force useStateDbOnly for archived queries."));
 });
 
