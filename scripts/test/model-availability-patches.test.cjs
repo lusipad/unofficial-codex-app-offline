@@ -227,6 +227,7 @@ test("models-api.json is generated as a single release artifact with Astra, GPT-
   assert.match(compatSource, /gpt-6-astra/);
   assert.match(builderSource, /DEEPSEEK_SETUP_URL/);
   assert.match(builderSource, /GPT_56_SLUGS/);
+  assert.match(builderSource, /GPT_6_SLUGS = \["gpt-6-sol", "gpt-6-luna"\]/);
   assert.match(builderSource, /OPENAI_CUSTOM_PROVIDER_PATCH/);
   assert.match(builderSource, /deepseek-flash/);
   assert.match(builderSource, /deepseek-v4-pro/);
@@ -242,6 +243,8 @@ test("models-api.json is generated as a single release artifact with Astra, GPT-
   assert.match(verifierSource, /API model catalog has unexpected custom-provider fields for/);
   assert.match(verifierSource, /API model catalog has unexpected DeepSeek fields for/);
   assert.match(verifierSource, /gpt-6-astra/);
+  // GPT-6 Sol / Luna carry the same custom-provider override as GPT-5.6.
+  assert.match(verifierSource, /'gpt-5\.6-luna', 'gpt-6-sol', 'gpt-6-luna'\)\) \{/);
 
   assert.match(readmeSource, /models-api\.json/);
   assert.match(readmeSource, /docs\/models-api\.md/);

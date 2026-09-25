@@ -31,9 +31,17 @@ const GPT_56_UPSTREAM_MULTI_AGENT_VERSIONS = Object.freeze({
   "gpt-5.6-terra": "v2",
   "gpt-5.6-luna": "v1",
 });
+// GPT-6 Sol / Luna ship with the same Codex-backend-only request shape as
+// GPT-5.6, so custom providers need the same temporary override.
+const GPT_6_SLUGS = ["gpt-6-sol", "gpt-6-luna"];
+const GPT_6_UPSTREAM_MULTI_AGENT_VERSIONS = Object.freeze({
+  "gpt-6-sol": "v2",
+  "gpt-6-luna": "v2",
+});
 const CUSTOM_PROVIDER_MODEL_VERSIONS = Object.freeze({
   [ASTRA_MODEL_SLUG]: "v2",
   ...GPT_56_UPSTREAM_MULTI_AGENT_VERSIONS,
+  ...GPT_6_UPSTREAM_MULTI_AGENT_VERSIONS,
 });
 // DeepSeek folded the separate vision variant into deepseek-flash: upstream
 // renamed deepseek-v4-flash and dropped deepseek-v4-flash-vision-exp, and its
@@ -217,7 +225,7 @@ export function mergeModelCatalogs(openAiCatalog, deepSeekCatalog, astraModel = 
     }
   }
 
-  for (const slug of [ASTRA_MODEL_SLUG, ...GPT_56_SLUGS]) {
+  for (const slug of [ASTRA_MODEL_SLUG, ...GPT_56_SLUGS, ...GPT_6_SLUGS]) {
     const model = modelsBySlug.get(slug);
     if (!model) {
       throw new Error(`OpenAI model catalog is missing required model: ${slug}`);

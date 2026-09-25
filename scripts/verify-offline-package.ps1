@@ -302,7 +302,7 @@ if (@($modelCatalogSlugs | Sort-Object -Unique).Count -ne $modelCatalogSlugs.Cou
     throw 'API model catalog contains duplicate model slugs.'
 }
 
-foreach ($slug in @('gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna')) {
+foreach ($slug in @('gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-6-sol', 'gpt-6-luna')) {
     $model = @($modelCatalogModels | Where-Object { $_.slug -eq $slug })
     if ($model.Count -ne 1) {
         throw "API model catalog must contain exactly one $slug entry."
@@ -459,7 +459,7 @@ try {
         }
         $loadedCatalog = $catalogDebugOutput -join [Environment]::NewLine | ConvertFrom-Json
         $loadedSlugs = @($loadedCatalog.models | ForEach-Object { [string]$_.slug })
-        foreach ($slug in @('gpt-6-astra', 'gpt-5.6-sol', 'deepseek-flash', 'deepseek-v4-pro')) {
+        foreach ($slug in @('gpt-6-astra', 'gpt-5.6-sol', 'gpt-6-sol', 'gpt-6-luna', 'deepseek-flash', 'deepseek-v4-pro')) {
             if ($loadedSlugs -notcontains $slug) {
                 throw "Bundled Codex did not load expected model from models-api.json: $slug"
             }

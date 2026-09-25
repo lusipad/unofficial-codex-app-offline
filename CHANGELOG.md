@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-09-25
+
+### 中文
+
+- `models-api.json` 的 custom-provider 临时修正扩展到 `gpt-6-sol` / `gpt-6-luna`。这两个模型随 `26.917.8451.0`（`rust-v0.155.0-alpha.16.3` 目录）新进入目录，但修正名单只覆盖 astra 与 `gpt-5.6-*`，因此它们原样保留上游的 `tool_mode = code_mode_only`、`multi_agent_version = v2`、`use_responses_lite = true`：走 CRS 等自定义 provider 时会构造 Codex 后端专用的 Responses Lite 请求，与 GPT-5.6 当初的原生 `web_search` 注入问题同源（openai/codex#31882、#33250）。现与 GPT-5.6 一样置空这三个字段，并对上游字段与 `supports_search_tool` 做逐模型失败关闭校验；离线包验证器同步断言两者的修正字段，并要求内置 Codex 能加载这两个模型。OpenAI 官方账号后端不受影响。
+- 验证：`node --test ./scripts/test/*.test.cjs ./web-gateway/gateway/test/*.test.cjs` 全绿（204 通过）；按商店当前版本 `26.917.9434.0`（内置 codex CLI `0.155.0-alpha.16.4`）跑通完整离线包构建（补丁器 `all patches applied or already correct`，无锚点漂移）与 `verify-offline-package.ps1`（direct-exe 启动 app-server 与窗口均 ready）；包内 `models-api.json` 共 13 个模型，`gpt-6-sol` / `gpt-6-luna` 的三个字段已置空且 `supports_search_tool = true`。
+
+### English
+
+- Extended the `models-api.json` custom-provider override to `gpt-6-sol` / `gpt-6-luna`. Both arrived with `26.917.8451.0` (the `rust-v0.155.0-alpha.16.3` catalog), but the override list only covered astra and `gpt-5.6-*`, so they kept upstream's `tool_mode = code_mode_only`, `multi_agent_version = v2` and `use_responses_lite = true` — on CRS and other custom providers that builds the Codex-backend-only Responses Lite request, the same root cause as GPT-5.6's native `web_search` injection problem (openai/codex#31882, #33250). They now get the same three-field override, with per-model fail-closed checks on the upstream fields and `supports_search_tool`; the offline package verifier asserts their overridden fields and that the bundled Codex loads both models. The official OpenAI account backend is unaffected.
+- Verified: `node --test ./scripts/test/*.test.cjs ./web-gateway/gateway/test/*.test.cjs` all green (204 pass); a full offline build of the Store's current `26.917.9434.0` (bundled codex CLI `0.155.0-alpha.16.4`) completes with no patch-anchor drift (`all patches applied or already correct`) and passes `verify-offline-package.ps1` (direct-exe launch, app-server and window ready); the packaged `models-api.json` has 13 models, with the three fields cleared and `supports_search_tool = true` for `gpt-6-sol` / `gpt-6-luna`.
+
 ## 2026-09-23
 
 ### 中文

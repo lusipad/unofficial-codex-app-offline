@@ -57,6 +57,8 @@ function fixtures() {
         openAiModel("gpt-5.6-sol"),
         openAiModel("gpt-5.6-terra"),
         openAiModel("gpt-5.6-luna", "v1"),
+        openAiModel("gpt-6-sol"),
+        openAiModel("gpt-6-luna"),
       ],
     },
     astra: astraModel(),
@@ -80,6 +82,8 @@ test("merges Astra and DeepSeek entries and applies the OpenAI provider workarou
     "gpt-5.6-sol",
     "gpt-5.6-terra",
     "gpt-5.6-luna",
+    "gpt-6-sol",
+    "gpt-6-luna",
   ]) {
     Object.assign(
       expected.models.find((model) => model.slug === slug),
@@ -103,6 +107,8 @@ test("merges Astra and DeepSeek entries and applies the OpenAI provider workarou
       "gpt-5.6-sol",
       "gpt-5.6-terra",
       "gpt-5.6-luna",
+      "gpt-6-sol",
+      "gpt-6-luna",
       "deepseek-flash",
       "deepseek-v4-pro",
     ],
@@ -116,6 +122,8 @@ test("merges Astra and DeepSeek entries and applies the OpenAI provider workarou
     "gpt-5.6-sol",
     "gpt-5.6-terra",
     "gpt-5.6-luna",
+    "gpt-6-sol",
+    "gpt-6-luna",
   ]) {
     const model = merged.models.find((entry) => entry.slug === slug);
     assert.equal(model.tool_mode, null);
@@ -142,18 +150,32 @@ test("extracts the official DeepSeek ModelsJson PowerShell block", async () => {
   assert.deepEqual(extractDeepSeekCatalog(script), fixtures().deepSeek);
 });
 
-test("rejects an upstream GPT-5.6 metadata change instead of silently overwriting it", async () => {
+test("rejects an upstream GPT-5.6 / GPT-6 metadata change instead of silently overwriting it", async () => {
   const { mergeModelCatalogs } = await modulePromise;
-  for (const [field, value] of [
-    ["tool_mode", null],
-    ["multi_agent_version", null],
-    ["use_responses_lite", false],
-  ]) {
+  for (const slug of ["gpt-5.6-sol", "gpt-6-sol", "gpt-6-luna"]) {
+    for (const [field, value] of [
+      ["tool_mode", null],
+      ["multi_agent_version", null],
+      ["use_responses_lite", false],
+    ]) {
+      const { openAi, astra, deepSeek } = fixtures();
+      openAi.models.find((model) => model.slug === slug)[field] = value;
+      assert.throws(
+        () => mergeModelCatalogs(openAi, deepSeek, astra),
+        /compatibility fields changed upstream/,
+      );
+    }
+  }
+});
+
+test("rejects a GPT-6 Sol / Luna entry that no longer advertises native web search", async () => {
+  const { mergeModelCatalogs } = await modulePromise;
+  for (const slug of ["gpt-6-sol", "gpt-6-luna"]) {
     const { openAi, astra, deepSeek } = fixtures();
-    openAi.models.find((model) => model.slug === "gpt-5.6-sol")[field] = value;
+    openAi.models.find((model) => model.slug === slug).supports_search_tool = false;
     assert.throws(
       () => mergeModelCatalogs(openAi, deepSeek, astra),
-      /compatibility fields changed upstream/,
+      new RegExp(`${slug} no longer advertises native web search`),
     );
   }
 });
