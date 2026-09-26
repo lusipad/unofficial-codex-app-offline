@@ -178,6 +178,12 @@ function parsePositiveNumberEnv(name, fallback) {
  * 所�?/wham�?aip、模型、技能、会话等业务数据都应该通过这里走本�?
  * app-server，不让远端浏览器直接�?token 或直连底层服务�?
  */
+/** 与桌面主进程一致：app-server 版本取自 initialize 响应 userAgent 的 `<name>/<version>`。 */
+function appServerVersionFromUserAgent(userAgent) {
+  const match = typeof userAgent === "string" ? userAgent.match(/^[^/\s]+\/(\S+)/) : null;
+  return match ? match[1] : null;
+}
+
 function createCodexAppServerClient({ broadcast, logger, defaultCodexBinaryPath } = {}) {
   const url = process.env.CODEX_APP_SERVER_URL || "";
   const defaultPort = String(process.env.CODEX_APP_SERVER_PORT || 3760);
@@ -197,6 +203,7 @@ function createCodexAppServerClient({ broadcast, logger, defaultCodexBinaryPath 
   let connectionResolve = null;
   let connectionReject = null;
   let lastError = null;
+  let initializationMessage = null;
   let reconnectTimer = null;
   let reconnectAttempts = 0;
   let reconnectGivenUp = false;
@@ -591,9 +598,17 @@ function createCodexAppServerClient({ broadcast, logger, defaultCodexBinaryPath 
     connecting = false;
     lastError = null;
     try {
-      await client.request("initialize", normalizeParams("initialize", null));
+      const initializeResult = await client.request("initialize", normalizeParams("initialize", null));
       await client.notify("initialized");
+      // 26.924 起 renderer 依赖桌面端的 codex-app-server-initialized（带版本）判定 gateway OAuth 就绪。
+      initializationMessage = {
+        hostId: "local",
+        transport: transport.kind,
+        appServerVersion: appServerVersionFromUserAgent(initializeResult && initializeResult.userAgent),
+        installedCodexVersion: null,
+      };
       broadcast && broadcast({ channel: "app-server:initialized", payload: { ok: true } });
+      broadcast && broadcast({ channel: "codex-app-server-initialized", payload: initializationMessage });
       resolveConnectionPromise();
     } catch (error) {
       logger && logger.warn("[app-server] initialize failed", error);
@@ -606,6 +621,7 @@ function createCodexAppServerClient({ broadcast, logger, defaultCodexBinaryPath 
 
   function handleTransportClosed(error) {
     if (disposed) return;
+    initializationMessage = null;
     connected = false;
     connecting = false;
     sendMessage = null;
@@ -1037,6 +1053,11 @@ function createCodexAppServerClient({ broadcast, logger, defaultCodexBinaryPath 
     return connected;
   }
 
+  /** 当前 codex-app-server-initialized 快照；未完成握手时为 null。 */
+  function getInitializationMessage() {
+    return initializationMessage;
+  }
+
   /** 返回对外展示用的连接模式�?*/
   function getMode() {
     if (connected) return "connected";
@@ -1116,11 +1137,13 @@ function createCodexAppServerClient({ broadcast, logger, defaultCodexBinaryPath 
     isConnected,
     getHealth,
     getMode,
+    getInitializationMessage,
     dispose,
   };
 }
 
 module.exports = {
+  appServerVersionFromUserAgent,
   createCodexAppServerClient,
   createJsonRpcClient,
 };

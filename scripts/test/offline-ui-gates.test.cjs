@@ -397,15 +397,16 @@ test("priority surface carries its dedicated static gate marker", () => {
     "escapeRegExp",
     `"use strict";\n${helperSource}\nreturn patchSidebarActivitySurface;`,
   )(sidebarMarker, escapeRegExp);
+  // 26.924 also subscribes to the sidebar layout atom inside the return.
   const fixture =
-    "function Fvc(){let e=Fg(Lvc),t=q(Sw);return e&&(t.status===`allowed`||t.status===`loading`)}" +
-    "Lvc=`4039078146`";
+    "function jon(){let e=Ei(Non),t=Y(Of);return Y(rA),e&&(t.status===`allowed`||t.status===`loading`)}" +
+    "Non=`4039078146`";
   const result = patchSidebarActivitySurface(fixture);
 
   assert.equal(result.patched, true);
   assert.equal(result.sidebarSurfaceSeen, true);
   assert.equal(result.sidebarCorrect, true);
-  assert.ok(result.content.includes(`e=!0${sidebarMarker},t=q(Sw)`));
+  assert.ok(result.content.includes(`e=!0${sidebarMarker},t=Y(Of);return Y(rA),e&&`));
 
   const secondPass = patchSidebarActivitySurface(result.content);
   assert.equal(secondPass.patched, false);
@@ -415,25 +416,16 @@ test("priority surface carries its dedicated static gate marker", () => {
   assert.equal(markerOnly.sidebarSurfaceSeen, false);
   assert.equal(markerOnly.sidebarCorrect, false);
 
-  const currentFixture =
-    "function Ivc(){let e=bg(Rvc),t=q(Lw);return e&&(t.status===`allowed`||t.status===`loading`)}" +
-    "Rvc=`4039078146`";
-  const currentResult = patchSidebarActivitySurface(currentFixture);
-  assert.equal(currentResult.patched, true);
-  assert.equal(currentResult.sidebarCorrect, true);
-
-  const latestFixture =
-    "function FUc(){let e=qh(LUc),t=J(Tv);return e&&(t.status===`allowed`||t.status===`loading`)}" +
-    "LUc=`4039078146`";
-  const latestResult = patchSidebarActivitySurface(latestFixture);
-  assert.equal(latestResult.patched, true);
-  assert.equal(latestResult.sidebarSurfaceSeen, true);
-  assert.equal(latestResult.sidebarCorrect, true);
-  assert.ok(latestResult.content.includes(`e=!0${sidebarMarker},t=J(Tv)`));
-
-  const latestSecondPass = patchSidebarActivitySurface(latestResult.content);
-  assert.equal(latestSecondPass.patched, false);
-  assert.equal(latestSecondPass.sidebarCorrect, true);
+  const verifierSurface = Function(
+    "SIDEBAR_ACTIVITY_VIEW_PATCH_MARKER",
+    "escapeRegExp",
+    `"use strict";\n${verifyScriptSource.slice(
+      verifyScriptSource.indexOf("const sidebarActivityPatchedSurfaceRe ="),
+      verifyScriptSource.indexOf("const offlineNetworkModePatchedSurfaceRe ="),
+    )}\nreturn { sidebarActivityPatchedSurfaceRe, sidebarActivityUnpatchedSurfaceRe };`,
+  )(sidebarMarker, escapeRegExp);
+  assert.ok(verifierSurface.sidebarActivityUnpatchedSurfaceRe.test(fixture));
+  assert.ok(verifierSurface.sidebarActivityPatchedSurfaceRe.test(result.content));
 
   assert.ok(contract.DESKTOP_ASAR_PATCH_MARKERS.includes(sidebarMarker), sidebarMarker);
   assert.ok(verifyScriptSource.includes(`patchMarker('${sidebarMarker}')`));

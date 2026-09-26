@@ -1049,6 +1049,83 @@
     });
   }
 
+  /**
+   * 26.924 起 renderer 经宿主 httpFetch service 发 HTTP 请求（fetch(id, request) / cancel(id)），
+   * 不再发 `fetch` 消息。Web 端把它转发到 gateway 既有的 `fetch` 通道，复用其代理与离线兜底。
+   */
+  function createCodexWebHttpFetch({ send, subscribe }) {
+    const pending = new Map();
+    const noop = () => {};
+    const disposable = (value) => Object.assign(value, { [Symbol.dispose]: noop });
+    const NULL_BODY_STATUSES = new Set([101, 204, 205, 304]);
+
+    subscribe("fetch-response", (payload) => {
+      const requestId = payload && payload.requestId;
+      const settle = requestId != null ? pending.get(String(requestId)) : null;
+      if (!settle) return;
+      pending.delete(String(requestId));
+      if (payload.responseType !== "success") {
+        settle({ error: String(payload.error || "Request failed"), status: payload.status || 500 });
+        return;
+      }
+      const status = payload.status || 200;
+      const text = payload.bodyText != null ? payload.bodyText : payload.bodyJsonString;
+      const body = NULL_BODY_STATUSES.has(status) || text == null ? null : String(text);
+      settle({ response: new Response(body, { status, headers: payload.headers || {} }) });
+    });
+
+    async function bodyText(body) {
+      if (body == null || typeof body === "string") return body == null ? undefined : body;
+      return new Response(body).text();
+    }
+
+    /** 同桌面主进程 prepareFetchInit：字符串 JSON body 缺 Content-Type 时补 application/json。 */
+    function requestHeaders(headers, body) {
+      const result = new Headers(headers || {});
+      if (typeof body === "string" && !result.has("content-type")) {
+        const trimmed = body.trim();
+        if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+          try {
+            JSON.parse(body);
+            result.set("content-type", "application/json");
+          } catch {}
+        }
+      }
+      return Object.fromEntries(result.entries());
+    }
+
+    return {
+      fetch(requestId, request) {
+        const id = String(requestId);
+        const result = new Promise((resolve) => {
+          pending.set(id, (value) => resolve(disposable(value)));
+        });
+        Promise.resolve(bodyText(request.body))
+          .then((body) => send({
+            type: "fetch",
+            requestId: id,
+            url: String(request.url),
+            method: String(request.method || "GET"),
+            headers: requestHeaders(request.headers, body),
+            body,
+          }))
+          .catch((error) => {
+            const settle = pending.get(id);
+            pending.delete(id);
+            if (settle) settle({ error: String((error && error.message) || error), status: 500 });
+          });
+        return disposable(result);
+      },
+      cancel(requestId) {
+        const id = String(requestId);
+        const settle = pending.get(id);
+        pending.delete(id);
+        if (settle) settle({ error: "Request cancelled", status: 499 });
+        return Promise.resolve();
+      },
+    };
+  }
+
   /** 发送 fetch-response 给官方 vscode-api 请求管理器。 */
   function emitFetchResponse(payload) {
     dispatch("fetch-response", payload);
@@ -1606,6 +1683,11 @@
   attachBridge(w.codexBridge);
   attachBridge(w.electronAPI);
   attachBridge(w.electronBridge);
+  // gateway 的 mock app services 以 httpFetch 暴露给 26.924+ renderer。
+  w.__codexWebHttpFetch = createCodexWebHttpFetch({
+    send: (message) => w.electronBridge.sendMessageFromView(message),
+    subscribe,
+  });
   installAppFsImageRewrite();
 
   subscribe("window:setTitle", (title) => setWindowTitle(title));

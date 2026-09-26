@@ -1183,17 +1183,41 @@ foreach ($docName in @('README.md', 'CHANGELOG.md')) {
 
 # Generate the one-time setup command. Setup is intentionally visible because
 # Chrome extension loading and native-host repair failures need readable output.
+# Setup reads CODEX_HOME from skill-installer.env (bootstrap-codex-skills.ps1),
+# so every launcher must hand the app and the web gateway the same home: an
+# inherited CODEX_HOME wins, then the package root file, then _internal; the
+# first CODEX_HOME in a file wins and relative paths resolve from the package
+# root. Each launcher sets CODEX_OFFLINE_ROOT to the package root first.
+$codexHomeImportCalls = @(
+    'if not defined CODEX_HOME call :import-codex-home "%CODEX_OFFLINE_ROOT%skill-installer.env"',
+    'if not defined CODEX_HOME call :import-codex-home "%CODEX_OFFLINE_ROOT%_internal\skill-installer.env"'
+)
+$codexHomeImportSubroutine = @(
+    '',
+    ':import-codex-home',
+    'if not exist "%~1" exit /b 0',
+    'pushd "%CODEX_OFFLINE_ROOT%"',
+    'for /f "usebackq eol=# tokens=1,* delims==" %%A in ("%~1") do for /f "tokens=1" %%K in ("%%A") do if /i "%%K"=="CODEX_HOME" if not defined CODEX_HOME if not "%%~B"=="" set "CODEX_HOME=%%~fB"',
+    'popd',
+    'exit /b 0'
+)
+
 $dailyLaunchCmd = @(
     '@echo off',
     'setlocal',
     'set CODEX_ELECTRON_ENABLE_WINDOWS_COMPUTER_USE=1',
-    'start "" /D "%~dp0_internal\app" "%~dp0_internal\app\ChatGPT.exe" %*'
-)
+    'set "CODEX_OFFLINE_ROOT=%~dp0"'
+) + $codexHomeImportCalls + @(
+    'start "" /D "%~dp0_internal\app" "%~dp0_internal\app\ChatGPT.exe" %*',
+    'exit /b 0'
+) + $codexHomeImportSubroutine
 $dailyLaunchCmd | Set-Content -Path (Join-Path $packageRoot 'Codex.cmd') -Encoding ASCII
 
 $webLaunchCmd = @(
     '@echo off',
     'setlocal',
+    'set "CODEX_OFFLINE_ROOT=%~dp0"'
+) + $codexHomeImportCalls + @(
     'where node >nul 2>nul',
     'if errorlevel 1 (',
     '  echo Node.js was not found. Install Node.js 22 or newer, then run this launcher again.',
@@ -1208,7 +1232,7 @@ $webLaunchCmd = @(
     '  pause',
     ')',
     'exit /b %WEB_EXIT%'
-)
+) + $codexHomeImportSubroutine
 $webLaunchCmd | Set-Content -Path (Join-Path $packageRoot 'Codex Web.cmd') -Encoding ASCII
 
 $setupCmd = @(
@@ -1232,8 +1256,11 @@ $launchDirectCmd = @(
     '@echo off',
     'setlocal',
     'set CODEX_ELECTRON_ENABLE_WINDOWS_COMPUTER_USE=1',
-    'start "" /D "%~dp0..\app" "%~dp0..\app\ChatGPT.exe" %*'
-)
+    'set "CODEX_OFFLINE_ROOT=%~dp0..\..\"'
+) + $codexHomeImportCalls + @(
+    'start "" /D "%~dp0..\app" "%~dp0..\app\ChatGPT.exe" %*',
+    'exit /b 0'
+) + $codexHomeImportSubroutine
 $launchDirectCmd | Set-Content -Path (Join-Path $toolsRoot 'Launch Codex Direct.cmd') -Encoding ASCII
 
 $syncDefaultCmd = @(

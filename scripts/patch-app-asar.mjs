@@ -858,11 +858,11 @@ function patchSidebarActivitySurface(content) {
   let patched = false;
   const sidebarPatchedSurfaceRe = new RegExp(
     `([A-Za-z_$][\\w$]*)=!0${escapeRegExp(SIDEBAR_ACTIVITY_VIEW_PATCH_MARKER)},` +
-      `([A-Za-z_$][\\w$]*)=[A-Za-z_$][\\w$]*\\([A-Za-z_$][\\w$]*\\);return \\1&&` +
+      `([A-Za-z_$][\\w$]*)=[A-Za-z_$][\\w$]*\\([A-Za-z_$][\\w$]*\\);return [A-Za-z_$][\\w$]*\\([A-Za-z_$][\\w$]*\\),\\1&&` +
       '\\(\\2\\.status===`allowed`\\|\\|\\2\\.status===`loading`\\)',
   );
   const sidebarUnpatchedSurfaceRe =
-    /([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*)\),([A-Za-z_$][\w$]*)=[A-Za-z_$][\w$]*\([A-Za-z_$][\w$]*\);return \1&&\(\4\.status===`allowed`\|\|\4\.status===`loading`\)\}[^]*?\3=`4039078146`/;
+    /([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*)\),([A-Za-z_$][\w$]*)=[A-Za-z_$][\w$]*\([A-Za-z_$][\w$]*\);return [A-Za-z_$][\w$]*\([A-Za-z_$][\w$]*\),\1&&\(\4\.status===`allowed`\|\|\4\.status===`loading`\)\}[^]*?\3=`4039078146`/;
   const sidebarAlreadyCorrect = sidebarPatchedSurfaceRe.test(next);
   const sidebarSurfaceSeen =
     sidebarAlreadyCorrect ||
@@ -1269,8 +1269,10 @@ function patchChromeBrowserClient(filePath) {
     const platformImportMatch = content.match(
       /import(?: [A-Za-z_$][\w$]*,)?\{[^}]*\bplatform as ([A-Za-z_$][\w$]*)\b[^}]*\}from"node:os";/,
     );
+    // Anchor on the assignment, not the declaration: 26.924 assigns the
+    // helper inside a lazy module initializer, away from its `var`.
     const pipePrefixMatch = content.match(
-      /var ([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)=>\2==="win32"\?"[^"]*codex-browser-use":"\/tmp\/codex-browser-use"/,
+      /(?<![\w$.])([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)=>\2==="win32"\?"[^"]*codex-browser-use":"\/tmp\/codex-browser-use"/,
     );
     if (!helperNeedleMatch || !unavailableMessageMatch || !platformImportMatch || !pipePrefixMatch) {
       throw new Error(
@@ -1480,8 +1482,10 @@ function patchChromeBrowserClient(filePath) {
     const directSetupGuardMatch = content.match(
       /if\(([A-Za-z_$][\w$]*)\(\)==null\)throw new Error\(([A-Za-z_$][\w$]*)\(\)\);?/,
     );
+    // 26.924 wraps the platform ternary in an async dispatcher that first
+    // honours BROWSER_USE_BACKEND_PATHS, so anchor on the returned ternary.
     const platformAwareSetupMatch = content.match(
-      /var [A-Za-z_$][\w$]*=([A-Za-z_$][\w$]*)=>\1\.platform===(?:`win32`|"win32")\?[A-Za-z_$][\w$]*\(\1\):[A-Za-z_$][\w$]*\(\1\)/,
+      /return ([A-Za-z_$][\w$]*)\.platform===(?:`win32`|"win32")\?[A-Za-z_$][\w$]*\(\1\):[A-Za-z_$][\w$]*\(\1\)\}/,
     );
     if (!directSetupGuardMatch && !platformAwareSetupMatch) {
       throw new Error(
@@ -2234,12 +2238,10 @@ try {
   // collection is an identifier rather than an inline array literal.
   const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOLS_TOP_LEVEL_RE =
     /(?<collection>[A-Za-z_$][\w$]*)\.map\((?<item>[A-Za-z_$][\w$]*)=>\(\{type:`function`,\.\.\.\k<item>,\.\.\.(?<deferLoadingGuard>(?<supportsNamespaces>[A-Za-z_$][\w$]*)&&[^?]+)\?\{deferLoading:!0\}:\{\}\}\)\);return \k<supportsNamespaces>\?\[\{type:`namespace`,name:(?<appNamespace>[A-Za-z_$][\w$]*),description:(?<appDescription>[A-Za-z_$][\w$]*),tools:(?<functionTools>[A-Za-z_$][\w$]*)\},\.\.\.(?<namespaceGroups>[A-Za-z_$][\w$]*)\]:(?<fallbackTools>[A-Za-z_$][\w$]*)/;
-  const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_COMPAT_MISSING_RE =
-    /(\(\{namespace:`node_repl`,name:`js`,description:`Execute JavaScript in the persistent Node REPL used by Computer Use\.`,inputSchema:\{[\s\S]{0,700}?required:\[`code`\]\}\}\),)(?!\(\{name:`js`,description:`Execute JavaScript in the persistent Node REPL used by Computer Use\. This forwards to node_repl\.js\.`)/;
-  const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_RE =
-    /(let [A-Za-z_$][\w$]*=[A-Za-z_$][\w$]*\.get\([A-Za-z_$][\w$]*\),\{id:([A-Za-z_$][\w$]*),params:([A-Za-z_$][\w$]*)\}=[A-Za-z_$][\w$]*,\{threadId:([A-Za-z_$][\w$]*),tool:([A-Za-z_$][\w$]*)\}=\3;if\(!\4\)\{[\s\S]{0,260}?return\})/;
+  // 26.924 destructures the handler options inside the body and no longer
+  // receives a queryClient.
   const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_CANONICAL_RE =
-    /(?<prefix>async function [A-Za-z_$][\w$]*\(\{scope:(?<scope>[A-Za-z_$][\w$]*),serverRequest:(?<serverRequest>[A-Za-z_$][\w$]*),hostId:(?<hostId>[A-Za-z_$][\w$]*),queryClient:(?<queryClient>[A-Za-z_$][\w$]*),signal:(?<signal>[A-Za-z_$][\w$]*)(?:,transport:[A-Za-z_$][\w$]*)?\}\)\{let\{id:(?<requestId>[A-Za-z_$][\w$]*),params:(?<params>[A-Za-z_$][\w$]*)\}=\k<serverRequest>,\{threadId:(?<threadId>[A-Za-z_$][\w$]*),tool:(?<tool>[A-Za-z_$][\w$]*)\}=\k<params>[\s\S]{0,4000}?if\(\k<signal>\?\.aborted\|\|[A-Za-z_$][\w$]*\.dynamicToolCalls!=null&&!await [A-Za-z_$][\w$]*\.dynamicToolCalls\.tryClaimExecution\(\{callId:\k<params>\.callId,hostId:\k<hostId>,threadId:\k<threadId>,turnId:\k<params>\.turnId\}\)\|\|\k<signal>\?\.aborted\)return!1;)/;
+    /(?<prefix>async function [A-Za-z_$][\w$]*\((?<options>[A-Za-z_$][\w$]*)\)\{let\{scope:(?<scope>[A-Za-z_$][\w$]*),serverRequest:(?<serverRequest>[A-Za-z_$][\w$]*),hostId:(?<hostId>[A-Za-z_$][\w$]*),signal:(?<signal>[A-Za-z_$][\w$]*)(?:,transport:[A-Za-z_$][\w$]*)?\}=\k<options>,\{id:(?<requestId>[A-Za-z_$][\w$]*),params:(?<params>[A-Za-z_$][\w$]*)\}=\k<serverRequest>,\{threadId:(?<threadId>[A-Za-z_$][\w$]*),tool:(?<tool>[A-Za-z_$][\w$]*)\}=\k<params>[\s\S]{0,4000}?if\(\k<signal>\?\.aborted\|\|[A-Za-z_$][\w$]*\.dynamicToolCalls!=null&&!await [A-Za-z_$][\w$]*\.dynamicToolCalls\.tryClaimExecution\(\{callId:\k<params>\.callId,hostId:\k<hostId>,threadId:\k<threadId>,turnId:\k<params>\.turnId\}\)\|\|\k<signal>\?\.aborted\)return!1;)/;
   const COMPUTER_USE_NODE_REPL_RESULT_TEXT_CODE =
     'let _codexOfflineNodeReplStringify=e=>{try{return JSON.stringify(e)}catch{return String(e)}};' +
     'let _codexOfflineNodeReplContentText=e=>Array.isArray(e)?e.map(e=>(e?.type===`text`||e?.type===`inputText`)?String(e.text??``):e?.text!=null?String(e.text):_codexOfflineNodeReplStringify(e)).join(`\\n`):``;' +
@@ -2249,47 +2251,46 @@ try {
     'if(e?.toolResult?.structuredContent!=null)return _codexOfflineNodeReplStringify(e.toolResult.structuredContent);' +
     'if(e?.raw?.structuredContent!=null)return _codexOfflineNodeReplStringify(e.raw.structuredContent);' +
     'let t=_codexOfflineNodeReplContentText(e?.content??e?.contentItems);return t.length>0?t:_codexOfflineNodeReplStringify(e)??``})();';
+  // 26.924 no longer sends thread/start through the bus, so anchor on the bus
+  // definition itself: it resolves the per-host AppServerManager RPC.
   function findAppServerRequestBusName(content) {
-    const patterns = [
-      /listExperimentalFeatures:[A-Za-z_$][\w$]*=>\s*([A-Za-z_$][\w$]*)\(`list-experimental-features`,\{[\s\S]{0,260}?hostId:/,
-      /listModels:[A-Za-z_$][\w$]*=>\s*([A-Za-z_$][\w$]*)\(`list-models-for-host`,\{[\s\S]{0,260}?hostId:/,
-      /await\s+([A-Za-z_$][\w$]*)\(`handle-dynamic-tools-for-thread-start-response-for-host`,\{hostId:/,
-      /await\s+([A-Za-z_$][\w$]*)\(`apply-thread-title-update-for-host`,\{hostId:/,
-      /(?:^|[^\w$])([A-Za-z_$][\w$]*)\([A-Za-z_$][\w$]*,[A-Za-z_$][\w$]*\)\.sendRequest\(`thread\/start`,/,
-    ];
-    for (const pattern of patterns) {
-      const match = pattern.exec(content);
-      if (match?.[1]) return match[1];
-    }
-    return null;
+    const match = content.match(
+      /function ([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*),([A-Za-z_$][\w$]*)\)\{let ([A-Za-z_$][\w$]*)=\2\.get\([A-Za-z_$][\w$]*\);if\(\4==null\)throw Error\(`AppServerManager RPC is not connected`\);return \4\.forHost\(\3\)\}/,
+    );
+    return match?.[1] ?? null;
   }
-  const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_CODE =
-    'if(($3.namespace===`node_repl`&&$5===`js`)||($3.namespace==null&&$5===`js`)){let _codexOfflineNodeReplResult,_codexOfflineNodeReplResponse;try{' +
-    '_codexOfflineNodeReplResult=await ln(`call-mcp-tool`,{hostId:n,threadId:$4,server:`node_repl`,tool:`js`,arguments:$3.arguments});' +
-    COMPUTER_USE_NODE_REPL_RESULT_TEXT_CODE +
-    'G.info(`computer_use_node_repl_js_call`,{safe:{namespace:$3.namespace??null,tool:$5,codePrefix:String($3.arguments?.code??``).slice(0,500),hasDirectSkyImport:String($3.arguments?.code??``).includes(`@oai/sky`),hasListApps:String($3.arguments?.code??``).includes(`list_apps`),resultPrefix:_codexOfflineNodeReplText.slice(0,500),isError:_codexOfflineNodeReplResult?.isError===!0},sensitive:{}});' +
-    '_codexOfflineNodeReplResponse={contentItems:[{type:`inputText`,text:_codexOfflineNodeReplText}],success:_codexOfflineNodeReplResult?.isError!==!0}' +
-    '}catch(_codexOfflineNodeReplError){_codexOfflineNodeReplResponse=Ge(String(_codexOfflineNodeReplError?.message??_codexOfflineNodeReplError))}' +
-    COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_PATCH_MARKER +
-    'X.dispatchMessage(`mcp-response`,{hostId:n,response:{id:a($2),result:_codexOfflineNodeReplResponse}});return}';
-  const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_CURRENT_CODE =
-    'if(($7.namespace===`node_repl`&&$9===`js`)||($7.namespace==null&&$9===`js`)){let _codexOfflineNodeReplResult,_codexOfflineNodeReplResponse;try{' +
-    '_codexOfflineNodeReplResult=await ln(`call-mcp-tool`,{hostId:$4,threadId:$8,server:`node_repl`,tool:`js`,arguments:$7.arguments});' +
-    COMPUTER_USE_NODE_REPL_RESULT_TEXT_CODE +
-    'G.info(`computer_use_node_repl_js_call`,{safe:{namespace:$7.namespace??null,tool:$9,codePrefix:String($7.arguments?.code??``).slice(0,500),hasDirectSkyImport:String($7.arguments?.code??``).includes(`@oai/sky`),hasListApps:String($7.arguments?.code??``).includes(`list_apps`),resultPrefix:_codexOfflineNodeReplText.slice(0,500),isError:_codexOfflineNodeReplResult?.isError===!0},sensitive:{}});' +
-    '_codexOfflineNodeReplResponse={contentItems:[{type:`inputText`,text:_codexOfflineNodeReplText}],success:_codexOfflineNodeReplResult?.isError!==!0}' +
-    '}catch(_codexOfflineNodeReplError){_codexOfflineNodeReplResponse=Ge(String(_codexOfflineNodeReplError?.message??_codexOfflineNodeReplError))}' +
-    COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_PATCH_MARKER +
-    'X.dispatchMessage(`mcp-response`,{hostId:$4,response:{id:a($6),result:_codexOfflineNodeReplResponse}});return}';
+  // The response helpers are minified per build; reuse the ones the handler
+  // itself calls for this request instead of naming them.
+  function findDynamicToolCallResponder(handlerBody, groups) {
+    const match = handlerBody.match(
+      new RegExp(
+        `([A-Za-z_$][\\w$]*)\\(\\{dispatchMessageFromView:\\(([A-Za-z_$][\\w$]*),([A-Za-z_$][\\w$]*)\\)=>([A-Za-z_$][\\w$]*)\\.dispatchMessage\\(\\2,\\3\\),` +
+        `hostId:${escapeRegExp(groups.hostId)},method:${escapeRegExp(groups.serverRequest)}\\.method,` +
+        `response:\\{id:([A-Za-z_$][\\w$]*)\\(${escapeRegExp(groups.requestId)}\\),`,
+      ),
+    );
+    return match
+      ? { respond: match[1], messageBus: match[4], requestIdFn: match[5] }
+      : null;
+  }
   function computerUseNodeReplDynamicToolCallReplacement(...args) {
     const groups = args.at(-1);
     const source = args.at(-2);
-    const appServerRequestFn = typeof source === 'string'
-      ? findAppServerRequestBusName(source)
-      : null;
+    const offset = args.at(-3);
+    const appServerRequestFn = findAppServerRequestBusName(source);
     if (!appServerRequestFn) {
       throw new Error(
         'Could not locate app-server request bus for Computer Use node_repl.js bridge.',
+      );
+    }
+    const handlerEnd = offset + args[0].length;
+    const responder = findDynamicToolCallResponder(
+      source.slice(handlerEnd, handlerEnd + 4000),
+      groups,
+    );
+    if (!responder) {
+      throw new Error(
+        'Could not locate response helpers for Computer Use node_repl.js bridge.',
       );
     }
     return (
@@ -2303,7 +2304,7 @@ try {
       '_codexOfflineNodeReplResponse={contentItems:[{type:`inputText`,text:_codexOfflineNodeReplText}],success:_codexOfflineNodeReplResult?.isError!==!0}' +
       '}catch(_codexOfflineNodeReplError){_codexOfflineNodeReplResponse={contentItems:[{type:`inputText`,text:String(_codexOfflineNodeReplError?.message??_codexOfflineNodeReplError)}],success:!1}}' +
       COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_PATCH_MARKER +
-      `return qzn({dispatchMessageFromView:(e,t)=>Up.dispatchMessage(e,t),hostId:${groups.hostId},method:${groups.serverRequest}.method,response:{id:zl(${groups.requestId}),result:_codexOfflineNodeReplResponse}}),!0}`
+      `return ${responder.respond}({dispatchMessageFromView:(e,t)=>${responder.messageBus}.dispatchMessage(e,t),hostId:${groups.hostId},method:${groups.serverRequest}.method,response:{id:${responder.requestIdFn}(${groups.requestId}),result:_codexOfflineNodeReplResponse}}),!0}`
     );
   }
   const COMPUTER_USE_NODE_REPL_NAMESPACE_TOOL_SPEC =

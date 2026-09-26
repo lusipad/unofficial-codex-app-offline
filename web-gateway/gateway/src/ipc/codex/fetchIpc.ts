@@ -199,6 +199,23 @@ function createFetchIpcHandlers(deps) {
         return true;
       }
 
+      if (pathname === "/wham/statsig/bootstrap") {
+        // 26.924 起登录后先取 Statsig bootstrap（renderer 5 秒超时）；离线代理只会超时拖慢首屏，
+        // 与 ab.chatgpt.com initialize 一样本地返回默认特性，user 取自请求以匹配 renderer 校验。
+        const request = body && typeof body === "object" ? body : {};
+        const initializePayload = JSON.parse(statsigInitializeFallbackResponse(requestId).bodyText);
+        const statsigPayload = JSON.stringify({
+          ...initializePayload,
+          user: {
+            customIDs: { stableID: String(request.stable_id || "") },
+            locale: request.locale,
+            appVersion: request.app_version,
+          },
+        });
+        broadcastFetchResponse(requestId, { statsigPayload }, 200, targetClientId);
+        return true;
+      }
+
       if (pathname === "/wham/accounts/check") {
         broadcastFetchResponse(requestId, await chatgptBackend.buildWhamAccountsCheck(), 200, targetClientId);
         return true;

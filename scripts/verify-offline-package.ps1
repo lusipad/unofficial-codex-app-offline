@@ -635,7 +635,7 @@ try {
 
     $dailyLauncherPath = Join-Path $portableRoot 'Codex.cmd'
     $dailyLauncherContent = Get-Content -Path $dailyLauncherPath -Raw
-    foreach ($needle in @('%~dp0_internal\app\ChatGPT.exe', '/D "%~dp0_internal\app"', 'CODEX_ELECTRON_ENABLE_WINDOWS_COMPUTER_USE')) {
+    foreach ($needle in @('%~dp0_internal\app\ChatGPT.exe', '/D "%~dp0_internal\app"', 'CODEX_ELECTRON_ENABLE_WINDOWS_COMPUTER_USE', 'call :import-codex-home "%CODEX_OFFLINE_ROOT%skill-installer.env"')) {
         if (-not $dailyLauncherContent.Contains($needle)) {
             throw "Daily launcher is missing expected relative-launch marker: $needle"
         }
@@ -643,7 +643,7 @@ try {
 
     $directLauncherPath = Join-Path $portableRoot '_internal\tools\Launch Codex Direct.cmd'
     $directLauncherContent = Get-Content -Path $directLauncherPath -Raw
-    foreach ($needle in @('%~dp0..\app\ChatGPT.exe', '/D "%~dp0..\app"', 'CODEX_ELECTRON_ENABLE_WINDOWS_COMPUTER_USE')) {
+    foreach ($needle in @('%~dp0..\app\ChatGPT.exe', '/D "%~dp0..\app"', 'CODEX_ELECTRON_ENABLE_WINDOWS_COMPUTER_USE', 'set "CODEX_OFFLINE_ROOT=%~dp0..\..\"', 'call :import-codex-home "%CODEX_OFFLINE_ROOT%skill-installer.env"')) {
         if (-not $directLauncherContent.Contains($needle)) {
             throw "Direct launcher is missing expected app-working-directory marker: $needle"
         }
@@ -651,7 +651,7 @@ try {
 
     $webLauncherPath = Join-Path $portableRoot 'Codex Web.cmd'
     $webLauncherContent = Get-Content -Path $webLauncherPath -Raw
-    foreach ($needle in @('where node', '%~dp0_internal\web\start-web.mjs')) {
+    foreach ($needle in @('where node', '%~dp0_internal\web\start-web.mjs', 'call :import-codex-home "%CODEX_OFFLINE_ROOT%skill-installer.env"')) {
         if (-not $webLauncherContent.Contains($needle)) {
             throw "Web launcher is missing expected Node startup marker: $needle"
         }
@@ -720,7 +720,7 @@ try {
 
     $webGatewayAssetPatchesPath = Join-Path $portableRoot '_internal\web\gateway\dist\official\assetPatches.js'
     $webGatewayAssetPatchesContent = Get-Content -Path $webGatewayAssetPatchesPath -Raw
-    foreach ($needle in @('codex-web-worked-for=1', 'connect-app-host')) {
+    foreach ($needle in @('"codex-web-patch=" + crypto.createHash("sha256").update(fs.readFileSync(__filename))', '.includes("{type:`connect-app-host`")')) {
         if (-not $webGatewayAssetPatchesContent.Contains($needle)) {
             throw "Web gateway asset patches are missing expected marker: $needle"
         }
@@ -863,7 +863,7 @@ try {
 
         $webZipAssetPatchesPath = Join-Path $webRoot 'gateway\dist\official\assetPatches.js'
         $webZipAssetPatchesContent = Get-Content -Path $webZipAssetPatchesPath -Raw
-        foreach ($needle in @('codex-web-worked-for=1', 'connect-app-host')) {
+        foreach ($needle in @('"codex-web-patch=" + crypto.createHash("sha256").update(fs.readFileSync(__filename))', '.includes("{type:`connect-app-host`")')) {
             if (-not $webZipAssetPatchesContent.Contains($needle)) {
                 throw "Web zip gateway asset patches are missing expected marker: $needle"
             }
@@ -1449,11 +1449,11 @@ const LEGACY_PLUGIN_RENDERER_PATCH_MARKERS = [
 ];
 const sidebarActivityPatchedSurfaceRe = new RegExp(
   `([A-Za-z_$][\\w$]*)=!0${escapeRegExp(SIDEBAR_ACTIVITY_VIEW_PATCH_MARKER)},` +
-    `([A-Za-z_$][\\w$]*)=[A-Za-z_$][\\w$]*\\([A-Za-z_$][\\w$]*\\);return \\1&&` +
+    `([A-Za-z_$][\\w$]*)=[A-Za-z_$][\\w$]*\\([A-Za-z_$][\\w$]*\\);return [A-Za-z_$][\\w$]*\\([A-Za-z_$][\\w$]*\\),\\1&&` +
     '\\(\\2\\.status===`allowed`\\|\\|\\2\\.status===`loading`\\)'
 );
 const sidebarActivityUnpatchedSurfaceRe =
-  /([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*)\),([A-Za-z_$][\w$]*)=[A-Za-z_$][\w$]*\([A-Za-z_$][\w$]*\);return \1&&\(\4\.status===`allowed`\|\|\4\.status===`loading`\)\}[^]*?\3=`4039078146`/;
+  /([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*)\),([A-Za-z_$][\w$]*)=[A-Za-z_$][\w$]*\([A-Za-z_$][\w$]*\);return [A-Za-z_$][\w$]*\([A-Za-z_$][\w$]*\),\1&&\(\4\.status===`allowed`\|\|\4\.status===`loading`\)\}[^]*?\3=`4039078146`/;
 const offlineNetworkModePatchedSurfaceRe = new RegExp(
   `([A-Za-z_$][\\w$]*)=\\{defaultOptions:\\{` +
     'mutations:\\{networkMode:`always`' +
@@ -1475,18 +1475,10 @@ const bundledPluginCacheLockCurrentFatalCatchRe =
 const bundledPluginCacheLockCurrentFatalResultRe =
   /let\{firstFailure:([A-Za-z_$][\w$]*)\}=[A-Za-z_$][\w$]*;if\(\1!=null\)\{if\([A-Za-z_$][\w$]*\.throwOnReconcileFailure\)throw \1\.error;return\{/;
 function findAppServerRequestBusName(content) {
-  const patterns = [
-    /listExperimentalFeatures:[A-Za-z_$][\w$]*=>\s*([A-Za-z_$][\w$]*)\(`list-experimental-features`,\{[\s\S]{0,260}?hostId:/,
-    /listModels:[A-Za-z_$][\w$]*=>\s*([A-Za-z_$][\w$]*)\(`list-models-for-host`,\{[\s\S]{0,260}?hostId:/,
-    /await\s+([A-Za-z_$][\w$]*)\(`handle-dynamic-tools-for-thread-start-response-for-host`,\{hostId:/,
-    /await\s+([A-Za-z_$][\w$]*)\(`apply-thread-title-update-for-host`,\{hostId:/,
-    /(?:^|[^\w$])([A-Za-z_$][\w$]*)\([A-Za-z_$][\w$]*,[A-Za-z_$][\w$]*\)\.sendRequest\(`thread\/start`,/,
-  ];
-  for (const pattern of patterns) {
-    const match = pattern.exec(content);
-    if (match?.[1]) return match[1];
-  }
-  return null;
+  const match = content.match(
+    /function ([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*),([A-Za-z_$][\w$]*)\)\{let ([A-Za-z_$][\w$]*)=\2\.get\([A-Za-z_$][\w$]*\);if\(\4==null\)throw Error\(`AppServerManager RPC is not connected`\);return \4\.forHost\(\3\)\}/,
+  );
+  return match?.[1] ?? null;
 }
 function hasComputerUseNodeReplDynamicToolCallBridge(content) {
   const requestFn = findAppServerRequestBusName(content);

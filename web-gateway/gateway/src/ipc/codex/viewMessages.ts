@@ -10,6 +10,7 @@ function createViewMessageHandlers(deps) {
   const SHARED_OBJECT_SNAPSHOT = deps.sharedObjectSnapshot;
   const PERSISTED_STATE = deps.persistedState;
   const appServerBridge = deps.appServerBridge;
+  const appServer = deps.appServer;
   const pendingWorktrees = deps.pendingWorktrees;
   const desktopState = deps.desktopState;
   const payloadShape = deps.payloadShape;
@@ -170,6 +171,18 @@ function createViewMessageHandlers(deps) {
       }
       if (String(payload.type || "").startsWith("pending-worktree-")) {
         return pendingWorktrees.handlePendingWorktreeMessage(payload);
+      }
+      if (payload.type === "ready") {
+        // 与桌面端一致：renderer ready 后补发 app-server 初始化快照；
+        // 26.924 起 renderer 依赖其中的版本判定 gateway OAuth 就绪，否则一直停在加载页。
+        const initializationMessage = appServer && appServer.getInitializationMessage();
+        if (initializationMessage && typeof broadcast === "function") {
+          broadcast(withTargetClient({
+            channel: "codex-app-server-initialized",
+            payload: { ...initializationMessage, isSnapshot: true },
+          }, targetClientIdForContext(context)));
+        }
+        return true;
       }
       if (DESKTOP_VIEW_NOOP_MESSAGE_TYPES.has(String(payload.type || ""))) {
         // 这些是 Desktop 主进程/系统 UI 状态同步消息。Web 没有对应原生窗口、

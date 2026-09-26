@@ -209,6 +209,24 @@ test("26.803 Chrome native pipe patch accepts additional node:os imports", () =>
   assert.equal(result.pipePrefixMatch?.[1], "ys");
 });
 
+test("26.924 Chrome native pipe prefix is found inside a lazy module initializer", () => {
+  // 26.924 moved the pipe-prefix helper into an esbuild lazy initializer, so
+  // its `var` declaration and its assignment are no longer adjacent.
+  const matchSource = sourceSlice(
+    "    const helperNeedleMatch =",
+    "\n    if (!helperNeedleMatch",
+  );
+  const matchSymbols = Function(
+    "content",
+    `"use strict";\n${matchSource}\nreturn { pipePrefixMatch };`,
+  );
+  const fixture =
+    'var qa,Pc=le(()=>{"use strict";u();' +
+    'qa=t=>t==="win32"?"\\\\\\\\.\\\\pipe\\\\codex-browser-use":"/tmp/codex-browser-use"});';
+
+  assert.equal(matchSymbols(fixture).pipePrefixMatch?.[1], "qa");
+});
+
 test("26.814 Chrome patches browser service but hashes browser client", () => {
   const patchSource = sourceSlice(
     "function patchChromePluginScripts",
@@ -377,36 +395,75 @@ test("26.814 browser descriptors patch shared plugin descriptor spreads", () => 
   }
 });
 
-test("26.814 dynamic tool handler bridges node_repl through the app server", () => {
+test("26.924 dynamic tool handler bridges node_repl through the app server", () => {
+  // 26.924 destructures the handler options inside the body and dropped
+  // queryClient. The response helper names are minified per build, so the
+  // bridge must reuse the ones the handler itself calls — `qzn`/`Up`/`zl`
+  // still exist in the fixture but belong to unrelated code.
   const patchSource = sourceSlice(
-    "  const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_RE =",
+    "  const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_CANONICAL_RE =",
     "  const ARCHIVED_THREADS_DATA_CONTROLS_CURRENT_RE =",
   );
   const patchComputerUseNodeReplDynamicToolCall = Function(
     "COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_PATCH_MARKER",
+    "escapeRegExp",
     `"use strict";\n${patchSource}\nreturn patchComputerUseNodeReplDynamicToolCall;`,
-  )("/*codex-offline:computer-use-node-repl-dynamic-tool-call*/");
+  )(
+    "/*codex-offline:computer-use-node-repl-dynamic-tool-call*/",
+    value => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
+  );
   const fixture =
-    "async function HZo({scope:e,serverRequest:t,hostId:n,queryClient:r,signal:i}){" +
-    "let{id:a,params:o}=t,{threadId:s,tool:c}=o;if(!s)return zp.error(`Missing threadId`),!1;" +
-    "if(i?.aborted||rX.dynamicToolCalls!=null&&!await rX.dynamicToolCalls.tryClaimExecution(" +
-    "{callId:o.callId,hostId:n,threadId:s,turnId:o.turnId})||i?.aborted)return!1;" +
-    "let m,h=o.namespace===KKo,g=o.namespace==null&&(eQo.has(c)||!1),_=" +
-    "h||g?await IKo({}):null,v=o.namespace===`plugin_management`?await NBr({}):null;" +
-    "if(v!=null)m=v;else if(!h&&!g)m=lv(`Unsupported dynamic tool namespace: ${o.namespace}`);" +
-    "else if(_!=null)m=_;else switch(c){}" +
-    "function seed(){return Ig(e,t).sendRequest(`thread/start`,{})}";
+    "function qzn(){}var Up={},zl=1;" +
+    "function qU(e,t){let n=e.get(JU);if(n==null)throw Error(`AppServerManager RPC is not connected`);return n.forHost(t)}" +
+    "async function GUr(e){let{scope:t,serverRequest:n,hostId:r,signal:i,transport:a}=e,{id:o,params:s}=n," +
+    "{threadId:c,tool:l}=s,u={callId:s.callId};if(!c)return!1;" +
+    "if(i?.aborted||c5.dynamicToolCalls!=null&&!await c5.dynamicToolCalls.tryClaimExecution(" +
+    "{callId:s.callId,hostId:r,threadId:c,turnId:s.turnId})||i?.aborted)return!1;" +
+    "let v;try{v=await load()}catch(e){return Dwn({dispatchMessageFromView:(e,t)=>ae.dispatchMessage(e,t)," +
+    "hostId:r,method:n.method,response:{id:TA(o),result:MZ(`failed`)}}),!0}}";
   const patched = patchComputerUseNodeReplDynamicToolCall(fixture);
 
-  assert.notEqual(patched.content, fixture);
-  assert.match(patched.content, /mcpServer\/tool\/call/);
-  assert.match(patched.content, /threadId:s/);
-  assert.match(patched.content, /codex-offline:computer-use-node-repl-dynamic-tool-call/);
   assert.equal(patched.patched, true);
+  assert.match(
+    patched.content,
+    /await qU\(t,r\)\.sendRequest\(`mcpServer\/tool\/call`,\{threadId:c,server:`node_repl`,tool:`js`,arguments:s\.arguments\}\)/,
+  );
+  assert.match(
+    patched.content,
+    /return Dwn\(\{dispatchMessageFromView:\(e,t\)=>ae\.dispatchMessage\(e,t\),hostId:r,method:n\.method,response:\{id:TA\(o\),result:_codexOfflineNodeReplResponse\}\}\),!0\}/,
+  );
+  assert.doesNotMatch(patched.content, /return qzn\(|Up\.dispatchMessage|zl\(o\)/);
+  assert.match(patched.content, /codex-offline:computer-use-node-repl-dynamic-tool-call/);
+});
+
+test("26.924 dynamic tool bridge fails closed without the handler's own responder", () => {
+  const patchSource = sourceSlice(
+    "  const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_CANONICAL_RE =",
+    "  const ARCHIVED_THREADS_DATA_CONTROLS_CURRENT_RE =",
+  );
+  const patchComputerUseNodeReplDynamicToolCall = Function(
+    "COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_PATCH_MARKER",
+    "escapeRegExp",
+    `"use strict";\n${patchSource}\nreturn patchComputerUseNodeReplDynamicToolCall;`,
+  )(
+    "/*codex-offline:computer-use-node-repl-dynamic-tool-call*/",
+    value => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
+  );
+  const fixture =
+    "function qU(e,t){let n=e.get(JU);if(n==null)throw Error(`AppServerManager RPC is not connected`);return n.forHost(t)}" +
+    "async function GUr(e){let{scope:t,serverRequest:n,hostId:r,signal:i,transport:a}=e,{id:o,params:s}=n," +
+    "{threadId:c,tool:l}=s;" +
+    "if(i?.aborted||c5.dynamicToolCalls!=null&&!await c5.dynamicToolCalls.tryClaimExecution(" +
+    "{callId:s.callId,hostId:r,threadId:c,turnId:s.turnId})||i?.aborted)return!1;return!0}";
+
+  assert.throws(
+    () => patchComputerUseNodeReplDynamicToolCall(fixture),
+    /response helpers for Computer Use node_repl\.js bridge/,
+  );
 });
 
 
-test("26.814 package verification accepts the app-server sendRequest bridge", () => {
+test("26.924 package verification accepts the app-server sendRequest bridge", () => {
   const verifierBridgeSource = verifierSourceSlice(
     "function findAppServerRequestBusName",
     "const PLUGINS_API_KEY_NAV_PATCH_MARKER =",
@@ -415,12 +472,11 @@ test("26.814 package verification accepts the app-server sendRequest bridge", ()
     `"use strict";\n${verifierBridgeSource}\nreturn { findAppServerRequestBusName, hasComputerUseNodeReplDynamicToolCallBridge };`,
   )();
   const fixture =
-    "function Ig(e,t){return e.get(t)}" +
-    "Ig(e,t).sendRequest(`thread/start`,{threadId:n});" +
-    "Ig(e,n).sendRequest(`mcpServer/tool/call`,{threadId:s,server:`node_repl`," +
-    "tool:`js`,arguments:o.arguments})";
+    "function qU(e,t){let n=e.get(JU);if(n==null)throw Error(`AppServerManager RPC is not connected`);return n.forHost(t)}" +
+    "qU(t,r).sendRequest(`mcpServer/tool/call`,{threadId:c,server:`node_repl`," +
+    "tool:`js`,arguments:s.arguments})";
 
-  assert.equal(verifierBridge.findAppServerRequestBusName(fixture), "Ig");
+  assert.equal(verifierBridge.findAppServerRequestBusName(fixture), "qU");
   assert.equal(verifierBridge.hasComputerUseNodeReplDynamicToolCallBridge(fixture), true);
 });
 
@@ -442,7 +498,9 @@ test("26.803 Chrome pipe filter accepts platform-aware listing functions", () =>
   assert.equal(result[0], fixture);
 });
 
-test("26.803 Chrome direct setup recognizes the platform dispatcher", () => {
+test("26.924 Chrome direct setup recognizes the platform dispatcher", () => {
+  // 26.924 folded the dispatcher into an async function that first honours
+  // BROWSER_USE_BACKEND_PATHS, then returns the platform ternary.
   const matchSource = sourceSlice(
     "    const directSetupGuardMatch =",
     "\n    if (!directSetupGuardMatch && !platformAwareSetupMatch)",
@@ -451,7 +509,9 @@ test("26.803 Chrome direct setup recognizes the platform dispatcher", () => {
     "content",
     `"use strict";\n${matchSource}\nreturn { directSetupGuardMatch, platformAwareSetupMatch };`,
   );
-  const fixture = "var Q6=e=>e.platform===`win32`?t4(e):e4(e)";
+  const fixture =
+    "var Gee=async t=>{let e=t.env.BROWSER_USE_BACKEND_PATHS;if(e!=null){return[...new Set(e.split(\";\"))]}" +
+    "return t.platform===\"win32\"?Xee(t):Kee(t)},Kee=async t=>[]";
 
   const result = matchDirectSetup(fixture);
   assert.equal(result.directSetupGuardMatch, null);
@@ -659,7 +719,7 @@ test("26.727 browser-use descriptor accepts external browser availability", () =
 test("26.908 dynamic tools keep node_repl at the top-level namespace boundary", () => {
   const regexSource = sourceSlice(
     "  const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOLS_TOP_LEVEL_RE =",
-    "\n  const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_RE =",
+    "\n  // 26.924 destructures the handler options inside the body",
   );
   const currentRegex = Function(
     `"use strict";\n${regexSource}\nreturn COMPUTER_USE_NODE_REPL_DYNAMIC_TOOLS_TOP_LEVEL_RE;`,

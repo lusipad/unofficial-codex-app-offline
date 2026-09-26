@@ -7,7 +7,15 @@ export {};
  * 禁止放宽为跨版本宽泛替换。
  */
 
-const OFFICIAL_ASSET_PATCH_QUERY = "codex-web-worked-for=1";
+const crypto = require("node:crypto");
+const fs = require("node:fs");
+
+/**
+ * 官方资源按 immutable 缓存一年，query 是让浏览器丢弃旧 gateway 补丁版本的唯一手段；
+ * 由本模块内容哈希得出，补丁一改 query 就变，不依赖人工递增。
+ */
+const OFFICIAL_ASSET_PATCH_QUERY =
+  "codex-web-patch=" + crypto.createHash("sha256").update(fs.readFileSync(__filename)).digest("hex").slice(0, 12);
 
 function officialAssetPatchQuery() {
   return OFFICIAL_ASSET_PATCH_QUERY;
@@ -21,6 +29,8 @@ function shouldPatchOfficialAsset(reqPath) {
 /** Web 环境下没有 Electron 宿主，这些宿主 services 由 gateway 侧 mock。 */
 const MOCK_APP_SERVICES =
   "{" +
+  // 26.924 起 renderer 的 HTTP 请求走宿主 httpFetch service，由 web-shell polyfill 转发到 gateway。
+  "httpFetch:window.__codexWebHttpFetch," +
   "hotkeyWindowHotkeys:{" +
   "dismiss:function(){},transitionDone:function(){},setEnabled:function(){},open:function(){}" +
   "}," +
@@ -156,17 +166,6 @@ function patchConnectAppHostChunk(source) {
   return source;
 }
 
-/** 个性化页面中 codex-agents-md 查询依赖 RPC 客户端，mock 不可用时显示错误。
-  * 将查询替换为空 mock，显示"暂无自定义指令"而非错误。 */
-function patchPersonalizationSettingsChunk(source) {
-  // 替换 Me=C(S,`codex-agents-md`,e=>({params:{hostId:e},staleTime:O.FIVE_SECONDS}))
-  // 为 mock，注意嵌套括号需要用 .+? 配合末尾的 })) 来精确匹配
-  return source.replace(
-    /,Me=C\(S,`codex-agents-md`,e=>\(\{params:\{hostId:e\},staleTime:O\.FIVE_SECONDS\}\)\)/,
-    ",Me={data:{instructions:\"\"},isLoading:false,isFetching:false}"
-  );
-}
-
 /** 对官方 chunk 做响应期 patch，不落盘改 vendor/官方构建产物。 */
 function patchOfficialAsset(reqPath, data) {
   if (!shouldPatchOfficialAsset(reqPath)) return data;
@@ -180,12 +179,10 @@ function patchOfficialAsset(reqPath, data) {
   const withRpcMock = /\/rpc-[^/]+\.js$/.test(reqPath)
     ? patchRpcInitChunk(withAppServerPatch)
     : withAppServerPatch;
-  const withConnectAppHostMock = /\/connect-app-host-[^/]+\.js$/.test(reqPath)
+  // 26.917 起握手被并进 app-shared，chunk 文件名不再稳定；按协议常量分派。
+  const patched = withRpcMock.includes("{type:`connect-app-host`")
     ? patchConnectAppHostChunk(withRpcMock)
     : withRpcMock;
-  const patched = /\/personalization-settings-[^/]+\.js$/.test(reqPath)
-    ? patchPersonalizationSettingsChunk(withConnectAppHostMock)
-    : withConnectAppHostMock;
   return Buffer.from(patched, "utf-8");
 }
 

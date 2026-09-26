@@ -195,3 +195,37 @@ sessionStorage 记录目标代号防刷新循环。验证（`build/tmp/web-e2e-a
   删除时打 snapshot ref，gateway 的 delete-worktree 不打 snapshot）。
 - 桌面 `create-worktree` 的 local environment setup 脚本执行、上游刷新
   （`upstreamRefreshMode`）与 synced branch 设置未复刻；entry 无 setup 阶段日志。
+
+## 26.917 / 26.924 复发（Web 再次停在启动屏）
+
+26.917 起 Web 端又停在官方启动屏，26.924 修掉握手后仍进不了主界面。逐层定位到五处，
+全部在 Gateway / web-shell 层修复，未改桌面 bundle：
+
+1. **mock 按文件名分派失效**：握手从 `connect-app-host-*.js` 并进 `app-shared-*.js`，
+   `patchOfficialAsset` 按文件名判断，补丁从未被调用，失配告警也不会触发。
+   改为按协议常量 `{type:` + "`connect-app-host`" 分派——文件名不是稳定语义锚点。
+2. **补丁查询串写死**：官方资源 `immutable, max-age=1y`，查询串是唯一的失效手段，
+   却固定为 `codex-web-worked-for=1`。Gateway 修复后浏览器仍跑缓存里的旧 chunk
+   （排查时曾因此误判"修复无效"）。现为 `codex-web-patch=<assetPatches 模块内容哈希>`。
+3. **宿主 `httpFetch` service**：26.924 renderer 的 HTTP 请求走 `c5.httpFetch`
+   （`fetch(id, req)` 返回可 dispose 的 Promise，结果为 `{response}` 或 `{error, status, …}`；
+   `cancel(id)`）。web-shell 的 `createCodexWebHttpFetch` 把它转发到 Gateway 既有的
+   `fetch` 消息通道，并照搬桌面主进程 `prepareFetchInit`：字符串 JSON body 且无
+   `Content-Type` 时补 `application/json`（否则 `/wham/statsig/bootstrap` 400）。
+4. **`codex-app-server-initialized`**：renderer 的 gateway OAuth 就绪（`Uli`）依赖其中的
+   app-server 版本，收不到就永远 `loading`。桌面主进程在 initialize 后广播，并在 renderer
+   发 `ready` 时经 `sendInitializationSnapshot` 补发；Gateway 按同一契约实现
+   （版本取自 initialize `userAgent` 的 `<name>/<version>`）。在 WebSocket hello 时补发无效：
+   那时 renderer 还没注册消息处理器。
+5. **登录后 Statsig bootstrap**：新增 `POST /wham/statsig/bootstrap`，renderer 5 秒超时，
+   离线代理只会超时。Gateway 与 `ab.chatgpt.com` initialize 一样本地返回默认特性，
+   响应为 `{statsigPayload: "<initialize JSON，含 user>"}`。
+
+排查方法：遍历 React fiber 读取 `RouteContext.matches` 与挂起组件的 hook 状态，
+比静态追踪压缩代码快得多；定位到 `jui` 的 `gatewayOAuthReadiness === "loading"` 后再反查数据来源。
+
+### 仍未覆盖的风险（26.924）
+
+- 首屏约 11～14 秒，其中约 5 秒空档尚未定位。
+- 内联可视化沙箱 iframe（`codex-sandbox://`）在 Web 端被 CSP 拦截，属外围功能。
+- 直接打开 `/settings/...` 等深链接会落到首页（renderer 使用内存路由），需在应用内导航。

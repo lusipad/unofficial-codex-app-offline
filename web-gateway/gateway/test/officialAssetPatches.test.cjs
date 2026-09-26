@@ -90,6 +90,47 @@ test("patchOfficialAsset wires the connect-app-host mock and module specifier qu
   );
 });
 
+// 26.917 起 connect-app-host 握手被并进 app-shared chunk，不再有独立文件名。
+const APP_SHARED_26924 =
+  'import{n as e}from"./rolldown-runtime-c05d78c594d1.js";' +
+  "var fWr={};function mWr(e){let{port1:t,port2:n}=new MessageChannel;" +
+  "return window.postMessage({type:`connect-app-host`,port:n},window.location.origin,[n]),Unt(t,e)}" +
+  "async function gWr(){s5=mWr(fWr),c5=await s5.services}";
+
+test("patchOfficialAsset mocks connect-app-host wherever the handshake lives (26.924 app-shared)", () => {
+  const reqPath = "/official/assets/app-shared-d93bebbb48ab.js";
+  const { result, warnings } = captureWarns(() =>
+    patchOfficialAsset(reqPath, Buffer.from(APP_SHARED_26924, "utf-8")).toString("utf-8")
+  );
+  assert.equal(warnings.length, 0);
+  assert.ok(!result.includes("new MessageChannel"), "must not keep the MessageChannel connect");
+  assert.ok(result.includes("function mWr(e){return{services:Promise.resolve({"));
+  assert.ok(result.includes("s5=mWr(fWr),c5=await s5.services"), "callers stay intact");
+  assert.ok(
+    result.includes("httpFetch:window.__codexWebHttpFetch"),
+    "26.924 renderer HTTP goes through the host httpFetch service"
+  );
+});
+
+test("patchOfficialAsset does not warn on chunks without the connect-app-host handshake", () => {
+  const body = "var a=1;export{a as b};";
+  const { result, warnings } = captureWarns(() =>
+    patchOfficialAsset("/official/assets/app-initial-58e226417aae.js", Buffer.from(body, "utf-8")).toString("utf-8")
+  );
+  assert.equal(result, body);
+  assert.equal(warnings.length, 0);
+});
+
+test("patch query changes whenever the patch module changes", () => {
+  // Official assets are served `immutable` for a year, so the query is the only
+  // thing that evicts a browser's copy patched by an older gateway.
+  const crypto = require("node:crypto");
+  const fs = require("node:fs");
+  const modulePath = require.resolve("../dist/official/assetPatches.js");
+  const digest = crypto.createHash("sha256").update(fs.readFileSync(modulePath)).digest("hex").slice(0, 12);
+  assert.equal(OFFICIAL_ASSET_PATCH_QUERY, `codex-web-patch=${digest}`);
+});
+
 test("patchOfficialAsset leaves non-asset paths untouched", () => {
   const body = Buffer.from(CONNECT_APP_HOST_26908, "utf-8");
   const out = patchOfficialAsset("/official/index.html", body);

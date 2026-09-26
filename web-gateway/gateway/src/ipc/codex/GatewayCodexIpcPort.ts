@@ -221,7 +221,6 @@ const DESKTOP_VIEW_NOOP_MESSAGE_TYPES = new Set([
   "open-in-new-window",
   "power-save-blocker-set",
   "query-cache-invalidate",
-  "ready",
   "remote-hosted-pip-active-thread-changed",
   "set-primary-runtime-install-release",
   "set-telemetry-user",
@@ -409,6 +408,7 @@ function makeHandlers({ appServer, broadcast, logger, isClientConnected }) {
   });
 
   const viewMessages = createViewMessageHandlers({
+    appServer,
     appServerBridge,
     avatarOverlayOpenStateKey: "electron-avatar-overlay-open",
     broadcast,
