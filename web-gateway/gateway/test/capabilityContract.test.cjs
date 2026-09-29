@@ -236,7 +236,25 @@ test("source data contract declares every required desktop asar marker", () => {
   }
 
   assert.equal(declared.has("/*codex-offline:default-on-gate-wrapper*/"), true);
-  assert.deepEqual(contractData.DESKTOP_GATE_DENYLIST, []);
+  assert.equal(declared.has("/*codex-offline:default-on-gate-atom*/"), true);
+});
+
+test("gate denylist never closes a gate the offline contract opens", () => {
+  const denylist = contractData.DESKTOP_GATE_DENYLIST;
+  assert.ok(Object.isFrozen(denylist));
+  assert.equal(new Set(denylist).size, denylist.length, "denylist entries are unique");
+  for (const gateId of denylist) {
+    assert.match(gateId, /^\d+$/, gateId);
+    assert.notEqual(contractData.STATSIG_DEFAULT_FEATURE_OVERRIDES[gateId], true, gateId);
+    assert.equal(contractData.DESKTOP_ASAR_KNOWN_GATE_IDS.includes(gateId), false, gateId);
+  }
+  // Local desktop surfaces the atom patch exists to open (App snapshots, Mini/pets,
+  // code review, worktrees, WSL remote connections).
+  for (const gateId of ["1532120159", "1655510532", "188145323", "579168209", "4059753351", "3855399757"]) {
+    assert.equal(denylist.includes(gateId), false, gateId);
+  }
+  // Opening this one starts the durable host connection, which needs a ChatGPT sign-in.
+  assert.equal(denylist.includes("375130565"), true);
 });
 
 test("source data contract covers direct exe asar patch surfaces", () => {
@@ -308,6 +326,7 @@ test("source data contract covers direct exe asar patch surfaces", () => {
       "/*codex-offline:ultra-reasoning-effort*/",
       "/*codex-offline:codex-mobile-auth-relogin*/",
       "/*codex-offline:default-on-gate-wrapper*/",
+      "/*codex-offline:default-on-gate-atom*/",
       "/*codex-offline:settings-route-map*/",
       "/*codex-offline:locale-source-default*/",
       "/*codex-offline:stdio-write-error-guard-v2*/",

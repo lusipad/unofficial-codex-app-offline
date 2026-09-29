@@ -1,4 +1,8 @@
-# 离线 gate 策略重设计草案（未实施：默认开 + 黑名单 + 发现报告）
+# 离线 gate 策略重设计草案（默认开 + 黑名单 + 发现报告）
+
+> 状态更新（2026-09-29）：`checkGate` 包裹已落地（`default-on-gate-wrapper`）；jotai atom 路径由
+> `default-on-gate-atom` 覆盖，黑名单已按 26.924.2738.0 填充，见
+> [`renderer-gate-atom-default-on.md`](renderer-gate-atom-default-on.md)。下文保留为原始设计记录。
 
 当前生产路径仍是：`init.cjs` 注入 allowlist 中的已知 gate id，加上
 `patch-app-asar.mjs` 的 `patchDirectStatsigGateCalls(..., DESKTOP_ASAR_KNOWN_GATE_IDS)`

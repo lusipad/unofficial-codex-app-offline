@@ -1433,6 +1433,12 @@ const SIDEBAR_ACTIVITY_VIEW_PATCH_MARKER =
   patchMarker('/*codex-offline:sidebar-activity-view*/');
 const RENDERER_KNOWN_STATSIG_GATES_PATCH_MARKER =
   patchMarker('/*codex-offline:renderer-known-statsig-gates*/');
+const DEFAULT_ON_GATE_ATOM_PATCH_MARKER =
+  patchMarker('/*codex-offline:default-on-gate-atom*/');
+// A gate atom write that still stores the raw Statsig value next to the
+// recognized-evaluation flag, i.e. an atom write the patch missed.
+const gateAtomUnpatchedWriteRe =
+  /let ([A-Za-z_$][\w$]*)=[A-Za-z_$][\w$]*\.getFeatureGate\(([A-Za-z_$][\w$]*)\);(?:[A-Za-z_$][\w$]*\(\1\.value\)|[A-Za-z_$][\w$]*\.set\([A-Za-z_$][\w$]*,\2,\1\.value\)),[A-Za-z_$][\w$]*\.set\([A-Za-z_$][\w$]*,\2,[A-Za-z_$][\w$]*\(\1\)\)/;
 const WORKSPACE_DEPENDENCIES_SETTINGS_PATCH_MARKER =
   patchMarker('/*codex-offline:workspace-dependencies-settings*/');
 const WORKTREE_HEAD_REF_PATCH_MARKER =
@@ -1621,6 +1627,8 @@ let ultraReasoningEffortSurfaceSeen = false;
 let ultraReasoningEffortPatched = false;
 let codexMobileRemoteControlMfaEndpointSeen = false;
 let codexMobileAuthReloginPatched = false;
+let defaultOnGateAtomPatched = false;
+const defaultOnGateAtomResiduals = [];
 const bundledBrowserPluginForceReloadResiduals = [];
 const settingsRouteResiduals = [];
 const localeSourceResiduals = [];
@@ -1646,6 +1654,12 @@ for (const entry of javaScriptEntries) {
     webviewBrokenBooleanPatchResiduals.push(entry);
   }
   if (isWebviewAsset) {
+    if (content.split(DEFAULT_ON_GATE_ATOM_PATCH_MARKER).length - 1 === 2) {
+      defaultOnGateAtomPatched = true;
+    }
+    if (gateAtomUnpatchedWriteRe.test(content)) {
+      defaultOnGateAtomResiduals.push(entry);
+    }
     if (sidebarActivityPatchedSurfaceRe.test(content)) {
       sidebarActivityViewSurfaceSeen = true;
       sidebarActivityViewPatched = true;
@@ -2040,6 +2054,18 @@ if (!computerUseNodeReplDynamicToolCallPatched) {
   reportPatchMiss(
     "/*codex-offline:computer-use-node-repl-dynamic-tool-call*/",
     'Computer Use node_repl.js dynamic tool call bridge marker is missing.',
+  );
+}
+if (!defaultOnGateAtomPatched) {
+  reportPatchMiss(
+    DEFAULT_ON_GATE_ATOM_PATCH_MARKER,
+    'Renderer Statsig gate atom does not open unrecognized gates (expected the marker on both atom writes).',
+  );
+}
+if (defaultOnGateAtomResiduals.length > 0) {
+  throw new Error(
+    'Renderer Statsig gate atom still stores raw offline gate values in: ' +
+    defaultOnGateAtomResiduals.join(', ')
   );
 }
 if (!archivedThreadsPartialListPatched) {

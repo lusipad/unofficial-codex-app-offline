@@ -265,6 +265,91 @@ test("renderer known gate patch handles direct and second-argument gate calls", 
   );
 });
 
+test("renderer gate atom opens unrecognized gates unless denied", () => {
+  const functionStart = patchScriptSource.indexOf("function patchDefaultOnStatsigGateAtom");
+  const functionEnd = patchScriptSource.indexOf("\nfunction patchOfflineNetworkModeDefaults", functionStart);
+  assert.notEqual(functionStart, -1, "gate atom patch helper is missing");
+  assert.notEqual(functionEnd, -1, "gate atom helper terminator is missing");
+  const patchDefaultOnStatsigGateAtom = Function(
+    "escapeRegExp",
+    `"use strict";\n${patchScriptSource.slice(functionStart, functionEnd)}\nreturn patchDefaultOnStatsigGateAtom;`,
+  )(escapeRegExp);
+  const marker = "/*codex-offline:default-on-gate-atom*/";
+  // 26.924 shapes: the values_updated refresh, the recognized predicate, and the atom onMount.
+  const fixture =
+    "function refresh(e,t,n){let r=t.getFeatureGate(n);e.set(EK,n,r.value),e.set(TK,n,zun(r))}" +
+    "function zun(e){return e.details.reason===`LocalOverride`||e.details.reason?.endsWith(`:Recognized`)===!0}" +
+    "function mount(e,t,n,r){let i=r.getFeatureGate(n);e(i.value),t.set(TK,n,zun(i))}";
+
+  const result = patchDefaultOnStatsigGateAtom(fixture, marker, ["111"], { "222": false, "333": true });
+  assert.equal(result.seen, true);
+  assert.equal(result.patched, true);
+  assert.equal(result.content.split(marker).length - 1, 2, "both atom writes must be patched");
+
+  const { refresh, mount } = Function(
+    "EK",
+    "TK",
+    `"use strict";${result.content}return {refresh,mount};`,
+  )("EK", "TK");
+  const gates = {
+    unknown: { value: false, details: { reason: "Network:Unrecognized" } },
+    111: { value: false, details: { reason: "Network:Unrecognized" } },
+    222: { value: false, details: { reason: "Network:Recognized" } },
+    222.5: { value: false, details: { reason: "Loading" } },
+    333: { value: true, details: { reason: "Network:Recognized" } },
+    local: { value: false, details: { reason: "LocalOverride" } },
+  };
+  const client = { getFeatureGate: (key) => gates[key] ?? gates.unknown };
+  function readRefresh(key) {
+    const writes = {};
+    refresh({ set: (atom, k, value) => { writes[atom] = value; } }, client, key);
+    return writes;
+  }
+  function readMount(key) {
+    let value;
+    mount((v) => { value = v; }, { set() {} }, key, client);
+    return value;
+  }
+  assert.deepEqual(readRefresh("4000000001"), { EK: true, TK: false }, "unrecognized gate opens");
+  assert.equal(readMount("4000000001"), true);
+  assert.equal(readRefresh("111").EK, false, "denylisted gate keeps upstream value");
+  assert.equal(readMount("111"), false);
+  assert.equal(readRefresh("222").EK, false, "recognized explicit false stays false");
+  assert.equal(
+    patchDefaultOnStatsigGateAtom(fixture, marker, [], { "222": false }).content.includes('["222"]'),
+    true,
+    "explicit false overrides are denied while Statsig is still loading",
+  );
+  assert.equal(readRefresh("333").EK, true);
+  assert.equal(readRefresh("local").EK, false, "local overrides stay authoritative");
+
+  const secondPass = patchDefaultOnStatsigGateAtom(result.content, marker, ["111"], {});
+  assert.equal(secondPass.alreadyCorrect, true);
+  assert.equal(secondPass.content, result.content);
+
+  const drifted = patchDefaultOnStatsigGateAtom(
+    fixture.replace("e.set(EK,n,r.value)", "e.set(EK,n,!!r.value)"),
+    marker,
+    [],
+    {},
+  );
+  assert.equal(drifted.seen, true);
+  assert.equal(drifted.patched, false, "a drifted atom write must fail closed");
+  assert.equal(drifted.content.includes(marker), false);
+
+  const unrelated = patchDefaultOnStatsigGateAtom("function x(){return 1}", marker, [], {});
+  assert.equal(unrelated.seen, false);
+});
+
+test("renderer gate atom patch is wired to the shared denylist and fails closed", () => {
+  assert.match(
+    patchScriptSource,
+    /patchDefaultOnStatsigGateAtom\(\s*content,\s*contractPatchMarker\('\/\*codex-offline:default-on-gate-atom\*\/'\),\s*DESKTOP_GATE_DENYLIST,/,
+  );
+  assert.match(patchScriptSource, /failRequiredPatch\(\s*'Could not open unrecognized gates in the renderer Statsig gate atom/);
+  assert.match(verifyScriptSource, /patchMarker\('\/\*codex-offline:default-on-gate-atom\*\/'\)/);
+});
+
 test("renderer defaults run local queries and mutations while the OS is offline", () => {
   const functionStart = patchScriptSource.indexOf(
     "function patchOfflineNetworkModeDefaults",

@@ -776,6 +776,42 @@ function patchDefaultOnStatsigCheckGate(content, patchMarker, denylist, override
   return { content: content.replace(anchor, replacement), seen: true, patched: true, alreadyCorrect: false };
 }
 
+// The renderer's jotai gate atom reads getFeatureGate(key).value directly, so
+// the checkGate wrapper above never reaches the UI hooks built on it. Both atom
+// writes (on mount and on values_updated) pair the value with upstream's own
+// "evaluation was recognized" predicate; we anchor on that predicate and open a
+// gate only when Statsig has no evaluation for it. Recognized values, including
+// the explicit false overrides, stay authoritative.
+function patchDefaultOnStatsigGateAtom(content, patchMarker, denylist, overrides) {
+  if (content.includes(patchMarker)) return { content, seen: true, patched: false, alreadyCorrect: true };
+  const predicate =
+    /function ([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*)\)\{return \2\.details\.reason===`LocalOverride`\|\|\2\.details\.reason\?\.endsWith\(`:Recognized`\)===!0\}/.exec(content);
+  if (!predicate) return { content, seen: false, patched: false, alreadyCorrect: false };
+  const recognized = escapeRegExp(predicate[1]);
+  const id = '[A-Za-z_$][\\w$]*';
+  const mountWrite = new RegExp(
+    `let (${id})=(${id})\\.getFeatureGate\\((${id})\\);(${id})\\(\\1\\.value\\),(${id})\\.set\\((${id}),\\3,${recognized}\\(\\1\\)\\)`,
+  );
+  const refreshWrite = new RegExp(
+    `let (${id})=(${id})\\.getFeatureGate\\((${id})\\);(${id})\\.set\\((${id}),\\3,\\1\\.value\\),\\4\\.set\\((${id}),\\3,${recognized}\\(\\1\\)\\)`,
+  );
+  const mount = mountWrite.exec(content);
+  const refresh = refreshWrite.exec(content);
+  if (!mount || !refresh) return { content, seen: true, patched: false, alreadyCorrect: false };
+  const explicitFalse = Object.entries(overrides || {})
+    .filter(([, value]) => value === false)
+    .map(([key]) => String(key));
+  const denied = JSON.stringify([...new Set([...explicitFalse, ...Array.from(denylist || []).map(String)])]);
+  const openValue = (gate, key) =>
+    `(${gate}.value||!${predicate[1]}(${gate})&&!${denied}.includes(String(${key}))${patchMarker})`;
+  const next = content
+    .replace(mountWrite, (_m, gate, client, key, setValue, store, recognizedAtom) =>
+      `let ${gate}=${client}.getFeatureGate(${key});${setValue}(${openValue(gate, key)}),${store}.set(${recognizedAtom},${key},${predicate[1]}(${gate}))`)
+    .replace(refreshWrite, (_m, gate, client, key, store, valueAtom, recognizedAtom) =>
+      `let ${gate}=${client}.getFeatureGate(${key});${store}.set(${valueAtom},${key},${openValue(gate, key)}),${store}.set(${recognizedAtom},${key},${predicate[1]}(${gate}))`);
+  return { content: next, seen: true, patched: true, alreadyCorrect: false };
+}
+
 function patchOfflineNetworkModeDefaults(
   content,
   queryPatchMarker,
@@ -3349,6 +3385,9 @@ try {
     var defaultOnStatsigGatePatched = false;
     var defaultOnStatsigGateSeen = false;
     var defaultOnStatsigGateAlreadyCorrect = false;
+    const defaultOnGateAtomPatchedFiles = [];
+    let defaultOnGateAtomSeen = false;
+    let defaultOnGateAtomAlreadyCorrect = false;
     let sidebarActivitySurfaceSeen = false;
     let sidebarActivityViewPatched = false;
     let offlineQueryNetworkModePatched = false;
@@ -3481,6 +3520,19 @@ try {
       }
       defaultOnStatsigGateSeen ||= defaultOnStatsigGatePatch.seen;
       defaultOnStatsigGateAlreadyCorrect ||= defaultOnStatsigGatePatch.alreadyCorrect;
+      const defaultOnGateAtomPatch = patchDefaultOnStatsigGateAtom(
+        content,
+        contractPatchMarker('/*codex-offline:default-on-gate-atom*/'),
+        DESKTOP_GATE_DENYLIST,
+        require('../web-gateway/gateway/src/ipc/codex/capabilityContractData.cjs').STATSIG_DEFAULT_FEATURE_OVERRIDES,
+      );
+      if (defaultOnGateAtomPatch.patched) {
+        content = defaultOnGateAtomPatch.content;
+        defaultOnGateAtomPatchedFiles.push(path.relative(tmpDir, filePath));
+        changed = true;
+      }
+      defaultOnGateAtomSeen ||= defaultOnGateAtomPatch.seen;
+      defaultOnGateAtomAlreadyCorrect ||= defaultOnGateAtomPatch.alreadyCorrect;
       const offlineNetworkModePatch = patchOfflineNetworkModeDefaults(
         content,
         OFFLINE_QUERY_NETWORK_MODE_PATCH_MARKER,
@@ -3578,6 +3630,17 @@ try {
     } else {
       failRequiredPatch(
         'Could not locate the Workspace Dependencies settings surface.',
+      );
+    }
+    if (defaultOnGateAtomPatchedFiles.length > 0) {
+      log('Unrecognized renderer gate-atom reads default on (' +
+        `${DESKTOP_GATE_DENYLIST.length} denied) in ${defaultOnGateAtomPatchedFiles.join(', ')}.`);
+    } else if (!defaultOnGateAtomAlreadyCorrect) {
+      failRequiredPatch(
+        'Could not open unrecognized gates in the renderer Statsig gate atom ' +
+        (defaultOnGateAtomSeen
+          ? '(the recognized-evaluation predicate matched but its two atom writes did not).'
+          : '(the recognized-evaluation predicate was not found).'),
       );
     }
     if (!sidebarActivitySurfaceSeen) {

@@ -1,5 +1,45 @@
 # Changelog
 
+## 2026-09-29
+
+### 中文
+
+- 修复离线包缺少官方新功能入口的问题（如设置里的「应用快照」「Mini 与虚拟宠物」）。
+  - **原因**：renderer 读 Statsig gate 有两条路径，已有的 `default-on-gate-wrapper` 只包裹了 `checkGate`；UI hook 使用的 jotai gate atom 直接读 `getFeatureGate(key).value`，离线无评估时恒为 `false`，而且同一个 gate 可能在两条路径上一开一关。
+  - **改动**：新增 required 补丁 `default-on-gate-atom`。它锚定上游自己的“评估已识别”判定，覆盖 atom 的两处写入（onMount 和 `values_updated`）。只有“无评估且不在 denylist”的 gate 默认开；已识别的值（包括显式 `false` 的 override）保持不变。
+  - **范围**：只作用于 `webview/assets`。主进程 Statsig SDK，以及下发给 app-server 的 `executionValues` / tool catalog 等直接 `getFeatureGate` 调用都不受影响。
+- `DESKTOP_GATE_DENYLIST` 由空列表改为按 26.924.2738.0 renderer 审查得到的 396 个 id：
+  - 纳入：云端 / ChatGPT 专属、onboarding、插件界面、遥测、app-server 绑定，以及只在通用 chunk 中读取、用途无法确认的 gate；
+  - 刻意不纳入：已由 `checkGate` 路径打开的 gate，本次只新增开启，不关闭现有功能；
+  - atom 路径新开放 61 个本地功能 gate。
+
+  审查方法与清单见 `docs/renderer-gate-atom-default-on.md`。
+- 在同一 stage 上做了运行时 A/B（仅还原 atom 补丁，跑 direct-launch 冒烟），并记录补丁实际打开的 gate，据此修正了静态审查：
+  - `375130565` 打开后会连接需要 ChatGPT 登录的 `durable` host 并反复重试，二分定位后已拒绝；
+  - `3389661532`（工作区语音权限）、`1009060764`（卡顿检测遥测）以变量传入 id，由运行时打印发现，已拒绝；
+  - `3855399757`（`wsl_remote_connections`）保留开启：它会自动连接 WSL 内的 Codex，WSL 内版本过旧时会显示 `update-required`，与官方行为一致。
+- 验证器新增断言：renderer 中 atom 两处写入都必须带 marker，并拒绝残留未打补丁的写入。
+- 验证：`node --test ./scripts/test/*.test.cjs ./web-gateway/gateway/test/*.test.cjs` 230 个测试全部通过，其中新增用例以 26.924 的真实 atom 形态执行补丁后代码，覆盖未识别、denylist、显式 false、已识别四种语义以及漂移时失败关闭。
+
+### English
+
+- Fixed official features missing from the offline package (e.g. Settings → App snapshots, Mini & pets).
+  - **Cause**: the renderer reads Statsig gates through two paths, and the existing `default-on-gate-wrapper` only wraps `checkGate`. The jotai gate atom behind the UI hooks reads `getFeatureGate(key).value` directly, which is always `false` offline because there is no evaluation, so a single gate could be on through one path and off through the other.
+  - **Change**: new required patch `default-on-gate-atom`. It anchors on upstream's own "evaluation recognized" predicate and covers both atom writes (on mount and on `values_updated`). A gate opens only when it has no evaluation and is not denylisted; recognized values, including explicit `false` overrides, stay authoritative.
+  - **Scope**: only `webview/assets` is patched. The main-process Statsig SDK and direct `getFeatureGate` calls such as the app-server-bound `executionValues` and tool catalog are untouched.
+- `DESKTOP_GATE_DENYLIST` goes from empty to 396 ids reviewed against the 26.924.2738.0 renderer:
+  - Included: cloud/ChatGPT-only, onboarding, plugin surfaces, telemetry, app-server-bound gates, and gates read only from shared chunks whose purpose could not be established.
+  - Deliberately excluded: gates the `checkGate` path already opens, since this change only opens gates and never closes existing ones.
+  - 61 local-feature gates are newly opened on the atom path.
+
+  The method and lists are in `docs/renderer-gate-atom-default-on.md`.
+- A runtime A/B on the same stage (reverting only the atom patch, then running the direct-launch smoke) plus logging which gates the patch actually opens corrected the static review:
+  - `375130565` makes the renderer connect to the `durable` host, which needs a ChatGPT sign-in, and retry; bisection isolated it and it is now denied.
+  - `3389661532` (workspace voice access) and `1009060764` (renderer hang telemetry) pass their ids through a variable, surfaced through runtime logging, and are now denied.
+  - `3855399757` (`wsl_remote_connections`) stays open. It auto-connects to Codex inside WSL and shows `update-required` when the WSL version is too old, matching official behaviour.
+- The verifier now requires the marker on both atom writes and rejects any unpatched write.
+- Verified: all 230 tests in `node --test ./scripts/test/*.test.cjs ./web-gateway/gateway/test/*.test.cjs` pass. The new cases execute the patched code against the real 26.924 atom shape and cover unrecognized, denylisted, explicit false and recognized gates, plus failing closed on drift.
+
 ## 2026-09-26
 
 ### 中文
