@@ -111,7 +111,21 @@ test("26.727 archive verifier accepts the current isError prop layout", () => {
     true,
   );
   assert.equal(
+    isVerified(
+      `archivedChats:se,isError:se.length===0&&d&&v.some(nn)${marker},onLoadNextPage:ue`,
+      marker,
+    ),
+    true,
+  );
+  assert.equal(
     isVerified("archivedChats:foo,isError:t&&l,onLoadNextPage:d", marker),
+    false,
+  );
+  assert.equal(
+    isVerified(
+      "archivedChats:se,isError:se.length===0&&(d&&v.some(nn)||y==null&&D),onLoadNextPage:ue",
+      marker,
+    ),
     false,
   );
 });
@@ -395,11 +409,12 @@ test("26.814 browser descriptors patch shared plugin descriptor spreads", () => 
   }
 });
 
-test("26.924 dynamic tool handler bridges node_repl through the app server", () => {
-  // 26.924 destructures the handler options inside the body and dropped
-  // queryClient. The response helper names are minified per build, so the
-  // bridge must reuse the ones the handler itself calls — `qzn`/`Up`/`zl`
-  // still exist in the fixture but belong to unrelated code.
+test("26.928 dynamic tool handler bridges node_repl through the app server", () => {
+  // 26.928 always destructures `transport` and lets the mcp `codex_app`
+  // `record_private_review` tool skip the execution claim. The response helper
+  // names are minified per build, so the bridge must reuse the ones the
+  // handler itself calls — `qzn`/`Up`/`zl` still exist in the fixture but
+  // belong to unrelated code.
   const patchSource = sourceSlice(
     "  const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_CANONICAL_RE =",
     "  const ARCHIVED_THREADS_DATA_CONTROLS_CURRENT_RE =",
@@ -416,11 +431,21 @@ test("26.924 dynamic tool handler bridges node_repl through the app server", () 
     "function qzn(){}var Up={},zl=1;" +
     "function qU(e,t){let n=e.get(JU);if(n==null)throw Error(`AppServerManager RPC is not connected`);return n.forHost(t)}" +
     "async function GUr(e){let{scope:t,serverRequest:n,hostId:r,signal:i,transport:a}=e,{id:o,params:s}=n," +
-    "{threadId:c,tool:l}=s,u={callId:s.callId};if(!c)return!1;" +
-    "if(i?.aborted||c5.dynamicToolCalls!=null&&!await c5.dynamicToolCalls.tryClaimExecution(" +
-    "{callId:s.callId,hostId:r,threadId:c,turnId:s.turnId})||i?.aborted)return!1;" +
-    "let v;try{v=await load()}catch(e){return Dwn({dispatchMessageFromView:(e,t)=>ae.dispatchMessage(e,t)," +
-    "hostId:r,method:n.method,response:{id:TA(o),result:MZ(`failed`)}}),!0}}";
+    "{threadId:c,tool:l}=s,u={callId:s.callId,isRemoteHost:r!==VI,tool:l,turnId:s.turnId};" +
+    "if(_f.info(`dynamic_app_tool_renderer_execution_started`,{safe:u,sensitive:{}}),!c)" +
+    "return _f.error(`Missing threadId for dynamic tool call request`,{safe:{},sensitive:{id:o,params:s}}),!1;" +
+    "let d=Z(c),f=new e6(t).getForHostId(r),p=f?.getConversation(d),m=XQ(p,s.turnId);" +
+    "if(a===`dynamic`&&h?.clientId!=null&&h.clientId!==m?.params.clientUserMessageId)return!1;" +
+    "let g=f?.getStreamRole?.(d);" +
+    "if(i?.aborted||(a!==`mcp`||s.namespace!==`codex_app`||l!==`record_private_review`)&&i6.dynamicToolCalls!=null" +
+    "&&!await i6.dynamicToolCalls.tryClaimExecution({callId:s.callId,hostId:r,threadId:c,turnId:s.turnId})||i?.aborted)return!1;" +
+    "let _=()=>{if(i?.aborted)return!0;if(a!==`dynamic`)return!1;return!1};" +
+    "return t9r({metrics:Z7r(t),tool:void 0,isCancelled:_},async t=>{let i;" +
+    "try{({executeDynamicToolCallRequest:i}=await Tf(()=>import(`./execution-959340e7ed6d.js`),__vite__mapDeps([24,1]),import.meta.url))}" +
+    "catch(e){return!_()&&(_f.warning(`dynamic_app_tool_dispatcher_load_failed`,{safe:u,sensitive:{error:e}})," +
+    "t({success:!1}),Rdn({dispatchMessageFromView:(e,t)=>Cf.dispatchMessage(e,t),hostId:r,method:n.method," +
+    "response:{id:Dj(o),result:NK(`The app could not load this tool. Please try again.`)}}),!0)}" +
+    "return!_()&&i(e,{onToolResult:t,appServerManager:f,conversation:p,conversationId:d,isBackgroundAeonTurn:!1,streamRole:g,turn:m})})}";
   const patched = patchComputerUseNodeReplDynamicToolCall(fixture);
 
   assert.equal(patched.patched, true);
@@ -430,13 +455,17 @@ test("26.924 dynamic tool handler bridges node_repl through the app server", () 
   );
   assert.match(
     patched.content,
-    /return Dwn\(\{dispatchMessageFromView:\(e,t\)=>ae\.dispatchMessage\(e,t\),hostId:r,method:n\.method,response:\{id:TA\(o\),result:_codexOfflineNodeReplResponse\}\}\),!0\}/,
+    /return Rdn\(\{dispatchMessageFromView:\(e,t\)=>Cf\.dispatchMessage\(e,t\),hostId:r,method:n\.method,response:\{id:Dj\(o\),result:_codexOfflineNodeReplResponse\}\}\),!0\}/,
   );
   assert.doesNotMatch(patched.content, /return qzn\(|Up\.dispatchMessage|zl\(o\)/);
   assert.match(patched.content, /codex-offline:computer-use-node-repl-dynamic-tool-call/);
+  assert.match(
+    patched.content,
+    /\|\|s\.namespace!==`codex_app`\|\|l!==`record_private_review`\)&&i6\.dynamicToolCalls!=null/,
+  );
 });
 
-test("26.924 dynamic tool bridge fails closed without the handler's own responder", () => {
+test("26.928 dynamic tool bridge fails closed without the handler's own responder", () => {
   const patchSource = sourceSlice(
     "  const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_CANONICAL_RE =",
     "  const ARCHIVED_THREADS_DATA_CONTROLS_CURRENT_RE =",
@@ -453,8 +482,8 @@ test("26.924 dynamic tool bridge fails closed without the handler's own responde
     "function qU(e,t){let n=e.get(JU);if(n==null)throw Error(`AppServerManager RPC is not connected`);return n.forHost(t)}" +
     "async function GUr(e){let{scope:t,serverRequest:n,hostId:r,signal:i,transport:a}=e,{id:o,params:s}=n," +
     "{threadId:c,tool:l}=s;" +
-    "if(i?.aborted||c5.dynamicToolCalls!=null&&!await c5.dynamicToolCalls.tryClaimExecution(" +
-    "{callId:s.callId,hostId:r,threadId:c,turnId:s.turnId})||i?.aborted)return!1;return!0}";
+    "if(i?.aborted||(a!==`mcp`||s.namespace!==`codex_app`||l!==`record_private_review`)&&i6.dynamicToolCalls!=null" +
+    "&&!await i6.dynamicToolCalls.tryClaimExecution({callId:s.callId,hostId:r,threadId:c,turnId:s.turnId})||i?.aborted)return!1;return!0}";
 
   assert.throws(
     () => patchComputerUseNodeReplDynamicToolCall(fixture),
@@ -852,7 +881,7 @@ test("26.825 node_repl config enables quoted features.js_repl without touching j
   assert.doesNotMatch(retiredFixture, currentRe);
 });
 
-test("26.831 archived thread loader accepts the data-controls pagination shape", () => {
+test("26.928 archived thread loader accepts the data-controls pagination shape", () => {
   const regexSource = sourceSlice(
     "  const ARCHIVED_THREADS_DATA_CONTROLS_CURRENT_RE =",
     "  function archivedThreadsReturnExpression",
@@ -860,16 +889,56 @@ test("26.831 archived thread loader accepts the data-controls pagination shape",
   const currentRe = Function(
     `"use strict";\n${regexSource}\nreturn ARCHIVED_THREADS_DATA_CONTROLS_CURRENT_RE;`,
   )();
+  // 26.928 inlined the loader as a React Query queryFn with an explicit abort
+  // signal and a pre-bound app-server request.
   const fixture =
-    "p=async()=>{let e=[],r=new Set,i=null;do{let a=await A(t,n).sendRequest(`thread/list`," +
-    "{archived:!0,cursor:i,limit:100,modelProviders:null,sortKey:`updated_at`,sourceKinds:L," +
-    "useStateDbOnly:!0},{priority:`background`,source:`thread_list`});if(e.push(...a.data)," +
-    "i=a.nextCursor,i!=null&&r.has(i))throw Error(`App Server repeated an archived thread list cursor`);" +
-    "i!=null&&r.add(i)}while(i!=null);return e}";
+    "queryFn:async t=>{let{signal:n}=t,r=Te(a,e),i=[],o=new Set,s=null;do{n.throwIfAborted();" +
+    "let e=await r.sendRequest(`thread/list`,{archived:!0,cursor:s,limit:100,modelProviders:null," +
+    "sortKey:`updated_at`,sourceKinds:Ne,useStateDbOnly:!0},{priority:`background`,source:`thread_list`});" +
+    "if(n.throwIfAborted(),i.push(...e.data),s=e.nextCursor,s!=null&&o.has(s))throw Error(" +
+    "`App Server repeated an archived thread list cursor`);s!=null&&o.add(s)}while(s!=null);return i}";
   const match = currentRe.exec(fixture);
-  assert.ok(match, "26.831 data-controls archived loader shape should match");
-  assert.equal(match.groups.loader, "p");
-  assert.equal(match.groups.sourceKinds, "L");
+  assert.ok(match, "26.928 data-controls archived loader shape should match");
+  assert.equal(match.groups.threads, "i");
+  assert.equal(match.groups.sourceKinds, "Ne");
+  assert.equal(match.groups.sendInit, "Te(a,e)");
+});
+
+test("26.928 archived thread loader caches the last full list for offline fallback", () => {
+  const patchSource = sourceSlice(
+    "  const ARCHIVED_THREADS_DATA_CONTROLS_CURRENT_RE =",
+    "  // The archived settings panel (Settings → Data controls → Archived) combines",
+  );
+  const patchArchivedThreadsPartialList = Function(
+    "ARCHIVED_THREADS_PARTIAL_LIST_PATCH_MARKER",
+    "ARCHIVED_THREADS_CACHE_FALLBACK_PATCH_MARKER",
+    `"use strict";\n${patchSource}\nreturn patchArchivedThreadsPartialList;`,
+  )(
+    "/*codex-offline:archived-threads-partial-list*/",
+    "/*codex-offline:archived-threads-cache-fallback*/",
+  );
+  const fixture =
+    "queryFn:async t=>{let{signal:n}=t,r=Te(a,e),i=[],o=new Set,s=null;do{n.throwIfAborted();" +
+    "let e=await r.sendRequest(`thread/list`,{archived:!0,cursor:s,limit:100,modelProviders:null," +
+    "sortKey:`updated_at`,sourceKinds:Ne,useStateDbOnly:!0},{priority:`background`,source:`thread_list`});" +
+    "if(n.throwIfAborted(),i.push(...e.data),s=e.nextCursor,s!=null&&o.has(s))throw Error(" +
+    "`App Server repeated an archived thread list cursor`);s!=null&&o.add(s)}while(s!=null);return i}";
+
+  const result = patchArchivedThreadsPartialList(fixture);
+  assert.equal(result.patched, true);
+  // The pagination loop keeps upstream's abort sequencing; the whole loop moves
+  // inside a try/catch that records the failure, and the return falls back to
+  // the last cached list only when the fresh list is empty because of it.
+  assert.match(
+    result.content,
+    /queryFn:async t=>\{let\{signal:n\}=t,r=Te\(a,e\),i=\[\],o=new Set,s=null,_codexOfflineArchiveListFailed=!1;/,
+  );
+  assert.match(result.content, /try\{do\{n\.throwIfAborted\(\);/);
+  assert.match(
+    result.content,
+    /catch\(_codexOfflineArchiveListError\)\{_codexOfflineArchiveListFailed=!0\}return _codexOfflineArchiveListFailed&&i\.length===0\?\(globalThis\.__codexOfflineArchivedThreadsCache\?\?i\):\(globalThis\.__codexOfflineArchivedThreadsCache=i,i\)\}/,
+  );
+  assert.match(result.content, /\/\*codex-offline:archived-threads-partial-list\*\/\/\*codex-offline:archived-threads-cache-fallback\*\//);
 });
 
 test("26.825 patcher keeps only current Settings and Worktree resolver shapes", () => {
@@ -978,7 +1047,7 @@ test("26.825 verifier rejects a disabled quoted shared node_repl config", () => 
   assert.doesNotMatch(enabledFixture, currentDisabledRe);
 });
 
-test("26.727 archived settings keeps local errors separate from cloud task errors", () => {
+test("26.928 archived settings keeps local errors separate from cloud task errors", () => {
   const patchSource = sourceSlice(
     "  function patchArchivedSettingsOfflineVisibility(content) {",
     "\n  const BUNDLED_BROWSER_PLUGINS_PATCH_MARKER =",
@@ -987,17 +1056,22 @@ test("26.727 archived settings keeps local errors separate from cloud task error
     "ARCHIVED_SETTINGS_OFFLINE_LOCAL_VISIBILITY_PATCH_MARKER",
     `"use strict";\n${patchSource}\nreturn patchArchivedSettingsOfflineVisibility;`,
   )("/*codex-offline:archived-settings-offline-local-visibility*/");
+  // 26.928 inlined the isError prop and added the durable-host connection
+  // status as another cloud term after the local query terms.
   const fixture =
-    "return{archivedChats:foo,projects:bar,isError:t&&l||u==null&&g," +
-    "onLoadNextPage:d};";
+    "return jsx(fn,{archivedChats:se,projects:ae,hostId:o,localChatsAvailable:d," +
+    "isError:se.length===0&&(d&&(v.some(nn)||_.includes(`durable`)&&(g===`disconnected`||g===`error`))" +
+    "||y==null&&D||O&&P==null&&R),onLoadNextPage:ue});";
 
   const result = patchArchivedSettingsOfflineVisibility(fixture);
   assert.equal(result.patched, true);
   assert.match(
     result.content,
-    /isError:t&&l\/\*codex-offline:archived-settings-offline-local-visibility\*\//,
+    /isError:se\.length===0&&d&&v\.some\(nn\)\/\*codex-offline:archived-settings-offline-local-visibility\*\/,onLoadNextPage:ue/,
   );
-  assert.ok(!result.content.includes("u==null&&g"));
+  assert.ok(!result.content.includes("y==null&&D"));
+  assert.ok(!result.content.includes("O&&P==null&&R"));
+  assert.ok(!result.content.includes("g===`disconnected`"));
 });
 
 test("26.810 archived settings ignores both cloud archive errors offline", () => {

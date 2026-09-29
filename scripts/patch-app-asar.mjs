@@ -2276,8 +2276,11 @@ try {
     /(?<collection>[A-Za-z_$][\w$]*)\.map\((?<item>[A-Za-z_$][\w$]*)=>\(\{type:`function`,\.\.\.\k<item>,\.\.\.(?<deferLoadingGuard>(?<supportsNamespaces>[A-Za-z_$][\w$]*)&&[^?]+)\?\{deferLoading:!0\}:\{\}\}\)\);return \k<supportsNamespaces>\?\[\{type:`namespace`,name:(?<appNamespace>[A-Za-z_$][\w$]*),description:(?<appDescription>[A-Za-z_$][\w$]*),tools:(?<functionTools>[A-Za-z_$][\w$]*)\},\.\.\.(?<namespaceGroups>[A-Za-z_$][\w$]*)\]:(?<fallbackTools>[A-Za-z_$][\w$]*)/;
   // 26.924 destructures the handler options inside the body and no longer
   // receives a queryClient.
+  // 26.928 always destructures `transport` and lets the mcp `codex_app`
+  // `record_private_review` tool skip the execution claim, so the anchor keeps
+  // that exact disjunct rather than widening to any claim condition.
   const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_CANONICAL_RE =
-    /(?<prefix>async function [A-Za-z_$][\w$]*\((?<options>[A-Za-z_$][\w$]*)\)\{let\{scope:(?<scope>[A-Za-z_$][\w$]*),serverRequest:(?<serverRequest>[A-Za-z_$][\w$]*),hostId:(?<hostId>[A-Za-z_$][\w$]*),signal:(?<signal>[A-Za-z_$][\w$]*)(?:,transport:[A-Za-z_$][\w$]*)?\}=\k<options>,\{id:(?<requestId>[A-Za-z_$][\w$]*),params:(?<params>[A-Za-z_$][\w$]*)\}=\k<serverRequest>,\{threadId:(?<threadId>[A-Za-z_$][\w$]*),tool:(?<tool>[A-Za-z_$][\w$]*)\}=\k<params>[\s\S]{0,4000}?if\(\k<signal>\?\.aborted\|\|[A-Za-z_$][\w$]*\.dynamicToolCalls!=null&&!await [A-Za-z_$][\w$]*\.dynamicToolCalls\.tryClaimExecution\(\{callId:\k<params>\.callId,hostId:\k<hostId>,threadId:\k<threadId>,turnId:\k<params>\.turnId\}\)\|\|\k<signal>\?\.aborted\)return!1;)/;
+    /(?<prefix>async function [A-Za-z_$][\w$]*\((?<options>[A-Za-z_$][\w$]*)\)\{let\{scope:(?<scope>[A-Za-z_$][\w$]*),serverRequest:(?<serverRequest>[A-Za-z_$][\w$]*),hostId:(?<hostId>[A-Za-z_$][\w$]*),signal:(?<signal>[A-Za-z_$][\w$]*),transport:(?<transport>[A-Za-z_$][\w$]*)\}=\k<options>,\{id:(?<requestId>[A-Za-z_$][\w$]*),params:(?<params>[A-Za-z_$][\w$]*)\}=\k<serverRequest>,\{threadId:(?<threadId>[A-Za-z_$][\w$]*),tool:(?<tool>[A-Za-z_$][\w$]*)\}=\k<params>[\s\S]{0,4000}?if\(\k<signal>\?\.aborted\|\|\(\k<transport>!==`mcp`\|\|\k<params>\.namespace!==`codex_app`\|\|\k<tool>!==`record_private_review`\)&&[A-Za-z_$][\w$]*\.dynamicToolCalls!=null&&!await [A-Za-z_$][\w$]*\.dynamicToolCalls\.tryClaimExecution\(\{callId:\k<params>\.callId,hostId:\k<hostId>,threadId:\k<threadId>,turnId:\k<params>\.turnId\}\)\|\|\k<signal>\?\.aborted\)return!1;)/;
   const COMPUTER_USE_NODE_REPL_RESULT_TEXT_CODE =
     'let _codexOfflineNodeReplStringify=e=>{try{return JSON.stringify(e)}catch{return String(e)}};' +
     'let _codexOfflineNodeReplContentText=e=>Array.isArray(e)?e.map(e=>(e?.type===`text`||e?.type===`inputText`)?String(e.text??``):e?.text!=null?String(e.text):_codexOfflineNodeReplStringify(e)).join(`\\n`):``;' +
@@ -2406,9 +2409,12 @@ try {
     return { content: next, alreadyCorrect: false, patched: next !== content };
   }
   // 26.831 moved archived-thread loading into the data-controls component.
-  // Keep this exact shape narrow so an upstream rewrite still fails closed.
+  // 26.928 inlined the loader as a React Query `queryFn` with an explicit
+  // abort signal and a pre-bound app-server request, so the anchor now starts
+  // at `queryFn:async` and keeps the exact `throwIfAborted` sequencing; an
+  // upstream rewrite still fails closed.
   const ARCHIVED_THREADS_DATA_CONTROLS_CURRENT_RE =
-    /(?<loader>[A-Za-z_$][\w$]*)=async\(\)=>\{let (?<threads>[A-Za-z_$][\w$]*)=\[\],(?<seen>[A-Za-z_$][\w$]*)=new Set,(?<cursor>[A-Za-z_$][\w$]*)=null;do\{let (?<page>[A-Za-z_$][\w$]*)=await (?<send>[A-Za-z_$][\w$]*)\((?<scope>[A-Za-z_$][\w$]*),(?<host>[A-Za-z_$][\w$]*)\)\.sendRequest\(`thread\/list`,\{archived:!0,cursor:\k<cursor>,limit:100,modelProviders:null,sortKey:`updated_at`,sourceKinds:(?<sourceKinds>[A-Za-z_$][\w$]*),useStateDbOnly:!0\},\{priority:`background`,source:`thread_list`\}\);if\(\k<threads>\.push\(\.\.\.\k<page>\.data\),\k<cursor>=\k<page>\.nextCursor,\k<cursor>!=null&&\k<seen>\.has\(\k<cursor>\)\)throw Error\(`App Server repeated an archived thread list cursor`\);\k<cursor>!=null&&\k<seen>\.add\(\k<cursor>\)\}while\(\k<cursor>!=null\);return \k<threads>\}/;
+    /queryFn:async (?<ctx>[A-Za-z_$][\w$]*)=>\{let\{signal:(?<signal>[A-Za-z_$][\w$]*)\}=\k<ctx>,(?<send>[A-Za-z_$][\w$]*)=(?<sendInit>[A-Za-z_$][\w$]*\([A-Za-z_$][\w$]*,[A-Za-z_$][\w$]*\)),(?<threads>[A-Za-z_$][\w$]*)=\[\],(?<seen>[A-Za-z_$][\w$]*)=new Set,(?<cursor>[A-Za-z_$][\w$]*)=null;do\{\k<signal>\.throwIfAborted\(\);let (?<page>[A-Za-z_$][\w$]*)=await \k<send>\.sendRequest\(`thread\/list`,\{archived:!0,cursor:\k<cursor>,limit:100,modelProviders:null,sortKey:`updated_at`,sourceKinds:(?<sourceKinds>[A-Za-z_$][\w$]*),useStateDbOnly:!0\},\{priority:`background`,source:`thread_list`\}\);if\(\k<signal>\.throwIfAborted\(\),\k<threads>\.push\(\.\.\.\k<page>\.data\),\k<cursor>=\k<page>\.nextCursor,\k<cursor>!=null&&\k<seen>\.has\(\k<cursor>\)\)throw Error\(`App Server repeated an archived thread list cursor`\);\k<cursor>!=null&&\k<seen>\.add\(\k<cursor>\)\}while\(\k<cursor>!=null\);return \k<threads>\}/;
   function archivedThreadsReturnExpression(archived, failed, threads) {
     return `${archived}?(${failed}&&${threads}.length===0?` +
       `(globalThis.__codexOfflineArchivedThreadsCache??${threads}):` +
@@ -2418,16 +2424,18 @@ try {
     let next = content.replace(
         ARCHIVED_THREADS_DATA_CONTROLS_CURRENT_RE,
         (_match, ...args) => {
-          const { loader, threads, seen, cursor, page, send, scope, host, sourceKinds } =
+          const { ctx, signal, send, sendInit, threads, seen, cursor, page, sourceKinds } =
             args.at(-1);
           const failed = '_codexOfflineArchiveListFailed';
           return (
-            `${loader}=async()=>{let ${threads}=[],${seen}=new Set,${cursor}=null,${failed}=!1;` +
-            `try{do{let ${page}=await ${send}(${scope},${host}).sendRequest(` +
+            `queryFn:async ${ctx}=>{let{signal:${signal}}=${ctx},${send}=${sendInit},` +
+            `${threads}=[],${seen}=new Set,${cursor}=null,${failed}=!1;` +
+            `try{do{${signal}.throwIfAborted();let ${page}=await ${send}.sendRequest(` +
             `\`thread/list\`,{archived:!0,cursor:${cursor},limit:100,modelProviders:null,` +
             `sortKey:\`updated_at\`,sourceKinds:${sourceKinds},useStateDbOnly:!0},` +
             `{priority:\`background\`,source:\`thread_list\`});` +
-            `if(${threads}.push(...${page}.data),${cursor}=${page}.nextCursor,` +
+            `if(${signal}.throwIfAborted(),${threads}.push(...${page}.data),` +
+            `${cursor}=${page}.nextCursor,` +
             `${cursor}!=null&&${seen}.has(${cursor}))throw Error(` +
             `\`App Server repeated an archived thread list cursor\`);` +
             `${cursor}!=null&&${seen}.add(${cursor})}while(${cursor}!=null)}` +
@@ -2505,20 +2513,26 @@ try {
       }
     }
 
+    // 26.928 inlined the combined isError prop and added the durable-host
+    // connection status (`disconnected`/`error`) as another cloud term; the
+    // archive-source queries in `queries.some(...)` still only cover local
+    // sources, so keeping items-empty + local-available + local query error
+    // preserves the offline semantics.
     const currentErrorPropRe =
-      /isError:([A-Za-z_$][\w$]*&&[A-Za-z_$][\w$]*)\|\|[A-Za-z_$][\w$]*==null&&[A-Za-z_$][\w$]*(?=,onLoadNextPage:)/;
+      /isError:(?<items>[A-Za-z_$][\w$]*)\.length===0&&\((?<localAvail>[A-Za-z_$][\w$]*)&&\((?<queries>[A-Za-z_$][\w$]*)\.some\((?<errFn>[A-Za-z_$][\w$]*)\)\|\|[A-Za-z_$][\w$]*\.includes\(`durable`\)&&\([A-Za-z_$][\w$]*===`disconnected`\|\|[A-Za-z_$][\w$]*===`error`\)\)\|\|[A-Za-z_$][\w$]*==null&&[A-Za-z_$][\w$]*\|\|[A-Za-z_$][\w$]*&&[A-Za-z_$][\w$]*==null&&[A-Za-z_$][\w$]*\)(?=,onLoadNextPage:)/;
     const currentErrorPropMatch = currentErrorPropRe.exec(
       content.slice(archivedPanelAnchor, archivedPanelAnchor + 1200),
     );
     if (!currentErrorPropMatch) {
       return { content, alreadyCorrect: false, patched: false };
     }
+    const { items, localAvail, queries, errFn } = currentErrorPropMatch.groups;
     const absoluteStart = archivedPanelAnchor + currentErrorPropMatch.index;
     const absoluteEnd = absoluteStart + currentErrorPropMatch[0].length;
     return {
       content:
         content.slice(0, absoluteStart) +
-        `isError:${currentErrorPropMatch[1]}` +
+        `isError:${items}.length===0&&${localAvail}&&${queries}.some(${errFn})` +
         ARCHIVED_SETTINGS_OFFLINE_LOCAL_VISIBILITY_PATCH_MARKER +
         content.slice(absoluteEnd),
       alreadyCorrect: false,
