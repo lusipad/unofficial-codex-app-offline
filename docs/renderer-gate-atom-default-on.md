@@ -43,7 +43,7 @@ renderer 读取 Statsig gate 有两条路径：
   - 人工确认的 onboarding、插件界面（保持插件服务契约现状）、遥测、app-server 绑定（`eTa` tool catalog、`Ec` 映射）。
 - **排除**：已经由 `checkGate` 路径打开的 gate，以及 `DESKTOP_ASAR_KNOWN_GATE_IDS`。denylist 同时作用于 `checkGate` 包裹，把它们列进来会让当前已开的功能反向关闭。本次改动只新增开启，不关闭任何现有功能。
 
-结果：denylist 396 个；atom 路径新开放 61 个本地功能 gate，包括：
+结果：denylist 398 个；atom 路径新开放 60 个本地功能 gate，包括：
 - 应用快照（`1532120159`）；
 - 宠物（`1655510532`、`188145323`）；
 - 头像悬浮；
@@ -65,6 +65,19 @@ renderer 读取 Statsig gate 有两条路径：
 - `3389661532`（工作区语音权限）、`1009060764`（renderer 卡顿检测遥测）以变量传入 id，扫描不到，由运行时打印发现。已加入 denylist。
 - `3855399757` 即 `wsl_remote_connections`，打开后会自动连接 WSL 内的 Codex。它是本地功能，保留开启。WSL 内 codex 版本低于要求（如 0.130 < 0.141）时会显示 `update-required` 并重试，行为与官方版一致。
 - 最终版冒烟：`durable` 连接为 0，启动通过。
+
+### 界面校验（CDP）
+
+用同一个 stage 的便携程序、隔离的 user-data 目录和临时 CODEX_HOME（只含 `config.toml`、`auth.json`、`.codex-global-state.json`），通过 CDP 打开设置并截图对比：
+
+- 首轮补丁版比无补丁版多出：
+  - 设置 → 集成「应用快照」；
+  - 设置 → 个人「个人资料」「语音」「调试」；
+  - 左栏「资料库」。
+- 「调试」：由 `2423536643`（GPU 画面撕裂调试，`isGpuTearingDebugEnabled`）控制，是官方版不显示的内部页，已拒绝。
+- 「资料库」：由 `3765605143`（ChatGPT Library）控制，离线无法加载，已拒绝。它是唯一一个已被 `checkGate` 路径读取、仍被放进 denylist 的 id：无补丁版左栏本来就没有它。
+- 最终版设置导航与官方版一致，只缺云端专属的「通知」「家长控制」「受信任联系人」。「应用快照」页可以正常打开，显示快捷键、发送目标、播放音效和示意图；「Mini 与虚拟宠物」页正常渲染。
+- 首启引导页、“完成 Windows 设置以继续”提示在无补丁版上同样出现，与本补丁无关。
 
 ## 仍未覆盖
 
