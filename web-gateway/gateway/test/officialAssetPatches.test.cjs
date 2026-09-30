@@ -121,6 +121,36 @@ test("patchOfficialAsset does not warn on chunks without the connect-app-host ha
   assert.equal(warnings.length, 0);
 });
 
+test("26.928 codexMicro mock covers the micro-bridge service surface", () => {
+  // 26.928's codex-micro-bridge chunk calls getState()/ownsPrimaryWindow()/
+  // updateLighting()/updateAgentThreadKeys() right after the first route
+  // render; a mock missing any of them throws inside the AppRoutes error
+  // boundary and takes the whole web UI to the crash screen.
+  const { result } = captureWarns(() => patchConnectAppHostChunk(CONNECT_APP_HOST_26908));
+  const services = result.slice(result.indexOf("services:Promise.resolve({"));
+  assert.match(services, /codexMicro:\{/, "codexMicro mock must stay present");
+  for (const method of [
+    "getMicroStatus",
+    "getState",
+    "ownsPrimaryWindow",
+    "updateLighting",
+    "updateAgentThreadKeys",
+  ]) {
+    assert.match(
+      services,
+      new RegExp(`${method}:function`),
+      `codexMicro mock must provide ${method}()`,
+    );
+  }
+  // updateLighting is chained with .then(l,l) by the caller, so it must
+  // return a promise even as a no-op.
+  assert.match(
+    services,
+    /updateLighting:function\(\)\{return Promise\.resolve\(\)\}/,
+    "updateLighting must return a promise",
+  );
+});
+
 test("patch query changes whenever the patch module changes", () => {
   // Official assets are served `immutable` for a year, so the query is the only
   // thing that evicts a browser's copy patched by an older gateway.

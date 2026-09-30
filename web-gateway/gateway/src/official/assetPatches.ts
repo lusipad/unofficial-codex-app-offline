@@ -39,7 +39,15 @@ const MOCK_APP_SERVICES =
   "}," +
   "primaryRuntime:{ensurePrimaryRuntimeInstalled:function(){return Promise.resolve()}," +
   "  getPrimaryRuntimeInstallState:function(){return Promise.resolve({state:'installed'})}}," +
-  "codexMicro:{getMicroStatus:function(){return Promise.resolve({available:false})}}," +
+  // 26.928 的 codex-micro-bridge 在首屏路由渲染后立即调用 getState/ownsPrimaryWindow/
+  // updateLighting/updateAgentThreadKeys；缺任何一个都会在 AppRoutes error boundary 里
+  // 炸掉整个 Web UI。getState 返回 detached（无 Micro 设备）跳过设备分支；updateLighting
+  // 被调用方用 .then 链接，必须返回 Promise。
+  "codexMicro:{getMicroStatus:function(){return Promise.resolve({available:false})}," +
+  "getState:function(){return Promise.resolve({status:'detached'})}," +
+  "ownsPrimaryWindow:function(){return Promise.resolve(!1)}," +
+  "updateLighting:function(){return Promise.resolve()}," +
+  "updateAgentThreadKeys:function(){return Promise.resolve()}}," +
   "projectWritableRoots:{clearRoots:function(){return Promise.resolve()}," +
   "  getWritableRoots:function(){return Promise.resolve([])}," +
   "  setWritableRoots:function(){return Promise.resolve()}," +
