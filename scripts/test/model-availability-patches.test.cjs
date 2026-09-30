@@ -180,6 +180,9 @@ test("package verification requires both model availability patches", () => {
   assert.match(verifier, /desktopModelAvailabilityMarkers/);
   assert.match(verifier, /STATSIG_MODEL_AVAILABILITY_CONFIG = '107580212'/);
   assert.match(verifier, /result\.key === STATSIG_MODEL_AVAILABILITY_CONFIG/);
+  assert.match(verifier, /patchModelListResponsePayload/);
+  assert.match(verifier, /patchWireModelListResult/);
+  assert.match(verifier, /STATSIG_DEFAULT_DYNAMIC_CONFIGS/);
 });
 
 test("shared model compatibility exposes Astra without exposing other hidden models", () => {
@@ -210,6 +213,186 @@ test("shared model compatibility exposes Astra without exposing other hidden mod
   });
   assert.equal(existing.data.length, 1);
   assert.equal(existing.data[0].hidden, false);
+});
+
+test("shared model list patch unhides gpt-6.1-sol but never synthesizes it", () => {
+  const { ASTRA_MODEL_SLUG, GPT_6_1_SOL_SLUG, patchModelListResult } = require(
+    modelCatalogCompatPath,
+  );
+  const original = {
+    data: [
+      { model: GPT_6_1_SOL_SLUG, displayName: "GPT-6.1 Sol", hidden: true },
+      { model: "gpt-hidden-other", hidden: true },
+    ],
+    nextCursor: null,
+  };
+
+  const patched = patchModelListResult(original);
+  assert.equal(
+    patched.data.find((model) => model.model === GPT_6_1_SOL_SLUG).hidden,
+    false,
+  );
+  assert.equal(
+    patched.data.find((model) => model.model === "gpt-hidden-other").hidden,
+    true,
+  );
+  // Gateway Astra 合成语义保持不变。
+  assert.ok(patched.data.some((model) => model.model === ASTRA_MODEL_SLUG));
+
+  // 本地目录没有 6.1 时不得向 API-key 用户合成一个后端不存在的模型。
+  const without61 = patchModelListResult({ data: [{ model: "gpt-5.6-sol", hidden: false }] });
+  assert.equal(
+    without61.data.some((model) => model.model === GPT_6_1_SOL_SLUG),
+    false,
+  );
+});
+
+test("wire model list patch unhides only listed slugs and never synthesizes entries", () => {
+  const { GPT_6_1_SOL_SLUG, patchWireModelListResult } = require(modelCatalogCompatPath);
+  const otherHidden = { model: "gpt-hidden-other", hidden: true };
+  const out = patchWireModelListResult({
+    data: [{ model: GPT_6_1_SOL_SLUG, displayName: "GPT-6.1 Sol", hidden: true }, otherHidden],
+    nextCursor: null,
+  });
+  assert.equal(out.data[0].hidden, false);
+  assert.equal(out.data[1].hidden, true);
+  // 桌面 wire 路径不做任何目录合成（包括 Astra）。
+  assert.equal(out.data.length, 2);
+
+  const absent = patchWireModelListResult({ data: [otherHidden] });
+  assert.equal(absent.data.length, 1);
+
+  const unchanged = patchWireModelListResult({
+    data: [{ model: "gpt-5.6-sol", hidden: false }],
+  });
+  assert.equal(unchanged.data[0].hidden, false);
+
+  const asArray = patchWireModelListResult([{ model: GPT_6_1_SOL_SLUG, hidden: true }]);
+  assert.equal(asArray[0].hidden, false);
+  assert.ok(Array.isArray(asArray));
+});
+
+function loadInitWithMockElectron(electron) {
+  const originalLoad = Module._load;
+  const originalActiveMarker = process.env.CODEX_OFFLINE_PATCH_ACTIVE;
+  let webRequestHandler;
+  const mockElectron = Object.assign(
+    {
+      app: { on() {} },
+      ipcMain: { handle() {}, on() {} },
+      session: {
+        defaultSession: {
+          webRequest: {
+            onBeforeRequest(_filter, handler) {
+              webRequestHandler = handler;
+            },
+          },
+        },
+      },
+      webContents: { getAllWebContents: () => [] },
+    },
+    electron,
+  );
+  try {
+    Module._load = function (request, parent, isMain) {
+      if (request === "electron") return mockElectron;
+      // 构建期才把 gateway 的共享契约拷到 patches/ 旁；测试直接喂真实契约，
+      // 与打包后 init.cjs 看到的导出保持一致。
+      if (request === "./capabilityContractData.cjs") return require(capabilityContractPath);
+      return originalLoad.call(this, request, parent, isMain);
+    };
+    delete require.cache[require.resolve(initPath)];
+    require(initPath);
+  } finally {
+    Module._load = originalLoad;
+    delete require.cache[require.resolve(initPath)];
+    if (originalActiveMarker === undefined) {
+      delete process.env.CODEX_OFFLINE_PATCH_ACTIVE;
+    } else {
+      process.env.CODEX_OFFLINE_PATCH_ACTIVE = originalActiveMarker;
+    }
+  }
+  return { mockElectron, getWebRequestHandler: () => webRequestHandler };
+}
+
+test("desktop init.cjs seeds the appshots dynamic config into the fake Statsig initialize", () => {
+  const { getWebRequestHandler } = loadInitWithMockElectron({});
+  const handler = getWebRequestHandler();
+  assert.equal(typeof handler, "function");
+  let redirect;
+  handler({}, (response) => {
+    redirect = response.redirectURL;
+  });
+  const fakeResponse = JSON.parse(
+    decodeURIComponent(redirect.slice(redirect.indexOf(",") + 1)),
+  );
+  const appshotsConfig = fakeResponse.dynamic_configs["1193530394"];
+  assert.ok(appshotsConfig, "1193530394 dynamic config must be seeded");
+  assert.equal(appshotsConfig.value.appshots_enabled, true);
+  // 既有 model availability 清空与默认 gate 注入不受影响。
+  assert.deepEqual(fakeResponse.dynamic_configs["107580212"].value, clearedModelConfig);
+  const defaults = fakeResponse.dynamic_configs["statsig_default_enable_features"];
+  assert.ok(defaults && Object.keys(defaults.value).length > 0);
+});
+
+test("desktop init.cjs unhides gpt-6.1-sol on wire model/list responses only", () => {
+  let windowCreatedHandler;
+  const { mockElectron } = loadInitWithMockElectron({
+    app: {
+      on(event, handler) {
+        if (event === "browser-window-created") windowCreatedHandler = handler;
+      },
+    },
+  });
+  assert.equal(typeof windowCreatedHandler, "function");
+
+  const sent = [];
+  const fakeWc = {
+    id: 1,
+    send(...args) {
+      sent.push(args);
+    },
+  };
+  windowCreatedHandler({}, { webContents: fakeWc });
+
+  const modelListPayload = {
+    type: "mcp-response",
+    hostId: "local",
+    requestMethod: "model/list",
+    message: {
+      id: 7,
+      result: {
+        data: [
+          { model: "gpt-6.1-sol", displayName: "GPT-6.1 Sol", hidden: true },
+          { model: "gpt-5.6-sol", hidden: false },
+        ],
+        nextCursor: null,
+      },
+    },
+  };
+  fakeWc.send("codex_desktop:message-for-view", modelListPayload);
+  assert.equal(modelListPayload.message.result.data[0].hidden, false);
+  assert.equal(modelListPayload.message.result.data[1].hidden, false);
+  assert.equal(modelListPayload.message.id, 7);
+
+  // 其它 requestMethod 的负载不得改写（即使内容长得像模型列表）。
+  const otherPayload = {
+    type: "mcp-response",
+    hostId: "local",
+    requestMethod: "thread/list",
+    message: {
+      id: 8,
+      result: { data: [{ model: "gpt-6.1-sol", hidden: true }] },
+    },
+  };
+  fakeWc.send("codex_desktop:message-for-view", otherPayload);
+  assert.equal(otherPayload.message.result.data[0].hidden, true);
+
+  // 非 message-for-view 通道不动。
+  const arrayPayload = [{ model: "gpt-6.1-sol", hidden: true }];
+  fakeWc.send("codex_desktop:worker:git:for-view", arrayPayload);
+  assert.equal(arrayPayload[0].hidden, true);
+  assert.equal(sent.length, 3);
 });
 
 test("models-api.json is generated as a single release artifact with Astra, GPT-5.6 and DeepSeek compatibility fields", () => {

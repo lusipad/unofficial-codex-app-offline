@@ -1,5 +1,15 @@
 const STATSIG_DEFAULT_FEATURES_CONFIG = "statsig_default_enable_features";
 
+// 26.928 起「应用快照」（编辑器"捕获应用快照"与对应设置分区）由该 Statsig dynamic config
+// 的 appshots_enabled 字段驱动（renderer 侧 lp("1193530394") 读取），不再走 gate 路径。
+// Web gateway 的 initialize/bootstrap 本地应答和桌面 init.cjs 的 Statsig 拦截都要携带它，
+// 否则 renderer 解析缺省为 false，功能入口整体消失。
+const STATSIG_DEFAULT_DYNAMIC_CONFIGS = Object.freeze({
+  "1193530394": Object.freeze({
+    appshots_enabled: true,
+  }),
+});
+
 const STATSIG_DEFAULT_FEATURE_OVERRIDES = Object.freeze({
   "4166894088": true,
   "824038554": true,
@@ -670,6 +680,7 @@ module.exports = {
   REQUIRED_WEB_SHELL_FEATURE_MARKERS,
   STATSIG_DEFAULT_FEATURE_OVERRIDES,
   STATSIG_DEFAULT_FEATURES_CONFIG,
+  STATSIG_DEFAULT_DYNAMIC_CONFIGS,
   DESKTOP_GATE_DENYLIST,
   normalizeDesktopFeatureValues,
 };

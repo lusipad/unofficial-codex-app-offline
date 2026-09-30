@@ -6,7 +6,7 @@
 
 该文件是完整目录，不是增量补丁：CI 从安装包内 `codex.exe --version` 读取精确的 `codex-cli` 版本，下载对应 `rust-v<version>` 的 OpenAI 官方目录，补入经内容指纹固定的官方 `gpt-6-astra` 条目，应用 GPT-6-Astra / GPT-5.6 / GPT-6-Sol / GPT-6-Luna custom-provider 临时修正，再合并 DeepSeek 官方 Codex 目录。
 
-`gpt-6-astra` 会在自定义目录和软件默认模型列表中显示。默认列表的兼容规则位于 Gateway 边界，只补入或取消隐藏 Astra，不会同时放出其他隐藏模型。
+`gpt-6-astra` 会在自定义目录和软件默认模型列表中显示。默认列表的兼容规则集中在共享契约 `scripts/desktop-patches/model-catalog-compat.cjs`（单一事实源）：Gateway 的 app-server `model/list` 应答走 `patchModelListResult`（补入并取消隐藏 Astra），桌面 renderer 的 wire 应答（`codex_desktop:message-for-view` 里 `requestMethod: "model/list"` 的 `mcp-response`）走 `patchWireModelListResult`——只把契约列明的高端隐藏条目（26.928 起为 `gpt-6.1-sol`）恢复可见，不合成任何条目，也不会放出其他隐藏模型。桌面 wire 路径刻意不合成 Astra：账号实际不可用的模型不能因为离线补丁而显示。
 
 ## Windows 安装器选项
 

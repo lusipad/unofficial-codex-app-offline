@@ -32,6 +32,12 @@
   } catch (_e) {
     _pluginServiceCompat = null;
   }
+  var _modelCatalogCompat;
+  try {
+    _modelCatalogCompat = require('./model-catalog-compat.cjs');
+  } catch (_e) {
+    _modelCatalogCompat = null;
+  }
 
   // ── Diagnostics ──────────────────────────────────────────────────────────
   // Set CODEX_OFFLINE_PATCH_DEBUG=1 to enable diagnostic logging
@@ -57,6 +63,31 @@
 
   if (!_pluginServiceCompat) {
     _diag('plugin-service compatibility core is unavailable');
+  }
+  if (!_modelCatalogCompat) {
+    _diag('model-catalog compatibility core is unavailable');
+  }
+
+  /**
+   * 恢复云端目录里被隐藏、但官方端对该账号可见的模型条目（26.928 的
+   * gpt-6.1-sol，见 model-catalog-compat.cjs 头注释）。只处理桌面 wire 协议里
+   * requestMethod 明确的 model/list 响应，不做任何目录合成。
+   */
+  function patchModelListResponsePayload(payload) {
+    if (!_modelCatalogCompat || !isPlainObject(payload)) return payload;
+    if (payload.type !== 'mcp-response' ||
+        payload.requestMethod !== 'model/list' ||
+        !isPlainObject(payload.message)) {
+      return payload;
+    }
+    var patchedResult = _modelCatalogCompat.patchWireModelListResult(payload.message.result);
+    if (patchedResult === payload.message.result) return payload;
+    _diag('model/list response normalized: unhid wire-listed models');
+    var nextMessage = {};
+    for (var mk in payload.message) nextMessage[mk] = payload.message[mk];
+    nextMessage.result = patchedResult;
+    payload.message = nextMessage;
+    return payload;
   }
 
   // Marker so other code can detect we're active
@@ -145,6 +176,7 @@
       for (var i = 1; i < arguments.length; i++) {
         if (isPlainObject(arguments[i])) {
           arguments[i] = patchPluginFetchResponse(wc, arguments[i]);
+          arguments[i] = patchModelListResponsePayload(arguments[i]);
           patchSharedObjectPayload(arguments[i]);
         }
       }
@@ -285,6 +317,9 @@
     }
 
     // Patch dynamic_configs / dynamicConfigs / configs
+    var dynamicConfigDefaults = (_capabilityContract &&
+      _capabilityContract.STATSIG_DEFAULT_DYNAMIC_CONFIGS) || {};
+    var dynamicConfigIds = Object.keys(dynamicConfigDefaults);
     var configContainerKeys = ['dynamic_configs', 'dynamicConfigs', 'configs'];
     for (var ci = 0; ci < configContainerKeys.length; ci++) {
       var configs = obj[configContainerKeys[ci]];
@@ -303,6 +338,35 @@
         }
       }
       if (overwriteModelAvailabilityConfig(configs)) changed = true;
+      // Seed dynamic config defaults (26.928 appshots_enabled etc.) with the same
+      // envelope shape the official Statsig SDK serves, mirroring the Web gateway.
+      for (var dj = 0; dj < dynamicConfigIds.length; dj++) {
+        var dcId = dynamicConfigIds[dj];
+        var dcFields = isPlainObject(dynamicConfigDefaults[dcId]) ? dynamicConfigDefaults[dcId] : {};
+        var dcFieldKeys = Object.keys(dcFields);
+        if (dcFieldKeys.length === 0) continue;
+        var dcExisting = isPlainObject(configs[dcId]) ? configs[dcId] : null;
+        var dcValue = (dcExisting && isPlainObject(dcExisting.value)) ? dcExisting.value : {};
+        var dcNextValue = {};
+        for (var vk in dcValue) dcNextValue[vk] = dcValue[vk];
+        var dcChanged = !dcExisting;
+        for (var fk = 0; fk < dcFieldKeys.length; fk++) {
+          if (dcNextValue[dcFieldKeys[fk]] !== dcFields[dcFieldKeys[fk]]) {
+            dcNextValue[dcFieldKeys[fk]] = dcFields[dcFieldKeys[fk]];
+            dcChanged = true;
+          }
+        }
+        if (dcChanged) {
+          configs[dcId] = {
+            name: dcId,
+            rule_id: (dcExisting && dcExisting.rule_id) ? dcExisting.rule_id : 'desktop_override',
+            secondary_exposures: (dcExisting && Array.isArray(dcExisting.secondary_exposures))
+              ? dcExisting.secondary_exposures : [],
+            value: dcNextValue
+          };
+          changed = true;
+        }
+      }
     }
 
     return changed;

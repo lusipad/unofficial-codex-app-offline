@@ -477,7 +477,12 @@ try {
         'available_models: []',
         'use_hidden_models: false',
         "var configContainerKeys = ['dynamic_configs', 'dynamicConfigs', 'configs'];",
-        'result.key === STATSIG_MODEL_AVAILABILITY_CONFIG'
+        'result.key === STATSIG_MODEL_AVAILABILITY_CONFIG',
+        "require('./model-catalog-compat.cjs')",
+        'patchModelListResponsePayload',
+        "payload.requestMethod !== 'model/list'",
+        'patchWireModelListResult',
+        '_capabilityContract.STATSIG_DEFAULT_DYNAMIC_CONFIGS'
     )
     foreach ($relativePath in @('_internal\patches\init.cjs', '_internal\app\patches\init.cjs')) {
         $initPatchContent = Get-Content -LiteralPath (Join-Path $portableRoot $relativePath) -Raw

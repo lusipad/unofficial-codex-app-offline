@@ -1,6 +1,29 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
+// 26.928 起「应用快照」（composer 捕获入口 + 设置分区）由 Statsig dynamic config
+// 1193530394 的 appshots_enabled 驱动；Web 本地 initialize fallback 的
+// dynamic_configs 若不带它，renderer 解析缺省为 false，功能入口整体消失。
+test("26.928 appshots feature rides the 1193530394 dynamic config", () => {
+  const { patchStatsigDefaultFeatures } = require("../dist/ipc/codex/featurePatches.js");
+  const out = JSON.parse(patchStatsigDefaultFeatures(JSON.stringify({
+    has_updates: true,
+    time: 1,
+    feature_gates: {},
+    dynamic_configs: {},
+    layer_configs: {},
+    param_stores: {},
+    exposures: {},
+    sdk_flags: {},
+  })));
+  const config = out.dynamic_configs["1193530394"];
+  assert.ok(config, "the 1193530394 dynamic config must exist in the fallback payload");
+  assert.equal(config.value.appshots_enabled, true);
+  // 既有 statsig_default_enable_features 注入不受影响
+  const defaults = out.dynamic_configs["statsig_default_enable_features"];
+  assert.ok(defaults && Object.keys(defaults.value).length > 0, "legacy defaults config must stay");
+});
+
 // 26.924 起 renderer 登录后 POST /wham/statsig/bootstrap（5 秒超时），离线时代理到远端只会超时，
 // 首屏因此多等 5~10 秒；与 ab.chatgpt.com initialize 一样由 gateway 本地应答默认特性。
 test("post-login statsig bootstrap is answered locally with the default features", async () => {

@@ -2,6 +2,7 @@
 export {};
 
 const {
+  STATSIG_DEFAULT_DYNAMIC_CONFIGS,
   STATSIG_DEFAULT_FEATURE_OVERRIDES,
   STATSIG_DEFAULT_FEATURES_CONFIG,
 } = require("./capabilityContract");
@@ -89,6 +90,12 @@ function patchStatsigDefaultFeatures(bodyText) {
             enabled
           ) || changed;
       }
+      for (const [configId, configFields] of Object.entries(STATSIG_DEFAULT_DYNAMIC_CONFIGS)) {
+        for (const [fieldName, fieldValue] of Object.entries(configFields)) {
+          changed =
+            setStatsigDynamicConfigValue(parsed[key], configId, fieldName, fieldValue) || changed;
+        }
+      }
     }
   }
   if (!isPlainObject(parsed.feature_gates)) {
@@ -108,6 +115,13 @@ function patchStatsigDefaultFeatures(bodyText) {
         featureName,
         enabled
       ) || changed;
+  }
+  for (const [configId, configFields] of Object.entries(STATSIG_DEFAULT_DYNAMIC_CONFIGS)) {
+    for (const [fieldName, fieldValue] of Object.entries(configFields)) {
+      changed =
+        setStatsigDynamicConfigValue(parsed.dynamic_configs, configId, fieldName, fieldValue) ||
+        changed;
+    }
   }
   return changed ? JSON.stringify(parsed) : null;
 }
