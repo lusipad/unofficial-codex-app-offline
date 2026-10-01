@@ -812,6 +812,31 @@ function patchDefaultOnStatsigGateAtom(content, patchMarker, denylist, overrides
   return { content: next, seen: true, patched: true, alreadyCorrect: false };
 }
 
+function patchUnauthenticatedCapabilityDefaultOn(content, patchMarker) {
+  if (content.includes(patchMarker)) {
+    return { content, seen: true, patched: false, alreadyCorrect: true };
+  }
+  // 26.928 app-shared capability selector: `if(account.authLoading&&account.authMethod==null
+  // ||account.authMethod===`chatgpt`&&account.accountLoading)return{isLoading:!0,...}`.
+  // Exactly one selector carries this branch; more or fewer means the bundle drifted
+  // and we fail closed rather than guess.
+  const branchRe =
+    /if\(([A-Za-z_$][\w$]*)\.authLoading&&\1\.authMethod==null\|\|\1\.authMethod===`chatgpt`&&\1\.accountLoading\)return\{isLoading:!0,isError:!1,isCapable:!1\};/g;
+  const matches = content.match(branchRe);
+  if (!matches || matches.length !== 1) {
+    return { content, seen: false, patched: false, alreadyCorrect: false };
+  }
+  const next = content.replace(
+    branchRe,
+    'if($1.authLoading&&$1.authMethod==null)return{isLoading:!1,isError:!1,isCapable:!0' +
+      patchMarker +
+      '};if($1.authMethod===`chatgpt`&&$1.accountLoading)return{isLoading:!0,isError:!1,isCapable:!1};',
+  );
+  return { content: next, seen: true, patched: true, alreadyCorrect: false };
+}
+
+// end patchUnauthenticatedCapabilityDefaultOn
+
 function patchOfflineNetworkModeDefaults(
   content,
   queryPatchMarker,
@@ -3402,6 +3427,9 @@ try {
     const defaultOnGateAtomPatchedFiles = [];
     let defaultOnGateAtomSeen = false;
     let defaultOnGateAtomAlreadyCorrect = false;
+    const unauthCapabilityPatchedFiles = [];
+    let unauthCapabilitySeen = false;
+    let unauthCapabilityAlreadyCorrect = false;
     let sidebarActivitySurfaceSeen = false;
     let sidebarActivityViewPatched = false;
     let offlineQueryNetworkModePatched = false;
@@ -3547,6 +3575,17 @@ try {
       }
       defaultOnGateAtomSeen ||= defaultOnGateAtomPatch.seen;
       defaultOnGateAtomAlreadyCorrect ||= defaultOnGateAtomPatch.alreadyCorrect;
+      const unauthCapabilityPatch = patchUnauthenticatedCapabilityDefaultOn(
+        content,
+        contractPatchMarker('/*codex-offline:unauthenticated-capability-default-on*/'),
+      );
+      if (unauthCapabilityPatch.patched) {
+        content = unauthCapabilityPatch.content;
+        unauthCapabilityPatchedFiles.push(path.relative(tmpDir, filePath));
+        changed = true;
+      }
+      unauthCapabilitySeen ||= unauthCapabilityPatch.seen;
+      unauthCapabilityAlreadyCorrect ||= unauthCapabilityPatch.alreadyCorrect;
       const offlineNetworkModePatch = patchOfflineNetworkModeDefaults(
         content,
         OFFLINE_QUERY_NETWORK_MODE_PATCH_MARKER,
@@ -3655,6 +3694,15 @@ try {
         (defaultOnGateAtomSeen
           ? '(the recognized-evaluation predicate matched but its two atom writes did not).'
           : '(the recognized-evaluation predicate was not found).'),
+      );
+    }
+    if (unauthCapabilityPatchedFiles.length > 0) {
+      log('Unauthenticated renderer sessions default capability-gated surfaces on in ' +
+        `${unauthCapabilityPatchedFiles.join(', ')}.`);
+    } else if (!unauthCapabilityAlreadyCorrect) {
+      failRequiredPatch(
+        'Could not default capability-gated surfaces on for unauthenticated sessions ' +
+        '(the capability selector branch was not found; automations would stay hidden).',
       );
     }
     if (!sidebarActivitySurfaceSeen) {

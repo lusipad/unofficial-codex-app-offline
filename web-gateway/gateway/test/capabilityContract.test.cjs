@@ -327,6 +327,7 @@ test("source data contract covers direct exe asar patch surfaces", () => {
       "/*codex-offline:codex-mobile-auth-relogin*/",
       "/*codex-offline:default-on-gate-wrapper*/",
       "/*codex-offline:default-on-gate-atom*/",
+      "/*codex-offline:unauthenticated-capability-default-on*/",
       "/*codex-offline:settings-route-map*/",
       "/*codex-offline:locale-source-default*/",
       "/*codex-offline:stdio-write-error-guard-v2*/",

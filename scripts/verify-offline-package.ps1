@@ -1440,6 +1440,8 @@ const RENDERER_KNOWN_STATSIG_GATES_PATCH_MARKER =
   patchMarker('/*codex-offline:renderer-known-statsig-gates*/');
 const DEFAULT_ON_GATE_ATOM_PATCH_MARKER =
   patchMarker('/*codex-offline:default-on-gate-atom*/');
+const UNAUTH_CAPABILITY_PATCH_MARKER =
+  patchMarker('/*codex-offline:unauthenticated-capability-default-on*/');
 // A gate atom write that still stores the raw Statsig value next to the
 // recognized-evaluation flag, i.e. an atom write the patch missed.
 const gateAtomUnpatchedWriteRe =
@@ -1634,6 +1636,12 @@ let codexMobileRemoteControlMfaEndpointSeen = false;
 let codexMobileAuthReloginPatched = false;
 let defaultOnGateAtomPatched = false;
 const defaultOnGateAtomResiduals = [];
+let unauthCapabilityPatched = false;
+const unauthCapabilityResiduals = [];
+// A capability selector that still hides every surface while the app is
+// unauthenticated, i.e. the branch this patch must split.
+const unauthCapabilityUnpatchedBranchRe =
+  /if\([A-Za-z_$][\w$]*\.authLoading&&[A-Za-z_$][\w$]*\.authMethod==null\|\|[A-Za-z_$][\w$]*\.authMethod===`chatgpt`&&[A-Za-z_$][\w$]*\.accountLoading\)return\{isLoading:!0,isError:!1,isCapable:!1\};/;
 const bundledBrowserPluginForceReloadResiduals = [];
 const settingsRouteResiduals = [];
 const localeSourceResiduals = [];
@@ -1664,6 +1672,12 @@ for (const entry of javaScriptEntries) {
     }
     if (gateAtomUnpatchedWriteRe.test(content)) {
       defaultOnGateAtomResiduals.push(entry);
+    }
+    if (content.includes(UNAUTH_CAPABILITY_PATCH_MARKER)) {
+      unauthCapabilityPatched = true;
+    }
+    if (unauthCapabilityUnpatchedBranchRe.test(content)) {
+      unauthCapabilityResiduals.push(entry);
     }
     if (sidebarActivityPatchedSurfaceRe.test(content)) {
       sidebarActivityViewSurfaceSeen = true;
@@ -2071,6 +2085,18 @@ if (defaultOnGateAtomResiduals.length > 0) {
   throw new Error(
     'Renderer Statsig gate atom still stores raw offline gate values in: ' +
     defaultOnGateAtomResiduals.join(', ')
+  );
+}
+if (!unauthCapabilityPatched) {
+  reportPatchMiss(
+    UNAUTH_CAPABILITY_PATCH_MARKER,
+    'Capability selector does not default capability-gated surfaces on for unauthenticated sessions.',
+  );
+}
+if (unauthCapabilityResiduals.length > 0) {
+  throw new Error(
+    'Capability selector still hides surfaces while unauthenticated in: ' +
+    unauthCapabilityResiduals.join(', ')
   );
 }
 if (!archivedThreadsPartialListPatched) {

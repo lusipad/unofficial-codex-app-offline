@@ -584,6 +584,15 @@ const DESKTOP_ASAR_PATCHES = Object.freeze([
     reverify: "Check that the recognized-evaluation predicate and both atom writes (on mount, on values_updated) still match, then re-run the gate review for new ids.",
   }),
   Object.freeze({
+    marker: "/*codex-offline:unauthenticated-capability-default-on*/",
+    kind: "patch",
+    tier: "required",
+    assert: "marker",
+    evidence:
+      "26.928.2636.0: the renderer capability selector (app-shared) returns isLoading forever while the app is unauthenticated (authLoading && authMethod == null), so capability-gated surfaces never render — most visibly the /scheduled automations nav entry and route (automations.local / automations.cloud isCapable), which breaks issue #123 on pure-offline machines that only configure a custom provider in config.toml. The patch gives a null-auth principal the same treatment as the selector's own apiKey branch right below it (isCapable: true): local capabilities have no account dependency. The chatgpt-account-loading branch is untouched.",
+    reverify: "Check that the capability selector still gates on authLoading/authMethod/accountLoading and that unauthenticated-with-config.toml remains an expected offline state.",
+  }),
+  Object.freeze({
     marker: "/*codex-offline:settings-route-map*/",
     kind: "patch",
     tier: "required",

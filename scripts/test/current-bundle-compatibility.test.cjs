@@ -12,6 +12,15 @@ const patchScriptSource = fs.readFileSync(
   path.join(repoRoot, "scripts", "patch-app-asar.mjs"),
   "utf8",
 );
+const capabilityContractPath = path.join(
+  repoRoot,
+  "web-gateway",
+  "gateway",
+  "src",
+  "ipc",
+  "codex",
+  "capabilityContractData.cjs",
+);
 const verifierScriptSource = fs.readFileSync(
   path.join(repoRoot, "scripts", "verify-offline-package.ps1"),
   "utf8",
@@ -1338,4 +1347,100 @@ test("26.917 Windows Browser Use capability override matches the reduced upstrea
   }
   assert.ok(patched.includes(marker));
   assert.ok(patched.endsWith("}:e,o=t===a.in.Dev?Mte(n):null;return o==null?{...i}:{...i,...o}}"));
+});
+
+test("26.928 unauthenticated capability default-on splits the selector loading branch", () => {
+  // The renderer capability selector (app-shared) used to return
+  // isLoading forever while unauthenticated (authLoading && authMethod==null),
+  // hiding every capability-gated surface — most visibly the /scheduled
+  // automations nav entry and route. The patch gives a null-auth principal
+  // the same treatment as the selector's own apiKey branch (isCapable: true)
+  // and leaves the chatgpt-account-loading branch untouched.
+  const fnSource = sourceSlice(
+    "function patchUnauthenticatedCapabilityDefaultOn(content, patchMarker) {",
+    "// end patchUnauthenticatedCapabilityDefaultOn",
+  );
+  const patch = Function(
+    '"use strict";\n' + fnSource + "\nreturn patchUnauthenticatedCapabilityDefaultOn;",
+  )();
+  const marker = "/*codex-offline:unauthenticated-capability-default-on*/";
+
+  // Exact 26.928.2636.0 app-shared selector shape (Gbn).
+  const real = "function Gbn({getAccount:e,getAccountInfoError:t,permissions:n,getWorkspaceSettings:r})" +
+    "{if(n.length===0)return{isLoading:!1,isError:!1,isCapable:!0};let i=e();" +
+    "if(i.authLoading&&i.authMethod==null||i.authMethod===`chatgpt`&&i.accountLoading)" +
+    "return{isLoading:!0,isError:!1,isCapable:!1};" +
+    "if(i.authMethod!==`chatgpt`)return{isLoading:!1,isError:!1,isCapable:!0};" +
+    "if(t())return{isLoading:!1,isError:!0,isCapable:!1}}";
+  const patched = patch(real, marker);
+  assert.equal(patched.patched, true);
+  assert.equal(patched.alreadyCorrect, false);
+  assert.ok(patched.content.includes(marker));
+  assert.match(
+    patched.content,
+    /if\(i\.authLoading&&i\.authMethod==null\)return\{isLoading:!1,isError:!1,isCapable:!0\/\*codex-offline:unauthenticated-capability-default-on\*\/\};/,
+  );
+  // ChatGPT 账号加载中的分支必须原样保留。
+  assert.match(
+    patched.content,
+    /if\(i\.authMethod===`chatgpt`&&i\.accountLoading\)return\{isLoading:!0,isError:!1,isCapable:!1\};/,
+  );
+  // apiKey 分支不受影响。
+  assert.ok(
+    patched.content.includes(
+      "if(i.authMethod!==`chatgpt`)return{isLoading:!1,isError:!1,isCapable:!0};",
+    ),
+  );
+
+  const secondPass = patch(patched.content, marker);
+  assert.equal(secondPass.alreadyCorrect, true);
+  assert.equal(secondPass.patched, false);
+  assert.equal(secondPass.content, patched.content);
+});
+
+test("26.928 unauthenticated capability default-on fails closed on drift", () => {
+  const fnSource = sourceSlice(
+    "function patchUnauthenticatedCapabilityDefaultOn(content, patchMarker) {",
+    "// end patchUnauthenticatedCapabilityDefaultOn",
+  );
+  const patch = Function(
+    '"use strict";\n' + fnSource + "\nreturn patchUnauthenticatedCapabilityDefaultOn;",
+  )();
+  const marker = "/*codex-offline:unauthenticated-capability-default-on*/";
+
+  // 属性名漂移：authState 取代 authLoading，补丁器不得猜测。
+  const drifted = "function Gbn({getAccount:e}){let i=e();" +
+    "if(i.authState&&i.authMethod==null||i.authMethod===`chatgpt`&&i.accountLoading)" +
+    "return{isLoading:!0,isError:!1,isCapable:!1};}";
+  const driftResult = patch(drifted, marker);
+  assert.equal(driftResult.seen, false);
+  assert.equal(driftResult.patched, false);
+  assert.equal(driftResult.content, drifted);
+
+  // 分支形态不唯一：出现两处同类分支时失败关闭。
+  const duplicated = "if(a.authLoading&&a.authMethod==null||a.authMethod===`chatgpt`&&a.accountLoading)" +
+    "return{isLoading:!0,isError:!1,isCapable:!1};" +
+    "if(b.authLoading&&b.authMethod==null||b.authMethod===`chatgpt`&&b.accountLoading)" +
+    "return{isLoading:!0,isError:!1,isCapable:!1};";
+  const dupResult = patch(duplicated, marker);
+  assert.equal(dupResult.seen, false);
+  assert.equal(dupResult.patched, false);
+  assert.equal(dupResult.content, duplicated);
+});
+
+test("package verification requires the unauthenticated capability patch", () => {
+  const contract = require(capabilityContractPath);
+  const verifier = verifierScriptSource;
+
+  assert.ok(
+    contract.DESKTOP_ASAR_PATCH_MARKERS.includes(
+      "/*codex-offline:unauthenticated-capability-default-on*/",
+    ),
+  );
+  assert.match(
+    verifier,
+    /patchMarker\('\/\*codex-offline:unauthenticated-capability-default-on\*\/'\)/,
+  );
+  assert.match(verifier, /unauthCapabilityUnpatchedBranchRe/);
+  assert.match(verifier, /unauthCapabilityResiduals/);
 });
