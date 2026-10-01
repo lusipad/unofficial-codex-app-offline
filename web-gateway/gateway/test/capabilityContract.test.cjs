@@ -253,6 +253,9 @@ test("gate denylist never closes a gate the offline contract opens", () => {
   for (const gateId of ["1532120159", "1655510532", "188145323", "579168209", "4059753351", "3855399757"]) {
     assert.equal(denylist.includes(gateId), false, gateId);
   }
+  // 26.928 navigation rail: GSr returns `legacy` and the scheduled-tasks sidebar never
+  // renders unless this gate is open on both the atom (zR) and the app-shared (Ao) paths.
+  assert.equal(denylist.includes("3085093835"), false, "navigation rail gate");
   // Opening this one starts the durable host connection, which needs a ChatGPT sign-in.
   assert.equal(denylist.includes("375130565"), true);
 });
@@ -320,6 +323,7 @@ test("source data contract covers direct exe asar patch surfaces", () => {
       "/*codex-offline:sidebar-activity-view*/",
       "/*codex-offline:workspace-dependencies-settings*/",
       "/*codex-offline:worktree-head-ref*/",
+      "/*codex-offline:durable-sign-in-retry-stop*/",
       "/*codex-offline:model-id-display-name-fallback*/",
       "/*codex-offline:offline-query-network-mode*/",
       "/*codex-offline:offline-mutation-network-mode*/",

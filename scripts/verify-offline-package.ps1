@@ -1450,6 +1450,8 @@ const WORKSPACE_DEPENDENCIES_SETTINGS_PATCH_MARKER =
   patchMarker('/*codex-offline:workspace-dependencies-settings*/');
 const WORKTREE_HEAD_REF_PATCH_MARKER =
   patchMarker('/*codex-offline:worktree-head-ref*/');
+const DURABLE_SIGN_IN_RETRY_STOP_PATCH_MARKER =
+  patchMarker('/*codex-offline:durable-sign-in-retry-stop*/');
 const MODEL_DISPLAY_NAME_FALLBACK_PATCH_MARKER =
   patchMarker('/*codex-offline:model-id-display-name-fallback*/');
 const OFFLINE_QUERY_NETWORK_MODE_PATCH_MARKER =
@@ -1626,6 +1628,7 @@ let sidebarActivityViewPatched = false;
 let workspaceDependenciesSettingsSurfaceSeen = false;
 let workspaceDependenciesSettingsPatched = false;
 let worktreeHeadRefPatched = false;
+let durableSignInRetryStopPatched = false;
 let modelDisplayNameFallbackPatched = false;
 let offlineNetworkModeSurfaceSeen = false;
 let offlineQueryNetworkModePatched = false;
@@ -1738,6 +1741,10 @@ for (const entry of javaScriptEntries) {
   worktreeHeadRefPatched ||=
     content.includes(WORKTREE_HEAD_REF_PATCH_MARKER) &&
     /if\([A-Za-z_$][\w$]*===`HEAD`\)return\{ref:`HEAD`\}\/\*codex-offline:worktree-head-ref\*\//.test(content);
+  durableSignInRetryStopPatched ||=
+    content.includes(DURABLE_SIGN_IN_RETRY_STOP_PATCH_MARKER) &&
+    content.includes('.message===`Sign in to ChatGPT to start a durable thread.`)return this.stopReconnectTimer(),!0' +
+      DURABLE_SIGN_IN_RETRY_STOP_PATCH_MARKER);
   windowsBrowserUseCapabilityPatched ||= content.includes(WINDOWS_BROWSER_USE_CAPABILITY_PATCH_MARKER);
   appServerSandboxOverridePatched ||= content.includes(APP_SERVER_SANDBOX_OVERRIDE);
   nodeReplFeatureConfigPatched ||= content.includes(NODE_REPL_FEATURE_ENABLED_PATCH_MARKER);
@@ -1901,6 +1908,9 @@ if (!workspaceDependenciesSettingsPatched) {
 }
 if (!worktreeHeadRefPatched) {
   throw new Error('Permanent worktree HEAD resolution patch marker is missing from app.asar.');
+}
+if (!durableSignInRetryStopPatched) {
+  throw new Error('Durable sign-in reconnect stop patch marker is missing from app.asar.');
 }
 if (!modelDisplayNameFallbackPatched) {
   throw new Error('Renderer formatted model-ID fallback marker is missing from app.asar.');

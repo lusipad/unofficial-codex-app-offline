@@ -79,6 +79,12 @@ renderer 读取 Statsig gate 有两条路径：
 - 最终版设置导航与官方版一致，只缺云端专属的「通知」「家长控制」「受信任联系人」。「应用快照」页可以正常打开，显示快捷键、发送目标、播放音效和示意图；「Mini 与虚拟宠物」页正常渲染。
 - 首启引导页、“完成 Windows 设置以继续”提示在无补丁版上同样出现，与本补丁无关。
 
+### 从 denylist 移出：`3085093835`（26.928 新导航）
+
+- 26.928 的导航模式判定 `GSr` 在 atom 路径（`zR`）和 app-shared 的 `Ao` 都读 `3085093835`，两者皆 false 时返回 `legacy`：左侧是旧式单列导航，没有图标栏，也没有定时任务侧栏 `ScheduledSidebar`。
+- 它是在首轮静态扫描时整批进入 denylist 的，没有单独做过 A/B。旧导航下 `/scheduled` 经 `SDa` 落到云端已安排任务表；未登录时 `automations.cloud` 判定可用，但 `cloud-automations/table` 查询因无账号被禁用，永远停在 pending，页面一直显示「正在加载任务」。
+- 移出后的界面 A/B（26.928.2636.0 stage 副本重打补丁、无 `auth.json`、代理/DNS 全封，另测 `navigator.onLine=false`）：出现图标栏（首页/定时任务/插件/探索/代码审查），没有离线不可用的云端入口；定时任务主区是 `ScheduledLanding`，侧栏「即将执行」列出本地任务，任务详情可以打开。契约测试锁定它不得再进入 denylist。
+
 ## 仍未覆盖
 
 - **Web 端**：Gateway 目前没有 `checkGate` 包裹，也没有 atom 补丁，gate 仍由 `featurePatches.ts` 按已知列表注入。若 Web 要对齐，应在 `assetPatches.ts` 复用同一 denylist，并先补齐 `checkGate` 语义。

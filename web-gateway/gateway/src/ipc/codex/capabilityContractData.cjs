@@ -123,7 +123,7 @@ const DESKTOP_GATE_DENYLIST = Object.freeze([
   "2840857813", "2846759686", "2849306825", "2861925050", "2880010779", "2881473956", "2889497622", "2899820207",
   "2910064124", "2911503418", "2912878776", "2925981202", "2929091547", "2929582856", "2942273643", "2980760407",
   "2981678837", "2983946247", "2992509071", "2998660035", "3000193894", "3001618585", "3011042580", "3017902351",
-  "3033586454", "3051515858", "3062419800", "3066066594", "3067284829", "3079718369", "3081805378", "3085093835",
+  "3033586454", "3051515858", "3062419800", "3066066594", "3067284829", "3079718369", "3081805378",
   "3092648596", "3096145510", "3133640912", "3157804138", "3162484136", "3194776735", "3199592968", "3204182052",
   "3210336210", "3219370863", "3220576529", "3220935388", "3224986812", "3226853936", "3283824397", "3309093858",
   "3333071866", "3335252006", "3336871980", "3337546492", "3350594701", "3350594702", "3365181325", "3384989494",
@@ -519,6 +519,15 @@ const DESKTOP_ASAR_PATCHES = Object.freeze([
     evidence:
       "26.903.8094.0: upstream still resolves a literal HEAD starting ref as refs/heads/HEAD, which fails permanent worktree creation.",
     reverify: "The needle still matching is itself the proof; a miss means upstream fixed it.",
+  }),
+  Object.freeze({
+    marker: "/*codex-offline:durable-sign-in-retry-stop*/",
+    kind: "patch",
+    tier: "required",
+    assert: "marker",
+    evidence:
+      "26.928.3736.0: the renderer always adds the durable host manager and lists its recent threads; without a ChatGPT sign-in the main-process durable transport throws 'Sign in to ChatGPT to start a durable thread.' and AppServerConnection reschedules a reconnect forever (14 attempts in 3.5 minutes offline, each logging stack traces). The patch makes shouldStopRetryingRemoteConnection stop the timer for that one durable error; a later on-demand request (e.g. after signing in) still connects because no non-retryable fatal error is recorded.",
+    reverify: "Check that both AppServerConnection failure paths still consult shouldStopRetryingRemoteConnection and that the durable transport still throws the same sign-in error text.",
   }),
   Object.freeze({
     marker: "/*codex-offline:model-id-display-name-fallback*/",

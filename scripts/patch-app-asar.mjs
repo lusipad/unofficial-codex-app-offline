@@ -837,6 +837,31 @@ function patchUnauthenticatedCapabilityDefaultOn(content, patchMarker) {
 
 // end patchUnauthenticatedCapabilityDefaultOn
 
+function patchDurableSignInRetryStop(content, patchMarker) {
+  if (content.includes(patchMarker)) {
+    return { content, seen: true, patched: false, alreadyCorrect: true };
+  }
+  // 26.928 bootstrap AppServerConnection: both the startup and the reconnect failure
+  // paths ask shouldStopRetryingRemoteConnection(error) before rescheduling. Exactly
+  // one definition (not a `this.` call site) may match; anything else fails closed.
+  const definitionRe = /(^|[^.\w$])shouldStopRetryingRemoteConnection\(([A-Za-z_$][\w$]*)\)\{/g;
+  const matches = content.match(definitionRe);
+  if (!matches || matches.length !== 1) {
+    return { content, seen: false, patched: false, alreadyCorrect: false };
+  }
+  const next = content.replace(
+    definitionRe,
+    (match, prefix, errorVar) =>
+      `${prefix}shouldStopRetryingRemoteConnection(${errorVar}){` +
+      `if(this.options.hostId===\`durable\`&&${errorVar} instanceof Error&&` +
+      `${errorVar}.message===\`Sign in to ChatGPT to start a durable thread.\`)` +
+      `return this.stopReconnectTimer(),!0${patchMarker};`,
+  );
+  return { content: next, seen: true, patched: true, alreadyCorrect: false };
+}
+
+// end patchDurableSignInRetryStop
+
 function patchOfflineNetworkModeDefaults(
   content,
   queryPatchMarker,
@@ -2633,6 +2658,41 @@ try {
   } else {
     failRequiredPatch(
       'Could not locate the Git starting-ref resolver used by permanent worktrees.',
+    );
+  }
+
+  // The guard compares against this exact durable transport error; if upstream
+  // rewords it the guard would silently stop matching, so require it to exist.
+  const DURABLE_SIGN_IN_ERROR_MESSAGE = 'Sign in to ChatGPT to start a durable thread.';
+  const DURABLE_SIGN_IN_RETRY_STOP_PATCH_MARKER =
+    contractPatchMarker('/*codex-offline:durable-sign-in-retry-stop*/');
+  const durableSignInRetryStopPatchedFiles = [];
+  let durableSignInRetryStopAlreadyCorrect = false;
+  let durableSignInErrorMessageSeen = false;
+
+  for (const filePath of mainBundleFiles) {
+    const content = fs.readFileSync(filePath, 'utf8');
+    durableSignInErrorMessageSeen ||= content.includes(`Error(\`${DURABLE_SIGN_IN_ERROR_MESSAGE}\`)`);
+    const result = patchDurableSignInRetryStop(content, DURABLE_SIGN_IN_RETRY_STOP_PATCH_MARKER);
+    if (result.patched) {
+      fs.writeFileSync(filePath, result.content, 'utf8');
+      durableSignInRetryStopPatchedFiles.push(path.relative(tmpDir, filePath));
+    } else if (result.alreadyCorrect) {
+      durableSignInRetryStopAlreadyCorrect = true;
+    }
+  }
+
+  if (!durableSignInErrorMessageSeen) {
+    failRequiredPatch(
+      'Could not locate the durable transport sign-in error; the durable retry stop guard would never match.',
+    );
+  } else if (durableSignInRetryStopPatchedFiles.length > 0) {
+    log('Durable sign-in failures stop the app-server reconnect loop in ' +
+        `${durableSignInRetryStopPatchedFiles.join(', ')}.`);
+  } else if (!durableSignInRetryStopAlreadyCorrect) {
+    failRequiredPatch(
+      'Could not locate AppServerConnection.shouldStopRetryingRemoteConnection ' +
+      '(durable sign-in failures would retry forever offline).',
     );
   }
 

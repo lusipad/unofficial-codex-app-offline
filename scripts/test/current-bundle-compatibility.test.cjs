@@ -1444,3 +1444,78 @@ test("package verification requires the unauthenticated capability patch", () =>
   assert.match(verifier, /unauthCapabilityUnpatchedBranchRe/);
   assert.match(verifier, /unauthCapabilityResiduals/);
 });
+
+test("26.928 durable sign-in failure stops the reconnect loop instead of retrying forever", () => {
+  // 26.928 renderer always adds the durable host manager and lists its recent
+  // threads. Without a ChatGPT sign-in the main process durable transport throws
+  // "Sign in to ChatGPT to start a durable thread." and AppServerConnection
+  // reschedules a reconnect forever (one attempt every ~15-30s offline). Both
+  // failure paths consult shouldStopRetryingRemoteConnection, so the patch makes
+  // that method stop the timer for this one durable sign-in error only.
+  const fnSource = sourceSlice(
+    "function patchDurableSignInRetryStop(content, patchMarker) {",
+    "// end patchDurableSignInRetryStop",
+  );
+  const patch = Function(
+    '"use strict";\n' + fnSource + "\nreturn patchDurableSignInRetryStop;",
+  )();
+  const marker = "/*codex-offline:durable-sign-in-retry-stop*/";
+
+  // Exact 26.928.3736.0 bootstrap shape.
+  const real = "}shouldStopRetryingRemoteConnection(e){if(!r.Rn(this.options.hostConfig))return!1;" +
+    "if(wA(e))return this.stopReconnectTimer(),!0;if(!(e instanceof tM))return!1;}" +
+    "f(){this.shouldStopRetryingRemoteConnection(t)?a():b()}";
+  const result = patch(real, marker);
+  assert.equal(result.patched, true);
+  assert.equal(result.alreadyCorrect, false);
+  assert.ok(result.content.includes(
+    "}shouldStopRetryingRemoteConnection(e){if(this.options.hostId===`durable`&&e instanceof Error&&" +
+    "e.message===`Sign in to ChatGPT to start a durable thread.`)return this.stopReconnectTimer(),!0" +
+    marker + ";if(!r.Rn(this.options.hostConfig))return!1;",
+  ));
+  // 调用点不能被当成定义改写。
+  assert.ok(result.content.endsWith("f(){this.shouldStopRetryingRemoteConnection(t)?a():b()}"));
+
+  const secondPass = patch(result.content, marker);
+  assert.equal(secondPass.alreadyCorrect, true);
+  assert.equal(secondPass.patched, false);
+  assert.equal(secondPass.content, result.content);
+});
+
+test("26.928 durable sign-in retry stop fails closed on drift", () => {
+  const fnSource = sourceSlice(
+    "function patchDurableSignInRetryStop(content, patchMarker) {",
+    "// end patchDurableSignInRetryStop",
+  );
+  const patch = Function(
+    '"use strict";\n' + fnSource + "\nreturn patchDurableSignInRetryStop;",
+  )();
+  const marker = "/*codex-offline:durable-sign-in-retry-stop*/";
+
+  // 方法改名：不得猜测。
+  const renamed = "}shouldStopRetrying(e){if(!r.Rn(this.options.hostConfig))return!1;}";
+  const renamedResult = patch(renamed, marker);
+  assert.equal(renamedResult.seen, false);
+  assert.equal(renamedResult.content, renamed);
+
+  // 两处定义：失败关闭。
+  const duplicated = "}shouldStopRetryingRemoteConnection(e){return!1}" +
+    "}shouldStopRetryingRemoteConnection(t){return!1}";
+  const dupResult = patch(duplicated, marker);
+  assert.equal(dupResult.seen, false);
+  assert.equal(dupResult.content, duplicated);
+});
+
+test("package verification requires the durable sign-in retry stop patch", () => {
+  const contract = require(capabilityContractPath);
+  assert.ok(
+    contract.DESKTOP_ASAR_PATCH_MARKERS.includes("/*codex-offline:durable-sign-in-retry-stop*/"),
+  );
+  assert.match(
+    verifierScriptSource,
+    /patchMarker\('\/\*codex-offline:durable-sign-in-retry-stop\*\/'\)/,
+  );
+  assert.match(verifierScriptSource, /durableSignInRetryStopPatched/);
+  // 守卫比较的错误文案必须仍存在于主进程 durable transport 中，否则守卫是死代码。
+  assert.match(patchScriptSource, /DURABLE_SIGN_IN_ERROR_MESSAGE/);
+});
