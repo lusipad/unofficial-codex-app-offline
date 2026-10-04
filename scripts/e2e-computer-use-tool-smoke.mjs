@@ -21,6 +21,22 @@ if (!appRoot || !fs.existsSync(path.join(appRoot, 'ChatGPT.exe'))) {
 fs.rmSync(workRoot, { force: true, recursive: true });
 fs.mkdirSync(workRoot, { recursive: true });
 
+// The composer persists per-thread drafts in the global state; a shared
+// codexHome restores the previous run's typed text into the composer and
+// breaks mention selection. Strip the drafts before launching.
+if (codexHome) {
+  const globalStatePath = path.join(codexHome, '.codex-global-state.json');
+  try {
+    const state = JSON.parse(fs.readFileSync(globalStatePath, 'utf8'));
+    for (const draftsKey of ['composer-prompt-drafts-v1', 'composer-prompt-drafts-v2']) {
+      if (state[draftsKey] !== undefined) state[draftsKey] = {};
+    }
+    fs.writeFileSync(globalStatePath, JSON.stringify(state), 'utf8');
+  } catch {
+    // Best effort: a missing or unreadable global state is fine.
+  }
+}
+
 const stdoutPath = path.join(workRoot, 'codex-stdout.log');
 const stderrPath = path.join(workRoot, 'codex-stderr.log');
 const resultPath = path.join(workRoot, 'result.json');
@@ -203,13 +219,19 @@ async function enterComputerPrompt(window, prompt, { composerDiagnosticsPath }) 
   const composer = await findComposer(window);
   await composer.fill('');
   await composer.click();
-  await window.keyboard.type('@电脑', { delay: 1 });
+  // Type "@" first so the mention menu opens on the trigger character, then the
+  // filter text — typing the whole string at once can skip the menu trigger.
+  await window.keyboard.type('@', { delay: 50 });
+  await window.waitForTimeout(800);
+  await window.keyboard.type('电脑', { delay: 50 });
   await window.waitForTimeout(1_500);
+  const earlyDiagnostics = await captureComposerDiagnostics(composer);
+  fs.writeFileSync(composerDiagnosticsPath, JSON.stringify({ stage: 'after-typing', ...earlyDiagnostics }, null, 2), 'utf8');
   await chooseComputerMention(window);
   await window.waitForTimeout(750);
   const selectedComposer = await findComposer(window);
   const composerDiagnostics = await captureComposerDiagnostics(selectedComposer);
-  fs.writeFileSync(composerDiagnosticsPath, JSON.stringify(composerDiagnostics, null, 2), 'utf8');
+  fs.writeFileSync(composerDiagnosticsPath, JSON.stringify({ stage: 'after-selection', ...composerDiagnostics }, null, 2), 'utf8');
   if (!composerDiagnostics.hasStructuredComputerUseMention) {
     throw new Error(`computer-use-plugin-mention-not-structured: ${composerDiagnostics.summary}`);
   }
@@ -235,11 +257,31 @@ async function findComposer(window) {
 }
 
 async function chooseComputerMention(window) {
-  const candidate = window
-    .getByRole('button')
-    .filter({ hasText: 'Control Windows apps from ChatGPT' })
-    .first();
-  await candidate.click({ timeout: 45_000 });
+  // 26.928.21956-era mentions render the skill description ("Control Windows
+  // apps from ChatGPT"); 26.928.31416+ renders the interface shortDescription
+  // ("Control Windows apps"). The menu item stopped being a role=button in
+  // newer builds, so fall back to keyboard selection (the menu auto-highlights
+  // the first match for the typed filter) and let the structured-mention
+  // diagnostics in enterComputerPrompt validate the outcome.
+  try {
+    const candidate = window
+      .getByRole('button')
+      .filter({ hasText: /Control Windows apps( from ChatGPT)?/ })
+      .first();
+    await candidate.click({ timeout: 10_000 });
+  } catch {
+    // Only fall back to Enter while the mention menu is actually open —
+    // otherwise Enter submits the composer with the raw "@…" text.
+    const menuVisible = await window
+      .getByText(/Control Windows apps/)
+      .first()
+      .isVisible()
+      .catch(() => false);
+    if (!menuVisible) {
+      throw new Error('computer-use-mention-menu-not-visible-after-typing');
+    }
+    await window.keyboard.press('Enter');
+  }
   await window.waitForTimeout(500);
 }
 

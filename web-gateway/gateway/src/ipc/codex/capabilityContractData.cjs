@@ -88,6 +88,15 @@ const STATSIG_DEFAULT_FEATURE_OVERRIDES = Object.freeze({
 // surfaced it, while the atom path adds a sidebar entry that cannot load offline.
 // A few ids are read through a variable rather than a literal and were found by
 // logging which gates the patched atom opens during an offline launch.
+//
+// Reclassified after later identification (do not re-deny):
+// - 3085093835: 26.928 navigation rail / scheduled-tasks sidebar mode switch.
+// - 1892382740: renderer `browserUseTinysky` desktop feature (26.928). Dispatched
+//   via `electron-desktop-features-changed`; the main process requires it for the
+//   unified-computer-use plugin availability (`cua_repl` TinySky CUA runtime, the
+//   电脑操控 surface) and mirrors it into `BROWSER_USE_TINYSKY_ENABLED`. Denying it
+//   hides the new computer-control entry while the legacy computer-use plugin
+//   keeps working; verified against the 26.928.21956 bundle.
 const DESKTOP_GATE_DENYLIST = Object.freeze([
   "131713", "8119044", "13323501", "60299493", "67629032", "68267662", "85924660", "87569714",
   "88729972", "89600278", "93596649", "107580212", "110872417", "131701769", "140487509", "183402703",
@@ -108,7 +117,7 @@ const DESKTOP_GATE_DENYLIST = Object.freeze([
   "1605145461", "1609929612", "1611573287", "1645387566", "1648954249", "1697652030", "1715534902", "1748737189",
   "1753656205", "1753900615", "1760150231", "1763977100", "1793241212", "1811711706", "1811798529", "1823130936",
   "1827303475", "1833686164", "1841893773", "1848317837", "1852804523", "1857002365", "1862054621", "1868494721",
-  "1873790768", "1892382740", "1892621033", "1895559448", "1896812223", "1911760873", "1912312436", "1929707103",
+  "1873790768", "1892621033", "1895559448", "1896812223", "1911760873", "1912312436", "1929707103",
   "1932174607", "1939400492", "1946731762", "1950211113", "1950533395", "1984032627", "1991660486", "2009341345",
   "2029197928", "2031251742", "2039979220", "2048788910", "2055603567", "2060455659", "2074528425", "2078407422",
   "2083739836", "2107644292", "2125321167", "2126931955", "2128165686", "2133596510", "2138468235", "2144562623",

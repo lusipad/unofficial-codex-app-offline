@@ -256,6 +256,11 @@ test("gate denylist never closes a gate the offline contract opens", () => {
   // 26.928 navigation rail: GSr returns `legacy` and the scheduled-tasks sidebar never
   // renders unless this gate is open on both the atom (zR) and the app-shared (Ao) paths.
   assert.equal(denylist.includes("3085093835"), false, "navigation rail gate");
+  // 26.928 unified computer use: this gate feeds the renderer `browserUseTinysky`
+  // desktop feature (electron-desktop-features-changed); the main process requires it
+  // for unified-computer-use plugin availability (the computer-control surface) and
+  // mirrors it into BROWSER_USE_TINYSKY_ENABLED.
+  assert.equal(denylist.includes("1892382740"), false, "browserUseTinysky gate");
   // Opening this one starts the durable host connection, which needs a ChatGPT sign-in.
   assert.equal(denylist.includes("375130565"), true);
 });

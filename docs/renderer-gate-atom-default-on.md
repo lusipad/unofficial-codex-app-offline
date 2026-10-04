@@ -85,6 +85,12 @@ renderer 读取 Statsig gate 有两条路径：
 - 它是在首轮静态扫描时整批进入 denylist 的，没有单独做过 A/B。旧导航下 `/scheduled` 经 `SDa` 落到云端已安排任务表；未登录时 `automations.cloud` 判定可用，但 `cloud-automations/table` 查询因无账号被禁用，永远停在 pending，页面一直显示「正在加载任务」。
 - 移出后的界面 A/B（26.928.2636.0 stage 副本重打补丁、无 `auth.json`、代理/DNS 全封，另测 `navigator.onLine=false`）：出现图标栏（首页/定时任务/插件/探索/代码审查），没有离线不可用的云端入口；定时任务主区是 `ScheduledLanding`，侧栏「即将执行」列出本地任务，任务详情可以打开。契约测试锁定它不得再进入 denylist。
 
+### 从 denylist 移出：`1892382740`（26.928 电脑操控 / browserUseTinysky）
+
+- 26.928 上游新增 `unified-computer-use` 插件（`cua_repl` MCP 服务 + TinySky CUA 运行时，与旧 `computer-use` 插件并存）。主进程对它的可用性判断是 `features.browserUseTinysky && (inAppBrowserUse || externalBrowserUse || computerUse)`；`browserUseTinysky` 在 renderer 侧就是 Statsig gate `1892382740`（`electron-desktop-features-changed` 的 `browserUseTinysky` 字段，主进程同时把它镜像进 node_repl 子进程的 `BROWSER_USE_TINYSKY_ENABLED`）。
+- 该 id 在 26.924 静态扫描时只出现在通用 chunk、用途不明，被整批拉黑；26.928 里它关闭的是电脑操控的新栈：基线上主进程判定不可用 → 统一插件完全不进插件清单，应用向 `config.toml` 写入 `BROWSER_USE_TINYSKY_ENABLED="0"`，并注册一个指向 `ChatGPT.exe` 的假 `cua_repl` 占位（unavailable dummy tool）。
+- 移出后的 A/B（26.928.3736.0 stage 副本：从已打补丁的 asar 精准移除 denylist 中该 id 共 3 处、重打包并改写 ELECTRONASAR 完整性资源；隔离 CODEX_HOME、代理/DNS 全封）：统一插件变为 `installed:true / enabled:true / availability:AVAILABLE`，应用写入 `BROWSER_USE_TINYSKY_ENABLED="1"` 且不再注册假 `cua_repl` 占位；`offline-direct-launch-smoke` 通过（durable 连接 0 次）。composer 的「电脑」mention、插件页的 Computer Use 卡片在基线与实验组均存在（来自旧 `computer-use` 插件，与本 gate 无关）。契约测试锁定它不得再进入 denylist。
+
 ## 仍未覆盖
 
 - **Web 端**：Gateway 目前没有 `checkGate` 包裹，也没有 atom 补丁，gate 仍由 `featurePatches.ts` 按已知列表注入。若 Web 要对齐，应在 `assetPatches.ts` 复用同一 denylist，并先补齐 `checkGate` 语义。
