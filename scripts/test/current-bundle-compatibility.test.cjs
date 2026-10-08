@@ -418,17 +418,42 @@ test("26.814 browser descriptors patch shared plugin descriptor spreads", () => 
   }
 });
 
-test("26.928 dynamic tool handler bridges node_repl through the app server", () => {
-  // 26.928 always destructures `transport` and lets the mcp `codex_app`
-  // `record_private_review` tool skip the execution claim. The response helper
-  // names are minified per build, so the bridge must reuse the ones the
-  // handler itself calls — `qzn`/`Up`/`zl` still exist in the fixture but
-  // belong to unrelated code.
+// 26.1002 retired the `AppServerManager RPC is not connected` bus; the
+// handler's chunk resolves the host through this function instead and its
+// native callers chain `.sendRequest` on the result.
+const APP_SERVER_HOST_RESOLVER_26_1002 =
+  "function jI(e,t){try{var n=AI();let r=e.get(DI,t),i=e.get(MI);" +
+  "if(i!=null&&r.status!==`disconnected`&&(r.status!==`unavailable`||!e.get(TI).includes(t)))" +
+  "try{return i.forHost(t)}catch{}let{client:a}=r;if(a!=null)return a.rpc;" +
+  "let o=e.get(NI,t);if(o!=null)return o;let s=aN(),c=n.u(new aIt(()=>s.promise)),l=n.u(c()).dup();" +
+  "l.onRpcBroken(()=>{}),e.set(NI,t,()=>l);let u=null,d=i!=null,f=!1,p=!1,m,h=()=>{p=!0,m?.()}," +
+  "g=()=>{p||u!=null||(h(),e.set(NI,t,null),s.reject(Error(`AppServerManager RPC is unavailable for hostId: ${t}`)))};" +
+  "return l}catch(e){n.e=e}finally{n.d()}}";
+const RETIRED_APP_SERVER_BUS =
+  "function qU(e,t){let n=e.get(JU);if(n==null)throw Error(`AppServerManager RPC is not connected`);return n.forHost(t)}";
+const DYNAMIC_TOOL_HANDLER_26_1002 =
+  "async function noi(e){let{scope:t,serverRequest:n,hostId:r,signal:i,transport:a}=e,{id:o,params:s}=n," +
+  "{threadId:c,tool:l}=s,u={callId:s.callId,isRemoteHost:r!==yI,tool:l,turnId:s.turnId};" +
+  "if(zd.info(`dynamic_app_tool_renderer_execution_started`,{safe:u,sensitive:{}}),!c)" +
+  "return zd.error(`Missing threadId for dynamic tool call request`,{safe:{},sensitive:{id:o,params:s}}),!1;" +
+  "let d=Z(c),f=new J3(t).getForHostId(r),p=f?.getConversation(d),m=QQ(p,s.turnId);" +
+  "let g=f?.getStreamRole?.(d);" +
+  "if(i?.aborted||(a!==`mcp`||s.namespace!==`codex_app`||l!==`record_private_review`)&&$3.dynamicToolCalls!=null" +
+  "&&!await $3.dynamicToolCalls.tryClaimExecution({callId:s.callId,hostId:r,threadId:c,turnId:s.turnId})||i?.aborted)return!1;" +
+  "let _=()=>{if(i?.aborted)return!0;if(a!==`dynamic`)return!1;return!1};" +
+  "return toi({metrics:Qai(t),tool:void 0,isCancelled:_},async t=>{let i;" +
+  "try{({executeDynamicToolCallRequest:i}=await Wd(()=>import(`./execution-aee12740d69c.js`),__vite__mapDeps([23,1]),import.meta.url))}" +
+  "catch(e){return!_()&&(zd.warning(`dynamic_app_tool_dispatcher_load_failed`,{safe:u,sensitive:{error:e}})," +
+  "t({success:!1}),K_n({dispatchMessageFromView:(e,t)=>Hd.dispatchMessage(e,t),hostId:r,method:n.method,threadId:c," +
+  "response:{id:XA(o),result:Yq(`The app could not load this tool. Please try again.`)}}),!0)}" +
+  "return!_()&&i(e,{onToolResult:t,appServerManager:f,conversation:p,conversationId:d,isBackgroundAeonTurn:!1,streamRole:g,turn:m})})}";
+
+function loadDynamicToolCallPatch() {
   const patchSource = sourceSlice(
     "  const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_CANONICAL_RE =",
     "  const ARCHIVED_THREADS_DATA_CONTROLS_CURRENT_RE =",
   );
-  const patchComputerUseNodeReplDynamicToolCall = Function(
+  return Function(
     "COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_PATCH_MARKER",
     "escapeRegExp",
     `"use strict";\n${patchSource}\nreturn patchComputerUseNodeReplDynamicToolCall;`,
@@ -436,72 +461,67 @@ test("26.928 dynamic tool handler bridges node_repl through the app server", () 
     "/*codex-offline:computer-use-node-repl-dynamic-tool-call*/",
     value => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
   );
+}
+
+test("26.1002 dynamic tool handler bridges node_repl through the app-server host resolver", () => {
+  // The response helper names are minified per build, so the bridge must
+  // reuse the ones the handler itself calls — `qzn`/`Up`/`zl` still exist in
+  // the fixture but belong to unrelated code. 26.1002 also passes the thread
+  // to that call.
+  const patchComputerUseNodeReplDynamicToolCall = loadDynamicToolCallPatch();
   const fixture =
     "function qzn(){}var Up={},zl=1;" +
-    "function qU(e,t){let n=e.get(JU);if(n==null)throw Error(`AppServerManager RPC is not connected`);return n.forHost(t)}" +
-    "async function GUr(e){let{scope:t,serverRequest:n,hostId:r,signal:i,transport:a}=e,{id:o,params:s}=n," +
-    "{threadId:c,tool:l}=s,u={callId:s.callId,isRemoteHost:r!==VI,tool:l,turnId:s.turnId};" +
-    "if(_f.info(`dynamic_app_tool_renderer_execution_started`,{safe:u,sensitive:{}}),!c)" +
-    "return _f.error(`Missing threadId for dynamic tool call request`,{safe:{},sensitive:{id:o,params:s}}),!1;" +
-    "let d=Z(c),f=new e6(t).getForHostId(r),p=f?.getConversation(d),m=XQ(p,s.turnId);" +
-    "if(a===`dynamic`&&h?.clientId!=null&&h.clientId!==m?.params.clientUserMessageId)return!1;" +
-    "let g=f?.getStreamRole?.(d);" +
-    "if(i?.aborted||(a!==`mcp`||s.namespace!==`codex_app`||l!==`record_private_review`)&&i6.dynamicToolCalls!=null" +
-    "&&!await i6.dynamicToolCalls.tryClaimExecution({callId:s.callId,hostId:r,threadId:c,turnId:s.turnId})||i?.aborted)return!1;" +
-    "let _=()=>{if(i?.aborted)return!0;if(a!==`dynamic`)return!1;return!1};" +
-    "return t9r({metrics:Z7r(t),tool:void 0,isCancelled:_},async t=>{let i;" +
-    "try{({executeDynamicToolCallRequest:i}=await Tf(()=>import(`./execution-959340e7ed6d.js`),__vite__mapDeps([24,1]),import.meta.url))}" +
-    "catch(e){return!_()&&(_f.warning(`dynamic_app_tool_dispatcher_load_failed`,{safe:u,sensitive:{error:e}})," +
-    "t({success:!1}),Rdn({dispatchMessageFromView:(e,t)=>Cf.dispatchMessage(e,t),hostId:r,method:n.method," +
-    "response:{id:Dj(o),result:NK(`The app could not load this tool. Please try again.`)}}),!0)}" +
-    "return!_()&&i(e,{onToolResult:t,appServerManager:f,conversation:p,conversationId:d,isBackgroundAeonTurn:!1,streamRole:g,turn:m})})}";
+    APP_SERVER_HOST_RESOLVER_26_1002 +
+    DYNAMIC_TOOL_HANDLER_26_1002;
   const patched = patchComputerUseNodeReplDynamicToolCall(fixture);
 
   assert.equal(patched.patched, true);
   assert.match(
     patched.content,
-    /await qU\(t,r\)\.sendRequest\(`mcpServer\/tool\/call`,\{threadId:c,server:`node_repl`,tool:`js`,arguments:s\.arguments\}\)/,
+    /await jI\(t,r\)\.sendRequest\(`mcpServer\/tool\/call`,\{threadId:c,server:`node_repl`,tool:`js`,arguments:s\.arguments\}\)/,
   );
   assert.match(
     patched.content,
-    /return Rdn\(\{dispatchMessageFromView:\(e,t\)=>Cf\.dispatchMessage\(e,t\),hostId:r,method:n\.method,response:\{id:Dj\(o\),result:_codexOfflineNodeReplResponse\}\}\),!0\}/,
+    /return K_n\(\{dispatchMessageFromView:\(e,t\)=>Hd\.dispatchMessage\(e,t\),hostId:r,method:n\.method,threadId:c,response:\{id:XA\(o\),result:_codexOfflineNodeReplResponse\}\}\),!0\}/,
   );
   assert.doesNotMatch(patched.content, /return qzn\(|Up\.dispatchMessage|zl\(o\)/);
   assert.match(patched.content, /codex-offline:computer-use-node-repl-dynamic-tool-call/);
   assert.match(
     patched.content,
-    /\|\|s\.namespace!==`codex_app`\|\|l!==`record_private_review`\)&&i6\.dynamicToolCalls!=null/,
+    /\|\|s\.namespace!==`codex_app`\|\|l!==`record_private_review`\)&&\$3\.dynamicToolCalls!=null/,
   );
 });
 
-test("26.928 dynamic tool bridge fails closed without the handler's own responder", () => {
-  const patchSource = sourceSlice(
-    "  const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_CANONICAL_RE =",
-    "  const ARCHIVED_THREADS_DATA_CONTROLS_CURRENT_RE =",
-  );
-  const patchComputerUseNodeReplDynamicToolCall = Function(
-    "COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_PATCH_MARKER",
-    "escapeRegExp",
-    `"use strict";\n${patchSource}\nreturn patchComputerUseNodeReplDynamicToolCall;`,
-  )(
-    "/*codex-offline:computer-use-node-repl-dynamic-tool-call*/",
-    value => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
-  );
-  const fixture =
-    "function qU(e,t){let n=e.get(JU);if(n==null)throw Error(`AppServerManager RPC is not connected`);return n.forHost(t)}" +
-    "async function GUr(e){let{scope:t,serverRequest:n,hostId:r,signal:i,transport:a}=e,{id:o,params:s}=n," +
-    "{threadId:c,tool:l}=s;" +
-    "if(i?.aborted||(a!==`mcp`||s.namespace!==`codex_app`||l!==`record_private_review`)&&i6.dynamicToolCalls!=null" +
-    "&&!await i6.dynamicToolCalls.tryClaimExecution({callId:s.callId,hostId:r,threadId:c,turnId:s.turnId})||i?.aborted)return!1;return!0}";
+test("26.1002 dynamic tool bridge fails closed on the retired app-server bus", () => {
+  const patchComputerUseNodeReplDynamicToolCall = loadDynamicToolCallPatch();
 
   assert.throws(
-    () => patchComputerUseNodeReplDynamicToolCall(fixture),
+    () => patchComputerUseNodeReplDynamicToolCall(RETIRED_APP_SERVER_BUS + DYNAMIC_TOOL_HANDLER_26_1002),
+    /app-server request bus for Computer Use node_repl\.js bridge/,
+  );
+});
+
+test("26.1002 dynamic tool bridge fails closed without the handler's own responder", () => {
+  const patchComputerUseNodeReplDynamicToolCall = loadDynamicToolCallPatch();
+  const handlerHead = DYNAMIC_TOOL_HANDLER_26_1002.slice(
+    0,
+    DYNAMIC_TOOL_HANDLER_26_1002.indexOf("let _=()=>"),
+  );
+
+  assert.throws(
+    () => patchComputerUseNodeReplDynamicToolCall(APP_SERVER_HOST_RESOLVER_26_1002 + handlerHead + "return!0}"),
+    /response helpers for Computer Use node_repl\.js bridge/,
+  );
+  // A responder that drops the thread is not the current native call.
+  assert.throws(
+    () => patchComputerUseNodeReplDynamicToolCall(
+      APP_SERVER_HOST_RESOLVER_26_1002 + DYNAMIC_TOOL_HANDLER_26_1002.replace("method:n.method,threadId:c,", "method:n.method,"),
+    ),
     /response helpers for Computer Use node_repl\.js bridge/,
   );
 });
 
-
-test("26.924 package verification accepts the app-server sendRequest bridge", () => {
+test("26.1002 package verification accepts the app-server host resolver bridge", () => {
   const verifierBridgeSource = verifierSourceSlice(
     "function findAppServerRequestBusName",
     "const PLUGINS_API_KEY_NAV_PATCH_MARKER =",
@@ -509,13 +529,18 @@ test("26.924 package verification accepts the app-server sendRequest bridge", ()
   const verifierBridge = Function(
     `"use strict";\n${verifierBridgeSource}\nreturn { findAppServerRequestBusName, hasComputerUseNodeReplDynamicToolCallBridge };`,
   )();
-  const fixture =
-    "function qU(e,t){let n=e.get(JU);if(n==null)throw Error(`AppServerManager RPC is not connected`);return n.forHost(t)}" +
-    "qU(t,r).sendRequest(`mcpServer/tool/call`,{threadId:c,server:`node_repl`," +
+  const bridgeCall =
+    "jI(t,r).sendRequest(`mcpServer/tool/call`,{threadId:c,server:`node_repl`," +
     "tool:`js`,arguments:s.arguments})";
+  const fixture = APP_SERVER_HOST_RESOLVER_26_1002 + bridgeCall;
 
-  assert.equal(verifierBridge.findAppServerRequestBusName(fixture), "qU");
+  assert.equal(verifierBridge.findAppServerRequestBusName(fixture), "jI");
   assert.equal(verifierBridge.hasComputerUseNodeReplDynamicToolCallBridge(fixture), true);
+  assert.equal(verifierBridge.findAppServerRequestBusName(RETIRED_APP_SERVER_BUS + bridgeCall), null);
+  assert.equal(
+    verifierBridge.hasComputerUseNodeReplDynamicToolCallBridge(RETIRED_APP_SERVER_BUS + bridgeCall),
+    false,
+  );
 });
 
 test("26.803 Chrome pipe filter accepts platform-aware listing functions", () => {

@@ -1489,9 +1489,12 @@ const bundledPluginCacheLockCurrentFatalCatchRe =
   /catch\(([A-Za-z_$][\w$]*)\)\{if\([A-Za-z_$][\w$]*\.warning\(`bundled_plugins_marketplace_install_failed`,\{safe:\{errorCategory:[A-Za-z_$][\w$]*\(\{error:\1,platformFamily:([A-Za-z_$][\w$]*)\.platformFamily\}\),marketplaceName:[A-Za-z_$][\w$]*,platformFamily:\2\.platformFamily\},sensitive:\{error:\1,marketplaceRoot:\2\.materializedMarketplace\.marketplaceRoot\}\}\),\2\.throwOnReconcileFailure\)throw \1;return\{/;
 const bundledPluginCacheLockCurrentFatalResultRe =
   /let\{firstFailure:([A-Za-z_$][\w$]*)\}=[A-Za-z_$][\w$]*;if\(\1!=null\)\{if\([A-Za-z_$][\w$]*\.throwOnReconcileFailure\)throw \1\.error;return\{/;
+// Same anchor as patch-app-asar.mjs: the per-host app-server RPC resolver
+// that 26.1002 uses in place of the retired `AppServerManager RPC is not
+// connected` bus.
 function findAppServerRequestBusName(content) {
   const match = content.match(
-    /function ([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*),([A-Za-z_$][\w$]*)\)\{let ([A-Za-z_$][\w$]*)=\2\.get\([A-Za-z_$][\w$]*\);if\(\4==null\)throw Error\(`AppServerManager RPC is not connected`\);return \4\.forHost\(\3\)\}/,
+    /function ([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*),([A-Za-z_$][\w$]*)\)\{try\{var [A-Za-z_$][\w$]*=[A-Za-z_$][\w$]*\(\);let ([A-Za-z_$][\w$]*)=\2\.get\([A-Za-z_$][\w$]*,\3\),([A-Za-z_$][\w$]*)=\2\.get\([A-Za-z_$][\w$]*\);if\(\5!=null&&[^{};]*\)try\{return \5\.forHost\(\3\)\}catch\{\}let\{client:([A-Za-z_$][\w$]*)\}=\4;if\(\6!=null\)return \6\.rpc;[\s\S]{0,1200}?Error\(`AppServerManager RPC is unavailable for hostId: \$\{\3\}`\)/,
   );
   return match?.[1] ?? null;
 }

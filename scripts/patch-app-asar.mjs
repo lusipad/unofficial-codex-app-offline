@@ -2340,21 +2340,27 @@ try {
     'if(e?.toolResult?.structuredContent!=null)return _codexOfflineNodeReplStringify(e.toolResult.structuredContent);' +
     'if(e?.raw?.structuredContent!=null)return _codexOfflineNodeReplStringify(e.raw.structuredContent);' +
     'let t=_codexOfflineNodeReplContentText(e?.content??e?.contentItems);return t.length>0?t:_codexOfflineNodeReplStringify(e)??``})();';
-  // 26.924 no longer sends thread/start through the bus, so anchor on the bus
-  // definition itself: it resolves the per-host AppServerManager RPC.
+  // Anchor on the bus definition itself: it resolves the per-host app-server
+  // RPC. 26.1002 retired the bus that threw `AppServerManager RPC is not
+  // connected`; the handler's chunk now resolves the host through a function
+  // that prefers the AppServerManager RPC, falls back to the host's own client
+  // and rejects with `AppServerManager RPC is unavailable for hostId`, and its
+  // native callers chain `.sendRequest` on the result.
   function findAppServerRequestBusName(content) {
     const match = content.match(
-      /function ([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*),([A-Za-z_$][\w$]*)\)\{let ([A-Za-z_$][\w$]*)=\2\.get\([A-Za-z_$][\w$]*\);if\(\4==null\)throw Error\(`AppServerManager RPC is not connected`\);return \4\.forHost\(\3\)\}/,
+      /function ([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*),([A-Za-z_$][\w$]*)\)\{try\{var [A-Za-z_$][\w$]*=[A-Za-z_$][\w$]*\(\);let ([A-Za-z_$][\w$]*)=\2\.get\([A-Za-z_$][\w$]*,\3\),([A-Za-z_$][\w$]*)=\2\.get\([A-Za-z_$][\w$]*\);if\(\5!=null&&[^{};]*\)try\{return \5\.forHost\(\3\)\}catch\{\}let\{client:([A-Za-z_$][\w$]*)\}=\4;if\(\6!=null\)return \6\.rpc;[\s\S]{0,1200}?Error\(`AppServerManager RPC is unavailable for hostId: \$\{\3\}`\)/,
     );
     return match?.[1] ?? null;
   }
   // The response helpers are minified per build; reuse the ones the handler
-  // itself calls for this request instead of naming them.
+  // itself calls for this request instead of naming them. 26.1002 passes the
+  // thread to that call as well.
   function findDynamicToolCallResponder(handlerBody, groups) {
     const match = handlerBody.match(
       new RegExp(
         `([A-Za-z_$][\\w$]*)\\(\\{dispatchMessageFromView:\\(([A-Za-z_$][\\w$]*),([A-Za-z_$][\\w$]*)\\)=>([A-Za-z_$][\\w$]*)\\.dispatchMessage\\(\\2,\\3\\),` +
         `hostId:${escapeRegExp(groups.hostId)},method:${escapeRegExp(groups.serverRequest)}\\.method,` +
+        `threadId:${escapeRegExp(groups.threadId)},` +
         `response:\\{id:([A-Za-z_$][\\w$]*)\\(${escapeRegExp(groups.requestId)}\\),`,
       ),
     );
@@ -2393,7 +2399,7 @@ try {
       '_codexOfflineNodeReplResponse={contentItems:[{type:`inputText`,text:_codexOfflineNodeReplText}],success:_codexOfflineNodeReplResult?.isError!==!0}' +
       '}catch(_codexOfflineNodeReplError){_codexOfflineNodeReplResponse={contentItems:[{type:`inputText`,text:String(_codexOfflineNodeReplError?.message??_codexOfflineNodeReplError)}],success:!1}}' +
       COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_PATCH_MARKER +
-      `return ${responder.respond}({dispatchMessageFromView:(e,t)=>${responder.messageBus}.dispatchMessage(e,t),hostId:${groups.hostId},method:${groups.serverRequest}.method,response:{id:${responder.requestIdFn}(${groups.requestId}),result:_codexOfflineNodeReplResponse}}),!0}`
+      `return ${responder.respond}({dispatchMessageFromView:(e,t)=>${responder.messageBus}.dispatchMessage(e,t),hostId:${groups.hostId},method:${groups.serverRequest}.method,threadId:${groups.threadId},response:{id:${responder.requestIdFn}(${groups.requestId}),result:_codexOfflineNodeReplResponse}}),!0}`
     );
   }
   const COMPUTER_USE_NODE_REPL_NAMESPACE_TOOL_SPEC =
