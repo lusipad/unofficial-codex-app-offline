@@ -61,8 +61,16 @@ jobs:
       - name: Inspect node_repl bridge anchors
         run: node .github/diag-issue-127/inspect.mjs "$ASSETS_DIR"
 
-      - name: Run the patcher against a scratch copy
+      - name: Run the patcher against a scratch copy with the node_repl bridge skipped
         run: |
           set -uo pipefail
           cp -r "$APP_DIR" "$RUNNER_TEMP/app-patch"
-          node scripts/patch-app-asar.mjs --app-dir "$RUNNER_TEMP/app-patch" 2>&1 | grep -v '^\s*$' | tail -n 200
+          node -e "
+            const fs = require('fs');
+            const anchor = 'function patchComputerUseNodeReplDynamicToolCall(content) {';
+            const source = fs.readFileSync('scripts/patch-app-asar.mjs', 'utf8');
+            if (!source.includes(anchor)) throw new Error('anchor missing');
+            fs.writeFileSync('scripts/patch-app-asar.diag.mjs',
+              source.replace(anchor, anchor + ' return { content, alreadyCorrect: false, patched: false };'));
+          "
+          node scripts/patch-app-asar.diag.mjs --app-dir "$RUNNER_TEMP/app-patch" 2>&1 | grep -v '^\s*$' | tail -n 250
