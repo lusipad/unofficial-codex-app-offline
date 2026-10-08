@@ -1,0 +1,64 @@
+name: diag-issue-127
+
+# Temporary, read-only reproduction of issue #127 against the current Store
+# package. It never publishes and is removed once the fix lands.
+on:
+  push:
+    branches:
+      - claude/great-cannon-n37msf
+    paths:
+      - '.github/workflows/diag-issue-127.yml'
+      - '.github/diag-issue-127/**'
+      - 'scripts/patch-app-asar.mjs'
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: |
+          npm ci
+          npx playwright install chromium
+
+      - name: Download and extract the current Store package
+        run: |
+          set -euo pipefail
+          node scripts/resolve-store-bundle-url.mjs --package-family-name OpenAI.Codex_2p2nqsd0c76g0 --ring Retail > "$RUNNER_TEMP/resolved.json"
+          jq '{version, selected: (.selected | {fileName, sha1, size})}' "$RUNNER_TEMP/resolved.json"
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/package.bin" "$(jq -r .selected.href "$RUNNER_TEMP/resolved.json")"
+          echo "$(jq -r .selected.sha1 "$RUNNER_TEMP/resolved.json")  $RUNNER_TEMP/package.bin" | sha1sum -c -
+          mkdir -p "$RUNNER_TEMP/outer" "$RUNNER_TEMP/inner"
+          if jq -r .selected.fileName "$RUNNER_TEMP/resolved.json" | grep -Eiq '\.(msixbundle|appxbundle)$'; then
+            unzip -q "$RUNNER_TEMP/package.bin" -d "$RUNNER_TEMP/outer"
+            inner_pkg="$(find "$RUNNER_TEMP/outer" -type f -iname 'OpenAI.Codex_*x64*.msix' | head -n1)"
+          else
+            inner_pkg="$RUNNER_TEMP/package.bin"
+          fi
+          unzip -q "$inner_pkg" -d "$RUNNER_TEMP/inner"
+          grep -o '<Identity[^>]*>' "$RUNNER_TEMP/inner/AppxManifest.xml"
+          node -e "require('@electron/asar').extractAll(process.argv[1], process.argv[2])" \
+            "$RUNNER_TEMP/inner/app/resources/app.asar" "$RUNNER_TEMP/asar"
+          echo "APP_DIR=$RUNNER_TEMP/inner/app" >> "$GITHUB_ENV"
+          echo "ASSETS_DIR=$RUNNER_TEMP/asar/webview/assets" >> "$GITHUB_ENV"
+
+      - name: Inspect node_repl bridge anchors
+        run: node .github/diag-issue-127/inspect.mjs "$ASSETS_DIR"
+
+      - name: Run the patcher against a scratch copy
+        run: |
+          set -uo pipefail
+          cp -r "$APP_DIR" "$RUNNER_TEMP/app-patch"
+          node scripts/patch-app-asar.mjs --app-dir "$RUNNER_TEMP/app-patch" 2>&1 | grep -v '^\s*$' | tail -n 200
