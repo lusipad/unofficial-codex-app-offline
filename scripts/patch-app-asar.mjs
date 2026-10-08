@@ -2573,9 +2573,11 @@ try {
     // connection status (`disconnected`/`error`) as another cloud term; the
     // archive-source queries in `queries.some(...)` still only cover local
     // sources, so keeping items-empty + local-available + local query error
-    // preserves the offline semantics.
+    // preserves the offline semantics. 26.1002 keeps that expression and
+    // follows it with a dedicated `chatGptArchiveError` prop (with its own
+    // retry) instead of `onLoadNextPage`.
     const currentErrorPropRe =
-      /isError:(?<items>[A-Za-z_$][\w$]*)\.length===0&&\((?<localAvail>[A-Za-z_$][\w$]*)&&\((?<queries>[A-Za-z_$][\w$]*)\.some\((?<errFn>[A-Za-z_$][\w$]*)\)\|\|[A-Za-z_$][\w$]*\.includes\(`durable`\)&&\([A-Za-z_$][\w$]*===`disconnected`\|\|[A-Za-z_$][\w$]*===`error`\)\)\|\|[A-Za-z_$][\w$]*==null&&[A-Za-z_$][\w$]*\|\|[A-Za-z_$][\w$]*&&[A-Za-z_$][\w$]*==null&&[A-Za-z_$][\w$]*\)(?=,onLoadNextPage:)/;
+      /isError:(?<items>[A-Za-z_$][\w$]*)\.length===0&&\((?<localAvail>[A-Za-z_$][\w$]*)&&\((?<queries>[A-Za-z_$][\w$]*)\.some\((?<errFn>[A-Za-z_$][\w$]*)\)\|\|[A-Za-z_$][\w$]*\.includes\(`durable`\)&&\([A-Za-z_$][\w$]*===`disconnected`\|\|[A-Za-z_$][\w$]*===`error`\)\)\|\|[A-Za-z_$][\w$]*==null&&[A-Za-z_$][\w$]*\|\|[A-Za-z_$][\w$]*&&[A-Za-z_$][\w$]*==null&&[A-Za-z_$][\w$]*\)(?=,chatGptArchiveError:)/;
     const currentErrorPropMatch = currentErrorPropRe.exec(
       content.slice(archivedPanelAnchor, archivedPanelAnchor + 1200),
     );

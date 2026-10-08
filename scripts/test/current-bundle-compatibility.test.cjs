@@ -1081,7 +1081,7 @@ test("26.825 verifier rejects a disabled quoted shared node_repl config", () => 
   assert.doesNotMatch(enabledFixture, currentDisabledRe);
 });
 
-test("26.928 archived settings keeps local errors separate from cloud task errors", () => {
+test("26.1002 archived settings keeps local errors separate from cloud task errors", () => {
   const patchSource = sourceSlice(
     "  function patchArchivedSettingsOfflineVisibility(content) {",
     "\n  const BUNDLED_BROWSER_PLUGINS_PATCH_MARKER =",
@@ -1091,21 +1091,29 @@ test("26.928 archived settings keeps local errors separate from cloud task error
     `"use strict";\n${patchSource}\nreturn patchArchivedSettingsOfflineVisibility;`,
   )("/*codex-offline:archived-settings-offline-local-visibility*/");
   // 26.928 inlined the isError prop and added the durable-host connection
-  // status as another cloud term after the local query terms.
+  // status as another cloud term after the local query terms; 26.1002 follows
+  // it with a dedicated ChatGPT archive error prop and retry callback.
   const fixture =
-    "return jsx(fn,{archivedChats:se,projects:ae,hostId:o,localChatsAvailable:d," +
-    "isError:se.length===0&&(d&&(v.some(nn)||_.includes(`durable`)&&(g===`disconnected`||g===`error`))" +
-    "||y==null&&D||O&&P==null&&R),onLoadNextPage:ue});";
+    "(0,Q.jsx)(gn,{archivedChats:W,backSlot:n,projects:H,hostId:i,localChatsAvailable:l,hasNextPage:G||K," +
+    "isLoading:W.length===0&&(l&&(v.some(cn)||g.includes(`durable`)&&(h===`connecting`||h===`restarting`))||S||E&&P||i===`local`&&oe)," +
+    "isFetchingNextPage:w||E&&L," +
+    "isError:W.length===0&&(l&&(v.some(sn)||g.includes(`durable`)&&(h===`disconnected`||h===`error`))||y==null&&T||E&&j==null&&R)," +
+    "chatGptArchiveError:E&&R?te:null,onRetryChatGptArchive:q,onLoadNextPage:J},`${i}:${l}:${o??``}`)}" +
+    "function gn(e){let t=(0,kn.c)(131),{archivedChats:n,backSlot:r,projects:i,hostId:a,localChatsAvailable:s," +
+    "hasNextPage:u,isLoading:d,isFetchingNextPage:p,isError:m,chatGptArchiveError:h,onRetryChatGptArchive:g,onLoadNextPage:_}=e}";
 
   const result = patchArchivedSettingsOfflineVisibility(fixture);
   assert.equal(result.patched, true);
   assert.match(
     result.content,
-    /isError:se\.length===0&&d&&v\.some\(nn\)\/\*codex-offline:archived-settings-offline-local-visibility\*\/,onLoadNextPage:ue/,
+    /isError:W\.length===0&&l&&v\.some\(sn\)\/\*codex-offline:archived-settings-offline-local-visibility\*\/,chatGptArchiveError:E&&R\?te:null,onRetryChatGptArchive:q,onLoadNextPage:J/,
   );
-  assert.ok(!result.content.includes("y==null&&D"));
-  assert.ok(!result.content.includes("O&&P==null&&R"));
-  assert.ok(!result.content.includes("g===`disconnected`"));
+  assert.ok(!result.content.includes("y==null&&T"));
+  assert.ok(!result.content.includes("E&&j==null&&R)"));
+  assert.ok(!result.content.includes("h===`disconnected`"));
+  // The loading state and the destructured component props stay untouched.
+  assert.ok(result.content.includes("h===`connecting`||h===`restarting`"));
+  assert.ok(result.content.includes("isError:m,chatGptArchiveError:h,"));
 });
 
 test("26.810 archived settings ignores both cloud archive errors offline", () => {
