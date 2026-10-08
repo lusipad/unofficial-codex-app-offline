@@ -39,6 +39,13 @@ function launcherLines() {
   return JSON.parse(json);
 }
 
+// Codex.cmd and Launch Codex Direct.cmd hand ChatGPT.exe to `start`, so the
+// probe can still be exiting from inside the package root when its output
+// appears; Windows then refuses the removal with EPERM/EBUSY until it is gone.
+function removePackageRoot(packageRoot) {
+  fs.rmSync(packageRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+}
+
 const LAUNCHERS = {
   daily: { file: "Codex.cmd", target: "app" },
   direct: { file: path.join("_internal", "tools", "Launch Codex Direct.cmd"), target: "app" },
@@ -86,7 +93,7 @@ function launchAndReadCodexHome(kind, { rootEnv, internalEnv, inheritedCodexHome
     }
     return { packageRoot, codexHome: fs.readFileSync(probeOut, "utf8") };
   } catch (error) {
-    fs.rmSync(packageRoot, { recursive: true, force: true });
+    removePackageRoot(packageRoot);
     throw error;
   }
 }
@@ -96,7 +103,7 @@ function withLaunch(kind, options, check) {
   try {
     check(codexHome, packageRoot);
   } finally {
-    fs.rmSync(packageRoot, { recursive: true, force: true });
+    removePackageRoot(packageRoot);
   }
 }
 
