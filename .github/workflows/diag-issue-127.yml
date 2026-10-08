@@ -49,6 +49,10 @@ jobs:
           fi
           unzip -q "$inner_pkg" -d "$RUNNER_TEMP/inner"
           grep -o '<Identity[^>]*>' "$RUNNER_TEMP/inner/AppxManifest.xml"
+          # Same repair build-offline-package.ps1 applies: MSIX stores `@` scopes as %40.
+          find "$RUNNER_TEMP/inner/app" -depth -type d -name '*%40*' | while IFS= read -r dir; do
+            mv "$dir" "$(dirname "$dir")/$(basename "$dir" | sed 's/%40/@/g')"
+          done
           node -e "require('@electron/asar').extractAll(process.argv[1], process.argv[2])" \
             "$RUNNER_TEMP/inner/app/resources/app.asar" "$RUNNER_TEMP/asar"
           echo "APP_DIR=$RUNNER_TEMP/inner/app" >> "$GITHUB_ENV"
