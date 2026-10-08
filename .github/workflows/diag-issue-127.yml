@@ -9,60 +9,13 @@ on:
       - claude/great-cannon-n37msf
     paths:
       - '.github/workflows/diag-issue-127.yml'
-      - '.github/diag-issue-127/**'
       - 'scripts/**'
 
 permissions:
   contents: read
 
 jobs:
-  inspect:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: 24
-          cache: npm
-
-      - name: Install dependencies
-        run: |
-          npm ci
-          npx playwright install chromium
-
-      - name: Download and extract the current Store package
-        run: |
-          set -euo pipefail
-          node scripts/resolve-store-bundle-url.mjs --package-family-name OpenAI.Codex_2p2nqsd0c76g0 --ring Retail > "$RUNNER_TEMP/resolved.json"
-          jq '{version, selected: (.selected | {fileName, sha1, size})}' "$RUNNER_TEMP/resolved.json"
-          curl -fsSL --retry 3 -o "$RUNNER_TEMP/package.msix" "$(jq -r .selected.href "$RUNNER_TEMP/resolved.json")"
-          echo "$(jq -r .selected.sha1 "$RUNNER_TEMP/resolved.json")  $RUNNER_TEMP/package.msix" | sha1sum -c -
-          unzip -q "$RUNNER_TEMP/package.msix" -d "$RUNNER_TEMP/inner"
-          # Same repair build-offline-package.ps1 applies: MSIX stores `@` scopes as %40.
-          find "$RUNNER_TEMP/inner/app" -depth -type d -name '*%40*' | while IFS= read -r dir; do
-            mv "$dir" "$(dirname "$dir")/$(basename "$dir" | sed 's/%40/@/g')"
-          done
-          node -e "require('@electron/asar').extractAll(process.argv[1], process.argv[2])" \
-            "$RUNNER_TEMP/inner/app/resources/app.asar" "$RUNNER_TEMP/asar"
-          echo "APP_DIR=$RUNNER_TEMP/inner/app" >> "$GITHUB_ENV"
-          echo "ASSETS_DIR=$RUNNER_TEMP/asar/webview/assets" >> "$GITHUB_ENV"
-
-      - name: Inspect the archived settings panel
-        run: node .github/diag-issue-127/inspect.mjs "$ASSETS_DIR"
-
-      - name: Run the patcher with summary throws collected
-        run: |
-          set -uo pipefail
-          cp -r "$APP_DIR" "$RUNNER_TEMP/app-patch"
-          sed '3700,3745s/throw new Error(/failRequiredPatch(/' scripts/patch-app-asar.mjs > scripts/patch-app-asar.diag.mjs
-          node scripts/patch-app-asar.diag.mjs --app-dir "$RUNNER_TEMP/app-patch" 2>&1 | grep -v '^\s*$' | tail -n 80
-
   build-verify:
-    if: ${{ false }}
     runs-on: windows-latest
     timeout-minutes: 90
     steps:
