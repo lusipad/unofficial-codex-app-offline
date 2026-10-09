@@ -1,0 +1,321 @@
+{
+  "schemaVersion": 1,
+  "version": "26.1007.2314.0",
+  "mode": "api-key",
+  "groups": [
+    {
+      "key": "personal",
+      "sections": [
+        {
+          "slug": "general-settings",
+          "visible": true,
+          "label": "常规",
+          "reason": null
+        },
+        {
+          "slug": "notifications",
+          "visible": false,
+          "label": "通知",
+          "reason": "需要登录 ChatGPT 账号"
+        },
+        {
+          "slug": "import",
+          "visible": false,
+          "label": "导入",
+          "reason": "原因待确认"
+        },
+        {
+          "slug": "profile",
+          "visible": false,
+          "label": "个人资料",
+          "reason": "需要 ChatGPT 账号资料"
+        },
+        {
+          "slug": "appearance",
+          "visible": true,
+          "label": "外观",
+          "reason": null
+        },
+        {
+          "slug": "security",
+          "visible": false,
+          "label": "账户安全与登录",
+          "reason": "上游当前对所有用户隐藏"
+        },
+        {
+          "slug": "account",
+          "visible": false,
+          "label": "账户",
+          "reason": "需要登录 ChatGPT 账号"
+        },
+        {
+          "slug": "data-controls",
+          "visible": false,
+          "label": "数据管理",
+          "reason": "需要登录 ChatGPT 账号；本地归档会话在「Archived chats」中管理"
+        },
+        {
+          "slug": "archived-chats",
+          "visible": true,
+          "label": "Archived chats",
+          "reason": null
+        },
+        {
+          "slug": "ads-controls",
+          "visible": false,
+          "label": "广告设置",
+          "reason": "ChatGPT 账号功能"
+        },
+        {
+          "slug": "parental-controls",
+          "visible": false,
+          "label": "家长控制",
+          "reason": "ChatGPT 账号功能"
+        },
+        {
+          "slug": "trusted-contact",
+          "visible": false,
+          "label": "可信联系人",
+          "reason": "ChatGPT 账号功能"
+        },
+        {
+          "slug": "safety",
+          "visible": false,
+          "label": "安全",
+          "reason": "ChatGPT 账号功能"
+        },
+        {
+          "slug": "voice",
+          "visible": true,
+          "label": "语音",
+          "reason": null
+        },
+        {
+          "slug": "storage",
+          "visible": true,
+          "label": "存储",
+          "reason": null
+        },
+        {
+          "slug": "agent",
+          "visible": true,
+          "label": "配置",
+          "reason": null
+        },
+        {
+          "slug": "personalization",
+          "visible": true,
+          "label": "个性化",
+          "reason": null
+        },
+        {
+          "slug": "pets",
+          "visible": true,
+          "label": "Mini 与虚拟宠物",
+          "reason": null
+        },
+        {
+          "slug": "keyboard-shortcuts",
+          "visible": true,
+          "label": "键盘快捷键",
+          "reason": null
+        },
+        {
+          "slug": "usage",
+          "visible": false,
+          "label": "使用情况和计费",
+          "reason": "需要 ChatGPT 账号的额度信息"
+        },
+        {
+          "slug": "billing",
+          "visible": false,
+          "label": "账单",
+          "reason": "上游当前对所有用户隐藏"
+        },
+        {
+          "slug": "analytics",
+          "visible": false,
+          "label": "分析",
+          "reason": "需要 ChatGPT 企业/团队工作区"
+        },
+        {
+          "slug": "consumer-view",
+          "visible": false,
+          "label": "消费者使用情况分析（内部）",
+          "reason": "OpenAI 内部页面"
+        },
+        {
+          "slug": "usage-code-review",
+          "visible": false,
+          "label": "代码审查用量",
+          "reason": "需要 ChatGPT 账号计划"
+        },
+        {
+          "slug": "debug",
+          "visible": false,
+          "label": "调试",
+          "reason": "内部调试页，离线包刻意保持关闭"
+        },
+        {
+          "slug": "agreements",
+          "visible": false,
+          "label": "协议",
+          "reason": "需要登录 ChatGPT 账号"
+        }
+      ]
+    },
+    {
+      "key": "teams",
+      "sections": [
+        {
+          "slug": "teams",
+          "visible": false,
+          "label": "团队",
+          "reason": "需要 ChatGPT 工作区账号"
+        }
+      ]
+    },
+    {
+      "key": "integrations",
+      "sections": [
+        {
+          "slug": "plugins-settings",
+          "visible": true,
+          "label": "插件",
+          "reason": null
+        },
+        {
+          "slug": "file-type-handlers",
+          "visible": false,
+          "label": "文件类型处理",
+          "reason": "安装了提供文件处理入口的插件后才显示"
+        },
+        {
+          "slug": "passwords",
+          "visible": false,
+          "label": "密码",
+          "reason": "ChatGPT 账号功能"
+        },
+        {
+          "slug": "computer-use",
+          "visible": true,
+          "label": "电脑操控",
+          "reason": null
+        },
+        {
+          "slug": "chronicle",
+          "visible": false,
+          "label": "电脑历史记录",
+          "reason": "仅 macOS"
+        },
+        {
+          "slug": "appshots",
+          "visible": true,
+          "label": "应用快照",
+          "reason": null
+        },
+        {
+          "slug": "codex-micro",
+          "visible": false,
+          "label": "Codex Micro",
+          "reason": "检测到过 Codex Micro 硬件后才显示"
+        },
+        {
+          "slug": "mcp-settings",
+          "visible": false,
+          "label": "MCP 服务器",
+          "reason": "已合并到「插件」页面"
+        },
+        {
+          "slug": "skills-settings",
+          "visible": false,
+          "label": "技能",
+          "reason": "已合并到「插件」页面"
+        },
+        {
+          "slug": "browser-use",
+          "visible": true,
+          "label": "浏览器",
+          "reason": null
+        },
+        {
+          "slug": "cloud-computer",
+          "visible": false,
+          "label": "云电脑",
+          "reason": "需要登录 ChatGPT 账号"
+        },
+        {
+          "slug": "extension",
+          "visible": false,
+          "label": "浏览器扩展",
+          "reason": "上游当前对所有用户隐藏"
+        }
+      ]
+    },
+    {
+      "key": "coding",
+      "sections": [
+        {
+          "slug": "hooks-settings",
+          "visible": true,
+          "label": "钩子",
+          "reason": null
+        },
+        {
+          "slug": "connections",
+          "visible": true,
+          "label": "连接",
+          "reason": null
+        },
+        {
+          "slug": "cloud-settings",
+          "visible": false,
+          "label": "云端偏好设置",
+          "reason": "需要 ChatGPT 云端"
+        },
+        {
+          "slug": "codex-cloud",
+          "visible": false,
+          "label": "Codex 云端",
+          "reason": "需要 ChatGPT 云端访问"
+        },
+        {
+          "slug": "cloud-environments",
+          "visible": false,
+          "label": "云环境",
+          "reason": "需要 ChatGPT 云端"
+        },
+        {
+          "slug": "code-review",
+          "visible": true,
+          "label": "代码审查",
+          "reason": null
+        },
+        {
+          "slug": "git-settings",
+          "visible": true,
+          "label": "Git",
+          "reason": null
+        },
+        {
+          "slug": "local-environments",
+          "visible": true,
+          "label": "环境",
+          "reason": null
+        },
+        {
+          "slug": "environments",
+          "visible": false,
+          "label": "云端环境",
+          "reason": "开启云端环境时替代本地「环境」；离线显示本地「环境」"
+        },
+        {
+          "slug": "worktrees",
+          "visible": true,
+          "label": "Worktrees",
+          "reason": null
+        }
+      ]
+    }
+  ]
+}

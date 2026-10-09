@@ -211,6 +211,7 @@ Web gateway 变量（`start.sh` 同级 `.env` 文件或环境变量）：
 
 ## 风险与限制
 
+- 离线版能用哪些官方功能、哪些不能用以及原因，见 [离线功能清单](docs/offline-features.md)。清单在离线包上实测生成；设置分区有变化时，Release 说明会单独列出。
 - `store.rg-adguard.net` 是第三方服务，可能失效
 - Store 包内部结构变化后解包逻辑可能需调整
 - Web gateway 需要 Node.js 18+ 和 `@openai/codex` CLI，当前包不捆绑这两者
@@ -305,6 +306,7 @@ Each Release also includes an optional, version-matched `models-api.json` for AP
 
 ### Risks
 
+- Which official features work offline, which do not, and why: see the [offline feature list](docs/offline-features.md) (Chinese). It is measured on the offline package; when the Settings sections change, the release notes list the changes.
 - Relies on third-party `store.rg-adguard.net`
 - Store package structure changes may break extraction
 - Web gateway requires Node.js 18+ and `@openai/codex` CLI (not bundled)
