@@ -4,6 +4,9 @@ const STATSIG_DEFAULT_FEATURES_CONFIG = "statsig_default_enable_features";
 // 的 appshots_enabled 字段驱动（renderer 侧 lp("1193530394") 读取），不再走 gate 路径。
 // Web gateway 的 initialize/bootstrap 本地应答和桌面 init.cjs 的 Statsig 拦截都要携带它，
 // 否则 renderer 解析缺省为 false，功能入口整体消失。
+// 26.1007 起该 id 变为 realtimeConversationPrompt（实时语音）配置，appshots_enabled 只控制
+// 语音会话里的应用快照动态工具；设置分区与编辑器入口改由 gate 1304276663 +（Windows）
+// 2124127696 + 原生捕获助手 supported 决定，均由 gate-atom/wrapper 默认开启补丁覆盖。
 const STATSIG_DEFAULT_DYNAMIC_CONFIGS = Object.freeze({
   "1193530394": Object.freeze({
     appshots_enabled: true,

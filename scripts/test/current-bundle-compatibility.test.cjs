@@ -915,35 +915,21 @@ test("26.825 node_repl config enables quoted features.js_repl without touching j
   assert.doesNotMatch(retiredFixture, currentRe);
 });
 
-test("26.928 archived thread loader accepts the data-controls pagination shape", () => {
-  const regexSource = sourceSlice(
-    "  const ARCHIVED_THREADS_DATA_CONTROLS_CURRENT_RE =",
-    "  function archivedThreadsReturnExpression",
-  );
-  const currentRe = Function(
-    `"use strict";\n${regexSource}\nreturn ARCHIVED_THREADS_DATA_CONTROLS_CURRENT_RE;`,
-  )();
-  // 26.928 inlined the loader as a React Query queryFn with an explicit abort
-  // signal and a pre-bound app-server request.
-  const fixture =
-    "queryFn:async t=>{let{signal:n}=t,r=Te(a,e),i=[],o=new Set,s=null;do{n.throwIfAborted();" +
-    "let e=await r.sendRequest(`thread/list`,{archived:!0,cursor:s,limit:100,modelProviders:null," +
-    "sortKey:`updated_at`,sourceKinds:Ne,useStateDbOnly:!0},{priority:`background`,source:`thread_list`});" +
-    "if(n.throwIfAborted(),i.push(...e.data),s=e.nextCursor,s!=null&&o.has(s))throw Error(" +
-    "`App Server repeated an archived thread list cursor`);s!=null&&o.add(s)}while(s!=null);return i}";
-  const match = currentRe.exec(fixture);
-  assert.ok(match, "26.928 data-controls archived loader shape should match");
-  assert.equal(match.groups.threads, "i");
-  assert.equal(match.groups.sourceKinds, "Ne");
-  assert.equal(match.groups.sendInit, "Te(a,e)");
-});
+// 26.1007 turned the archived loader into an async generator that yields each
+// page to a React Query streamed query (one per host).
+const ARCHIVED_THREADS_GENERATOR_FIXTURE =
+  "async function*Sn(e,t,n){let r=Xe(e,t),i=new Set,a=null;do{n.throwIfAborted();" +
+  "let e=await r.sendRequest(`thread/list`,{archived:!0,cursor:a,limit:100,modelProviders:null," +
+  "sortKey:`updated_at`,sourceKinds:xe,useStateDbOnly:!0},{priority:`background`,source:`thread_list`});" +
+  "if(n.throwIfAborted(),yield e.data,a=e.nextCursor,a!=null&&i.has(a))throw Error(" +
+  "`App Server repeated an archived thread list cursor`);a!=null&&i.add(a)}while(a!=null)}";
 
-test("26.928 archived thread loader caches the last full list for offline fallback", () => {
+function loadArchivedThreadsPartialListPatch() {
   const patchSource = sourceSlice(
     "  const ARCHIVED_THREADS_DATA_CONTROLS_CURRENT_RE =",
     "  // The archived settings panel (Settings → Data controls → Archived) combines",
   );
-  const patchArchivedThreadsPartialList = Function(
+  return Function(
     "ARCHIVED_THREADS_PARTIAL_LIST_PATCH_MARKER",
     "ARCHIVED_THREADS_CACHE_FALLBACK_PATCH_MARKER",
     `"use strict";\n${patchSource}\nreturn patchArchivedThreadsPartialList;`,
@@ -951,28 +937,70 @@ test("26.928 archived thread loader caches the last full list for offline fallba
     "/*codex-offline:archived-threads-partial-list*/",
     "/*codex-offline:archived-threads-cache-fallback*/",
   );
-  const fixture =
+}
+
+// Evaluates the patched generator against a scripted app-server; each entry of
+// `pages` is either a page object or an Error to throw for that request.
+async function collectArchivedThreadPages(patchedSource, pages, signal = new AbortController().signal) {
+  let request = 0;
+  const Xe = () => ({
+    sendRequest: async () => {
+      const next = pages[request++];
+      if (next instanceof Error) throw next;
+      return next;
+    },
+  });
+  const Sn = Function("Xe", "xe", `"use strict";${patchedSource};return Sn;`)(Xe, []);
+  const yielded = [];
+  for await (const chunk of Sn(null, "local", signal)) yielded.push(chunk);
+  return yielded;
+}
+
+test("26.1007 archived thread generator keeps streamed pages and replays the last full list offline", async (t) => {
+  const patchArchivedThreadsPartialList = loadArchivedThreadsPartialListPatch();
+  const result = patchArchivedThreadsPartialList(ARCHIVED_THREADS_GENERATOR_FIXTURE);
+  assert.equal(result.patched, true);
+  assert.match(result.content, /\/\*codex-offline:archived-threads-partial-list\*\/\/\*codex-offline:archived-threads-cache-fallback\*\/$/);
+  assert.ok(result.content.includes("useStateDbOnly:!0"));
+  t.after(() => { delete globalThis.__codexOfflineArchivedThreadsCache; });
+  delete globalThis.__codexOfflineArchivedThreadsCache;
+
+  // A complete list is yielded page by page and remembered for this host.
+  assert.deepEqual(
+    await collectArchivedThreadPages(result.content, [
+      { data: [{ id: "a" }], nextCursor: "c1" },
+      { data: [{ id: "b" }], nextCursor: null },
+    ]),
+    [[{ id: "a" }], [{ id: "b" }]],
+  );
+  // A failure before any page replays the remembered list instead of erroring.
+  assert.deepEqual(
+    await collectArchivedThreadPages(result.content, [new Error("app-server down")]),
+    [[{ id: "a" }, { id: "b" }]],
+  );
+  // A failure after some pages keeps what already streamed.
+  assert.deepEqual(
+    await collectArchivedThreadPages(result.content, [
+      { data: [{ id: "c" }], nextCursor: "c1" },
+      new Error("app-server down"),
+    ]),
+    [[{ id: "c" }]],
+  );
+  // Aborts still propagate so React Query can cancel the stream.
+  const controller = new AbortController();
+  controller.abort();
+  await assert.rejects(collectArchivedThreadPages(result.content, [], controller.signal));
+});
+
+test("26.1007 archived thread generator patch fails closed on the 26.1002 queryFn shape", () => {
+  const patchArchivedThreadsPartialList = loadArchivedThreadsPartialListPatch();
+  const retired =
     "queryFn:async t=>{let{signal:n}=t,r=Te(a,e),i=[],o=new Set,s=null;do{n.throwIfAborted();" +
     "let e=await r.sendRequest(`thread/list`,{archived:!0,cursor:s,limit:100,modelProviders:null," +
     "sortKey:`updated_at`,sourceKinds:Ne,useStateDbOnly:!0},{priority:`background`,source:`thread_list`});" +
     "if(n.throwIfAborted(),i.push(...e.data),s=e.nextCursor,s!=null&&o.has(s))throw Error(" +
     "`App Server repeated an archived thread list cursor`);s!=null&&o.add(s)}while(s!=null);return i}";
-
-  const result = patchArchivedThreadsPartialList(fixture);
-  assert.equal(result.patched, true);
-  // The pagination loop keeps upstream's abort sequencing; the whole loop moves
-  // inside a try/catch that records the failure, and the return falls back to
-  // the last cached list only when the fresh list is empty because of it.
-  assert.match(
-    result.content,
-    /queryFn:async t=>\{let\{signal:n\}=t,r=Te\(a,e\),i=\[\],o=new Set,s=null,_codexOfflineArchiveListFailed=!1;/,
-  );
-  assert.match(result.content, /try\{do\{n\.throwIfAborted\(\);/);
-  assert.match(
-    result.content,
-    /catch\(_codexOfflineArchiveListError\)\{_codexOfflineArchiveListFailed=!0\}return _codexOfflineArchiveListFailed&&i\.length===0\?\(globalThis\.__codexOfflineArchivedThreadsCache\?\?i\):\(globalThis\.__codexOfflineArchivedThreadsCache=i,i\)\}/,
-  );
-  assert.match(result.content, /\/\*codex-offline:archived-threads-partial-list\*\/\/\*codex-offline:archived-threads-cache-fallback\*\//);
+  assert.equal(patchArchivedThreadsPartialList(retired).patched, false);
 });
 
 test("26.825 patcher keeps only current Settings and Worktree resolver shapes", () => {
@@ -1081,7 +1109,7 @@ test("26.825 verifier rejects a disabled quoted shared node_repl config", () => 
   assert.doesNotMatch(enabledFixture, currentDisabledRe);
 });
 
-test("26.1002 archived settings keeps local errors separate from cloud task errors", () => {
+test("26.1007 archived settings keeps only the local archive error in isError", () => {
   const patchSource = sourceSlice(
     "  function patchArchivedSettingsOfflineVisibility(content) {",
     "\n  const BUNDLED_BROWSER_PLUGINS_PATCH_MARKER =",
@@ -1090,30 +1118,34 @@ test("26.1002 archived settings keeps local errors separate from cloud task erro
     "ARCHIVED_SETTINGS_OFFLINE_LOCAL_VISIBILITY_PATCH_MARKER",
     `"use strict";\n${patchSource}\nreturn patchArchivedSettingsOfflineVisibility;`,
   )("/*codex-offline:archived-settings-offline-local-visibility*/");
-  // 26.928 inlined the isError prop and added the durable-host connection
-  // status as another cloud term after the local query terms; 26.1002 follows
-  // it with a dedicated ChatGPT archive error prop and retry callback.
+  // 26.1007 moved the local and durable-host archive errors into their own
+  // props, leaving only the cloud-task and ChatGPT-conversation terms in
+  // the combined isError.
   const fixture =
-    "(0,Q.jsx)(gn,{archivedChats:W,backSlot:n,projects:H,hostId:i,localChatsAvailable:l,hasNextPage:G||K," +
-    "isLoading:W.length===0&&(l&&(v.some(cn)||g.includes(`durable`)&&(h===`connecting`||h===`restarting`))||S||E&&P||i===`local`&&oe)," +
-    "isFetchingNextPage:w||E&&L," +
-    "isError:W.length===0&&(l&&(v.some(sn)||g.includes(`durable`)&&(h===`disconnected`||h===`error`))||y==null&&T||E&&j==null&&R)," +
-    "chatGptArchiveError:E&&R?te:null,onRetryChatGptArchive:q,onLoadNextPage:J},`${i}:${l}:${o??``}`)}" +
-    "function gn(e){let t=(0,kn.c)(131),{archivedChats:n,backSlot:r,projects:i,hostId:a,localChatsAvailable:s," +
-    "hasNextPage:u,isLoading:d,isFetchingNextPage:p,isError:m,chatGptArchiveError:h,onRetryChatGptArchive:g,onLoadNextPage:_}=e}";
+    "(0,Q.jsx)(wn,{archivedChats:G,backSlot:n,projects:U,hostId:i,localChatsAvailable:f," +
+    "isLocalArchiveFetching:f&&me,isLocalArchiveError:f&&he," +
+    "isDurableArchiveFetching:f&&S[1]!=null&&(S[1].isFetching||y===`connecting`||y===`restarting`)," +
+    "isDurableArchiveError:f&&S[1]!=null&&(S[1].isError||y===`disconnected`||y===`error`)," +
+    "onRetryLocalArchive:K,onRetryDurableArchive:be,hasNextPage:_e||ye," +
+    "isLoading:G.length===0&&(E||M&&re||i===`local`&&fe),isFetchingNextPage:O||M&&ae," +
+    "isError:G.length===0&&(C==null&&A||M&&L==null&&oe)," +
+    "chatGptArchiveError:M&&oe?z:null,onRetryChatGptArchive:xe,onLoadNextPage:Se},`${i}:${f}:${o??``}`)}" +
+    "function wn(e){let n=(0,Ln.c)(136),{archivedChats:r,isLocalArchiveError:u,isError:C,chatGptArchiveError:w}=e}";
 
   const result = patchArchivedSettingsOfflineVisibility(fixture);
   assert.equal(result.patched, true);
   assert.match(
     result.content,
-    /isError:W\.length===0&&l&&v\.some\(sn\)\/\*codex-offline:archived-settings-offline-local-visibility\*\/,chatGptArchiveError:E&&R\?te:null,onRetryChatGptArchive:q,onLoadNextPage:J/,
+    /isError:G\.length===0&&f&&he\/\*codex-offline:archived-settings-offline-local-visibility\*\/,chatGptArchiveError:M&&oe\?z:null,/,
   );
-  assert.ok(!result.content.includes("y==null&&T"));
-  assert.ok(!result.content.includes("E&&j==null&&R)"));
-  assert.ok(!result.content.includes("h===`disconnected`"));
-  // The loading state and the destructured component props stay untouched.
-  assert.ok(result.content.includes("h===`connecting`||h===`restarting`"));
-  assert.ok(result.content.includes("isError:m,chatGptArchiveError:h,"));
+  assert.ok(!result.content.includes("C==null&&A"));
+  assert.ok(!result.content.includes("M&&L==null&&oe"));
+  // The per-source error props, loading state and destructured props stay untouched.
+  assert.ok(result.content.includes("isLocalArchiveError:f&&he,"));
+  assert.ok(result.content.includes("S[1].isError||y===`disconnected`||y===`error`"));
+  assert.ok(result.content.includes("isLoading:G.length===0&&(E||M&&re||i===`local`&&fe)"));
+  assert.ok(result.content.includes("isError:C,chatGptArchiveError:w"));
+  assert.equal(patchArchivedSettingsOfflineVisibility(result.content).alreadyCorrect, true);
 });
 
 test("26.810 archived settings ignores both cloud archive errors offline", () => {

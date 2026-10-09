@@ -2465,12 +2465,12 @@ try {
     return { content: next, alreadyCorrect: false, patched: next !== content };
   }
   // 26.831 moved archived-thread loading into the data-controls component.
-  // 26.928 inlined the loader as a React Query `queryFn` with an explicit
-  // abort signal and a pre-bound app-server request, so the anchor now starts
-  // at `queryFn:async` and keeps the exact `throwIfAborted` sequencing; an
-  // upstream rewrite still fails closed.
+  // 26.1007 turned the loader into an async generator that yields each
+  // `thread/list` page to a React Query streamed query (one per host), so the
+  // anchor is the generator itself with its exact `throwIfAborted`/`yield`
+  // sequencing; an upstream rewrite still fails closed.
   const ARCHIVED_THREADS_DATA_CONTROLS_CURRENT_RE =
-    /queryFn:async (?<ctx>[A-Za-z_$][\w$]*)=>\{let\{signal:(?<signal>[A-Za-z_$][\w$]*)\}=\k<ctx>,(?<send>[A-Za-z_$][\w$]*)=(?<sendInit>[A-Za-z_$][\w$]*\([A-Za-z_$][\w$]*,[A-Za-z_$][\w$]*\)),(?<threads>[A-Za-z_$][\w$]*)=\[\],(?<seen>[A-Za-z_$][\w$]*)=new Set,(?<cursor>[A-Za-z_$][\w$]*)=null;do\{\k<signal>\.throwIfAborted\(\);let (?<page>[A-Za-z_$][\w$]*)=await \k<send>\.sendRequest\(`thread\/list`,\{archived:!0,cursor:\k<cursor>,limit:100,modelProviders:null,sortKey:`updated_at`,sourceKinds:(?<sourceKinds>[A-Za-z_$][\w$]*),useStateDbOnly:!0\},\{priority:`background`,source:`thread_list`\}\);if\(\k<signal>\.throwIfAborted\(\),\k<threads>\.push\(\.\.\.\k<page>\.data\),\k<cursor>=\k<page>\.nextCursor,\k<cursor>!=null&&\k<seen>\.has\(\k<cursor>\)\)throw Error\(`App Server repeated an archived thread list cursor`\);\k<cursor>!=null&&\k<seen>\.add\(\k<cursor>\)\}while\(\k<cursor>!=null\);return \k<threads>\}/;
+    /async function\*(?<fn>[A-Za-z_$][\w$]*)\((?<client>[A-Za-z_$][\w$]*),(?<host>[A-Za-z_$][\w$]*),(?<signal>[A-Za-z_$][\w$]*)\)\{let (?<send>[A-Za-z_$][\w$]*)=(?<sendFn>[A-Za-z_$][\w$]*)\(\k<client>,\k<host>\),(?<seen>[A-Za-z_$][\w$]*)=new Set,(?<cursor>[A-Za-z_$][\w$]*)=null;do\{\k<signal>\.throwIfAborted\(\);let (?<page>[A-Za-z_$][\w$]*)=await \k<send>\.sendRequest\(`thread\/list`,\{archived:!0,cursor:\k<cursor>,limit:100,modelProviders:null,sortKey:`updated_at`,sourceKinds:(?<sourceKinds>[A-Za-z_$][\w$]*),useStateDbOnly:!0\},\{priority:`background`,source:`thread_list`\}\);if\(\k<signal>\.throwIfAborted\(\),yield \k<page>\.data,\k<cursor>=\k<page>\.nextCursor,\k<cursor>!=null&&\k<seen>\.has\(\k<cursor>\)\)throw Error\(`App Server repeated an archived thread list cursor`\);\k<cursor>!=null&&\k<seen>\.add\(\k<cursor>\)\}while\(\k<cursor>!=null\)\}/;
   function archivedThreadsReturnExpression(archived, failed, threads) {
     return `${archived}?(${failed}&&${threads}.length===0?` +
       `(globalThis.__codexOfflineArchivedThreadsCache??${threads}):` +
@@ -2480,25 +2480,32 @@ try {
     let next = content.replace(
         ARCHIVED_THREADS_DATA_CONTROLS_CURRENT_RE,
         (_match, ...args) => {
-          const { ctx, signal, send, sendInit, threads, seen, cursor, page, sourceKinds } =
+          const { fn, client, host, signal, send, sendFn, seen, cursor, page, sourceKinds } =
             args.at(-1);
           const failed = '_codexOfflineArchiveListFailed';
+          const threads = '_codexOfflineArchivedThreads';
+          const cache = '_codexOfflineArchivedThreadsCache';
+          // Pages already yielded stay in the streamed query; a failure is
+          // recorded instead of rethrown (aborts still propagate), and the last
+          // complete list for this host is replayed only when nothing arrived.
           return (
-            `queryFn:async ${ctx}=>{let{signal:${signal}}=${ctx},${send}=${sendInit},` +
-            `${threads}=[],${seen}=new Set,${cursor}=null,${failed}=!1;` +
+            `async function*${fn}(${client},${host},${signal}){` +
+            `let ${send}=${sendFn}(${client},${host}),${seen}=new Set,${cursor}=null,` +
+            `${failed}=!1,${threads}=[];` +
             `try{do{${signal}.throwIfAborted();let ${page}=await ${send}.sendRequest(` +
             `\`thread/list\`,{archived:!0,cursor:${cursor},limit:100,modelProviders:null,` +
             `sortKey:\`updated_at\`,sourceKinds:${sourceKinds},useStateDbOnly:!0},` +
             `{priority:\`background\`,source:\`thread_list\`});` +
-            `if(${signal}.throwIfAborted(),${threads}.push(...${page}.data),` +
+            `if(${signal}.throwIfAborted(),${threads}.push(...${page}.data),yield ${page}.data,` +
             `${cursor}=${page}.nextCursor,` +
             `${cursor}!=null&&${seen}.has(${cursor}))throw Error(` +
             `\`App Server repeated an archived thread list cursor\`);` +
             `${cursor}!=null&&${seen}.add(${cursor})}while(${cursor}!=null)}` +
-            `catch(_codexOfflineArchiveListError){${failed}=!0}` +
-            `return ${failed}&&${threads}.length===0?` +
-            `(globalThis.__codexOfflineArchivedThreadsCache??${threads}):` +
-            `(globalThis.__codexOfflineArchivedThreadsCache=${threads},${threads})}` +
+            `catch(_codexOfflineArchiveListError){if(${signal}.aborted)throw _codexOfflineArchiveListError;${failed}=!0}` +
+            `let ${cache}=globalThis.__codexOfflineArchivedThreadsCache??={};` +
+            `${failed}&&${threads}.length===0?` +
+            `${cache}[${host}]!=null&&(yield ${cache}[${host}]):` +
+            `${cache}[${host}]=${threads}}` +
             ARCHIVED_THREADS_PARTIAL_LIST_PATCH_MARKER +
             ARCHIVED_THREADS_CACHE_FALLBACK_PATCH_MARKER
           );
@@ -2569,28 +2576,27 @@ try {
       }
     }
 
-    // 26.928 inlined the combined isError prop and added the durable-host
-    // connection status (`disconnected`/`error`) as another cloud term; the
-    // archive-source queries in `queries.some(...)` still only cover local
-    // sources, so keeping items-empty + local-available + local query error
-    // preserves the offline semantics. 26.1002 keeps that expression and
-    // follows it with a dedicated `chatGptArchiveError` prop (with its own
-    // retry) instead of `onLoadNextPage`.
+    // 26.1007 moved the local (and durable-host) archive errors into their own
+    // `isLocalArchiveError`/`isDurableArchiveError` props, leaving only the
+    // cloud-task and ChatGPT-conversation terms in the combined isError. Swap
+    // those network terms for the local error expression passed a few props
+    // earlier, so the offline semantics stay items-empty + local query error.
     const currentErrorPropRe =
-      /isError:(?<items>[A-Za-z_$][\w$]*)\.length===0&&\((?<localAvail>[A-Za-z_$][\w$]*)&&\((?<queries>[A-Za-z_$][\w$]*)\.some\((?<errFn>[A-Za-z_$][\w$]*)\)\|\|[A-Za-z_$][\w$]*\.includes\(`durable`\)&&\([A-Za-z_$][\w$]*===`disconnected`\|\|[A-Za-z_$][\w$]*===`error`\)\)\|\|[A-Za-z_$][\w$]*==null&&[A-Za-z_$][\w$]*\|\|[A-Za-z_$][\w$]*&&[A-Za-z_$][\w$]*==null&&[A-Za-z_$][\w$]*\)(?=,chatGptArchiveError:)/;
+      /isLocalArchiveError:(?<localError>[A-Za-z_$][\w$]*&&[A-Za-z_$][\w$]*),(?<between>[^]{0,600}?)isError:(?<items>[A-Za-z_$][\w$]*)\.length===0&&\([A-Za-z_$][\w$]*==null&&[A-Za-z_$][\w$]*\|\|[A-Za-z_$][\w$]*&&[A-Za-z_$][\w$]*==null&&[A-Za-z_$][\w$]*\)(?=,chatGptArchiveError:)/;
     const currentErrorPropMatch = currentErrorPropRe.exec(
       content.slice(archivedPanelAnchor, archivedPanelAnchor + 1200),
     );
     if (!currentErrorPropMatch) {
       return { content, alreadyCorrect: false, patched: false };
     }
-    const { items, localAvail, queries, errFn } = currentErrorPropMatch.groups;
+    const { localError, between, items } = currentErrorPropMatch.groups;
     const absoluteStart = archivedPanelAnchor + currentErrorPropMatch.index;
     const absoluteEnd = absoluteStart + currentErrorPropMatch[0].length;
     return {
       content:
         content.slice(0, absoluteStart) +
-        `isError:${items}.length===0&&${localAvail}&&${queries}.some(${errFn})` +
+        `isLocalArchiveError:${localError},${between}` +
+        `isError:${items}.length===0&&${localError}` +
         ARCHIVED_SETTINGS_OFFLINE_LOCAL_VISIBILITY_PATCH_MARKER +
         content.slice(absoluteEnd),
       alreadyCorrect: false,
