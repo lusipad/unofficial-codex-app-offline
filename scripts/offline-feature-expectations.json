@@ -1,0 +1,145 @@
+{
+  "$comment": "Expectations for scripts/offline-feature-probe.mjs. Slugs are the settings panel ids (data-settings-panel-slug), stable across Store versions. mode: the probe launches with an API-key auth.json and no ChatGPT login, network blocked. expectVisible/expectHidden were confirmed in the UI; notes give the label and reason for sections hidden in this mode, taken from the renderer's own visibility rules (use-visible-settings-sections, 26.1007). Reasons are user-facing: keep gate ids and internals out of them (record those in CHANGELOG/docs instead).",
+  "mode": "api-key",
+  "alwaysVisible": [
+    "general-settings",
+    "appearance",
+    "keyboard-shortcuts"
+  ],
+  "expectVisible": [
+    "appshots",
+    "computer-use",
+    "pets",
+    "worktrees",
+    "plugins-settings",
+    "browser-use"
+  ],
+  "expectHidden": [
+    "billing",
+    "cloud-settings",
+    "codex-cloud",
+    "debug"
+  ],
+  "notes": {
+    "notifications": {
+      "label": "通知",
+      "reason": "需要登录 ChatGPT 账号"
+    },
+    "import": {
+      "label": "导入",
+      "reason": "原因待确认"
+    },
+    "profile": {
+      "label": "个人资料",
+      "reason": "需要 ChatGPT 账号资料"
+    },
+    "security": {
+      "label": "账户安全与登录",
+      "reason": "上游当前对所有用户隐藏"
+    },
+    "account": {
+      "label": "账户",
+      "reason": "需要登录 ChatGPT 账号"
+    },
+    "data-controls": {
+      "label": "数据管理",
+      "reason": "需要登录 ChatGPT 账号；本地归档会话在「Archived chats」中管理"
+    },
+    "ads-controls": {
+      "label": "广告设置",
+      "reason": "ChatGPT 账号功能"
+    },
+    "parental-controls": {
+      "label": "家长控制",
+      "reason": "ChatGPT 账号功能"
+    },
+    "trusted-contact": {
+      "label": "可信联系人",
+      "reason": "ChatGPT 账号功能"
+    },
+    "safety": {
+      "label": "安全",
+      "reason": "ChatGPT 账号功能"
+    },
+    "usage": {
+      "label": "使用情况和计费",
+      "reason": "需要 ChatGPT 账号的额度信息"
+    },
+    "billing": {
+      "label": "账单",
+      "reason": "上游当前对所有用户隐藏"
+    },
+    "analytics": {
+      "label": "分析",
+      "reason": "需要 ChatGPT 企业/团队工作区"
+    },
+    "consumer-view": {
+      "label": "消费者使用情况分析（内部）",
+      "reason": "OpenAI 内部页面"
+    },
+    "usage-code-review": {
+      "label": "代码审查用量",
+      "reason": "需要 ChatGPT 账号计划"
+    },
+    "debug": {
+      "label": "调试",
+      "reason": "内部调试页，离线包刻意保持关闭"
+    },
+    "agreements": {
+      "label": "协议",
+      "reason": "需要登录 ChatGPT 账号"
+    },
+    "teams": {
+      "label": "团队",
+      "reason": "需要 ChatGPT 工作区账号"
+    },
+    "file-type-handlers": {
+      "label": "文件类型处理",
+      "reason": "安装了提供文件处理入口的插件后才显示"
+    },
+    "passwords": {
+      "label": "密码",
+      "reason": "ChatGPT 账号功能"
+    },
+    "chronicle": {
+      "label": "电脑历史记录",
+      "reason": "仅 macOS"
+    },
+    "codex-micro": {
+      "label": "Codex Micro",
+      "reason": "检测到过 Codex Micro 硬件后才显示"
+    },
+    "mcp-settings": {
+      "label": "MCP 服务器",
+      "reason": "已合并到「插件」页面"
+    },
+    "skills-settings": {
+      "label": "技能",
+      "reason": "已合并到「插件」页面"
+    },
+    "cloud-computer": {
+      "label": "云电脑",
+      "reason": "需要登录 ChatGPT 账号"
+    },
+    "extension": {
+      "label": "浏览器扩展",
+      "reason": "上游当前对所有用户隐藏"
+    },
+    "cloud-settings": {
+      "label": "云端偏好设置",
+      "reason": "需要 ChatGPT 云端"
+    },
+    "codex-cloud": {
+      "label": "Codex 云端",
+      "reason": "需要 ChatGPT 云端访问"
+    },
+    "cloud-environments": {
+      "label": "云环境",
+      "reason": "需要 ChatGPT 云端"
+    },
+    "environments": {
+      "label": "云端环境",
+      "reason": "开启云端环境时替代本地「环境」；离线显示本地「环境」"
+    }
+  }
+}

@@ -2178,6 +2178,18 @@ console.log(`[verify-offline-package] Verified app.asar patches in ${path.basena
         if ($LASTEXITCODE -ne 0) {
             throw "Desktop direct-launch offline smoke failed with exit code $LASTEXITCODE."
         }
+
+        # Record which Settings sections the package shows offline; the probe
+        # checks itself and the UI-confirmed expectations before writing.
+        $featureReportDir = Join-Path (Join-Path (Split-Path $artifactRoot -Parent) 'reports') $metadata.version
+        node (Join-Path $repoRoot 'scripts\offline-feature-probe.mjs') `
+            --portable-root $portableRoot `
+            --out-dir $featureReportDir `
+            --work-root (Join-Path $tempRoot 'feature-probe') `
+            --version $metadata.version
+        if ($LASTEXITCODE -ne 0) {
+            throw "Offline feature probe failed with exit code $LASTEXITCODE."
+        }
     }
 }
 finally {

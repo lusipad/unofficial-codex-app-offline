@@ -315,6 +315,17 @@ jobs:
             $lines.Add("Built at: `` $generatedAt ``")
           }
 
+          # Offline feature changes written by the verifier's feature probe; the
+          # file is empty when the visible Settings sections did not change.
+          if (-not $skipBuild -and $version) {
+            $artifactDir = '${{ steps.build.outputs.artifact_dir }}'
+            $featureSnippet = Join-Path (Join-Path (Split-Path $artifactDir -Parent) 'reports') (Join-Path $version 'offline-features-release.md')
+            if ((Test-Path $featureSnippet) -and ((Get-Item $featureSnippet).Length -gt 0)) {
+              $lines.Add("")
+              $lines.Add((Get-Content -Path $featureSnippet -Raw -Encoding UTF8).TrimEnd())
+            }
+          }
+
           if ($version) {
             try {
               $changelogJson = node ./scripts/get-store-app-changelog.mjs --version $version --recent-app-limit 5
