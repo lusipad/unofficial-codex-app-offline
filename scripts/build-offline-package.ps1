@@ -1156,6 +1156,25 @@ if ($LASTEXITCODE -ne 0) {
 # Patch app.asar so Codex runs correctly outside the MSIX container.
 $patchScript = Join-Path $scriptRoot 'patch-app-asar.mjs'
 $stagedAppDir = Join-Path $internalRoot 'app'
+
+# Inventory the Statsig ids the unpatched bundle reads (diagnostic only). It runs
+# before patching so a drifted build still leaves a report behind, and it lives
+# outside the artifact directory, which is published as release assets.
+$gateReportDir = Join-Path (Join-Path $outputRoot 'reports') $version
+Write-BuildTrace 'Writing gate report.'
+$gateReportArgs = @(
+    (Join-Path $scriptRoot 'gate-report.mjs'),
+    '--asar', (Join-Path $stagedAppDir 'resources\app.asar'),
+    '--out-dir', $gateReportDir,
+    '--version', $version
+)
+if (-not [string]::IsNullOrWhiteSpace($env:GITHUB_STEP_SUMMARY)) {
+    $gateReportArgs += @('--summary', $env:GITHUB_STEP_SUMMARY)
+}
+node @gateReportArgs
+if ($LASTEXITCODE -ne 0) {
+    Write-Warning 'gate-report.mjs failed; continuing without a gate report.'
+}
 Write-BuildTrace 'Patching app.asar for standalone launch.'
 node $patchScript --app-dir $stagedAppDir
 if ($LASTEXITCODE -ne 0) {

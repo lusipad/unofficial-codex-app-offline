@@ -42,6 +42,7 @@ Codex Offline - 离线版 Codex AI 编程助手 Web Gateway。
 - 主程序内嵌 asar 完整性资源（`ELECTRONASAR`）重写：`scripts/asar-integrity-resource.cjs`
 - 离线包构建编排：`scripts/build-offline-package.ps1`
 - 离线包完整性验证：`scripts/verify-offline-package.ps1`
+- Statsig gate 清单与离线判定报告（新版本审阅 denylist/override 的入口）：`scripts/gate-report.mjs`、基线 `docs/gate-baseline.json`，说明见 [`docs/gate-report.md`](docs/gate-report.md)
 - 安装器模板：`installer/CodexOffline.iss.tpl`
 - 安装、升级与清理逻辑：`scripts/setup-codex-offline.ps1`
 - 构建和安装回归测试：`scripts/test/`
