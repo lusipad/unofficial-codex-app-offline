@@ -80,7 +80,7 @@ const STATSIG_DEFAULT_FEATURE_OVERRIDES = Object.freeze({
 // checkGate wrapper and the jotai gate atom (default-on-gate-atom). Gates listed
 // here keep their upstream (offline: false) value on both.
 //
-// Reviewed against the 26.924.2738.0 renderer (docs/renderer-gate-atom-default-on.md).
+// Reviewed against the 26.924.2738.0 renderer (docs/architecture/renderer-gate-atom-default-on.md).
 // It holds every gate the atom path read while offline-closed that is either
 // ChatGPT/cloud-only (billing, GPTs, Library, Sites, maps, ads, voice, mobile,
 // announcements), onboarding/NUX, a plugin surface, telemetry, bound for the
@@ -318,7 +318,7 @@ const DESKTOP_ASAR_KNOWN_GATE_IDS = Object.freeze([
 //
 // `evidence` records why the entry is still here and against which Store
 // bundle that was established; `reverify` records what would settle it again.
-// See docs/superpowers/specs/2026-09-11-desktop-patch-boundary-design.md.
+// See docs/architecture/desktop-patch-boundary-design.md.
 const DESKTOP_ASAR_PATCHES = Object.freeze([
   Object.freeze({
     marker: "/*codex-offline:windows-app-contained-core-off*/",

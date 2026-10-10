@@ -89,4 +89,4 @@ Web Gateway 在代理 `fetch` 抛出异常时返回共享空结果；桌面端�
 - 当前官方 renderer 经补丁后不存在 `plugin-query-network-mode`、`plugin-cloud-fallback` 或各 `/ps/plugins/*` 查询函数改写。
 - 完整测试、包验证、app-server 启动和桌面直接启动均通过；生成同版本未发布安装包供试用。
 
-实施记录见 [implementation-notes-plugin-service-compat.md](implementation-notes-plugin-service-compat.md)。
+实施记录见 [plugin-service-compat.md](../implementation-notes/plugin-service-compat.md)。

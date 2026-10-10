@@ -181,14 +181,7 @@ pwsh -NoProfile -File ./scripts/build-offline-package.ps1
 
 ### 维护文档
 
-- [Gateway 与桌面补丁边界分析](docs/issue-59-gateway-vs-patch-analysis.md)
-- [方案 B 补丁迁移清单](docs/plan-b-patch-migration-inventory.md)
-- [离线 gate 策略重设计草案](docs/gate-redesign.md)
-- [Priority filter 与 Fast mode 实施记录](docs/implementation-notes-priority-filter-fast-mode.md)
-- [插件服务兼容迁移计划](docs/plugin-service-compat-migration-plan.md)
-- [插件服务兼容实施记录](docs/implementation-notes-plugin-service-compat.md)
-- [API/custom provider 模型目录](docs/models-api.md)
-- [Primary runtime 解压失败排查](docs/issue-108-primary-runtime-extract-failure.md)
+架构决策、实施记录、版本故障排查和维护工具说明的完整清单（含每篇的现行/历史状态）见 [docs/ 索引](docs/README.md)。
 
 ## 配置
 

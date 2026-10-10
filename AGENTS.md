@@ -42,14 +42,14 @@ Codex Offline - 离线版 Codex AI 编程助手 Web Gateway。
 - 主程序内嵌 asar 完整性资源（`ELECTRONASAR`）重写：`scripts/asar-integrity-resource.cjs`
 - 离线包构建编排：`scripts/build-offline-package.ps1`
 - 离线包完整性验证：`scripts/verify-offline-package.ps1`
-- Statsig gate 清单与离线判定报告（新版本审阅 denylist/override 的入口）：`scripts/gate-report.mjs`、基线 `docs/gate-baseline.json`，说明见 [`docs/gate-report.md`](docs/gate-report.md)
-- 离线可见设置分区实测清单（验证器内运行，含金标准断言）：`scripts/offline-feature-probe.mjs`、期望与不可见原因 `scripts/offline-feature-expectations.json`，说明见 [`docs/offline-feature-probe.md`](docs/offline-feature-probe.md)
+- Statsig gate 清单与离线判定报告（新版本审阅 denylist/override 的入口）：`scripts/gate-report.mjs`、基线 `docs/baselines/gate-baseline.json`，说明见 [`docs/maintenance/gate-report.md`](docs/maintenance/gate-report.md)
+- 离线可见设置分区实测清单（验证器内运行，含金标准断言）：`scripts/offline-feature-probe.mjs`、期望与不可见原因 `scripts/offline-feature-expectations.json`，说明见 [`docs/maintenance/offline-feature-probe.md`](docs/maintenance/offline-feature-probe.md)
 - 安装器模板：`installer/CodexOffline.iss.tpl`
 - 安装、升级与清理逻辑：`scripts/setup-codex-offline.ps1`
 - 构建和安装回归测试：`scripts/test/`
-- 架构决策与版本兼容记录：`docs/`
-- Gateway 与桌面补丁边界分析：[`docs/issue-59-gateway-vs-patch-analysis.md`](docs/issue-59-gateway-vs-patch-analysis.md)
-- 插件服务兼容迁移：[`docs/plugin-service-compat-migration-plan.md`](docs/plugin-service-compat-migration-plan.md) 与 [`docs/implementation-notes-plugin-service-compat.md`](docs/implementation-notes-plugin-service-compat.md)
+- 架构决策、实施记录与故障排查：`docs/`（索引见 [`docs/README.md`](docs/README.md)）
+- Gateway 与桌面补丁边界分析：[`docs/architecture/issue-59-gateway-vs-patch-analysis.md`](docs/architecture/issue-59-gateway-vs-patch-analysis.md)
+- 插件服务兼容迁移：[`docs/architecture/plugin-service-compat-migration-plan.md`](docs/architecture/plugin-service-compat-migration-plan.md) 与 [`docs/implementation-notes/plugin-service-compat.md`](docs/implementation-notes/plugin-service-compat.md)
 
 ## 定位与修改流程
 
@@ -65,7 +65,7 @@ Codex Offline - 离线版 Codex AI 编程助手 Web Gateway。
 
 - 修改插件能力、方法映射或降级规则时，同步检查共享契约、Gateway 适配、桌面适配、静态补丁、包验证器和对应测试。共享规则只能有一个事实来源。
 - 修改功能 gate 或 bundle marker 时，同步检查 `capabilityContractData.cjs`、补丁脚本、构建脚本、验证器和 gate 测试。
-- 修复或关闭某个官方功能入口时，同步更新 `scripts/offline-feature-expectations.json`（`expectVisible`/`expectHidden` 与不可见原因），并用 `offline-feature-probe.mjs --promote` 重新生成 `docs/offline-features.{json,md}`；用户文档不得手工编辑。
+- 修复或关闭某个官方功能入口时，同步更新 `scripts/offline-feature-expectations.json`（`expectVisible`/`expectHidden` 与不可见原因），并用 `offline-feature-probe.mjs --promote` 重新生成 `docs/baselines/offline-features.json` 与 `docs/offline-features.md`；用户文档不得手工编辑。
 - 修改安装器 `[CustomMessages]` 的精确文案时，同步修改安装器模板、构建时 UTF-8 文案校验、离线包验证器和安装器测试。
 - `model_catalog_json` 必须保持为 `config.toml` 根级键，写在任何 `[table]` 之前。取消勾选或卸载时，只能删除安装器管理的 catalog 路径和文件，必须保留用户的 Provider、API Key 与其他配置。
 - 新增安装选项时，必须同时覆盖首次安装、重新安装时勾选、重新安装时取消勾选和卸载四条路径。
