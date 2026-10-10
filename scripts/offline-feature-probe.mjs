@@ -37,7 +37,7 @@ import { parseArgs } from 'node:util';
 const require = createRequire(import.meta.url);
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(scriptDir, '..');
-const BASELINE_PATH = path.join(repoRoot, 'docs', 'offline-features.json');
+const BASELINE_PATH = path.join(repoRoot, 'docs', 'baselines', 'offline-features.json');
 const USER_DOC_PATH = path.join(repoRoot, 'docs', 'offline-features.md');
 const MAIN_EXECUTABLE_NAME = 'ChatGPT.exe';
 const MAIN_WINDOW_URL = 'app://-/index.html';

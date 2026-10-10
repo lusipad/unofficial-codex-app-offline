@@ -1,6 +1,6 @@
 # Implementation notes — 插件服务兼容逻辑迁移
 
-Plan: [plugin-service-compat-migration-plan.md](plugin-service-compat-migration-plan.md)
+Plan: [plugin-service-compat-migration-plan.md](../architecture/plugin-service-compat-migration-plan.md)
 
 ## Decisions
 

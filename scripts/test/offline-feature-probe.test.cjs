@@ -152,7 +152,7 @@ test("release snippet lists only changes and collapses long lists", async () => 
 test("committed feature baseline and user document stay in sync", async () => {
   const fs = require("node:fs");
   const { renderUserDocument } = await loadProbe();
-  const baseline = require(path.join(repoRoot, "docs", "offline-features.json"));
+  const baseline = require(path.join(repoRoot, "docs", "baselines", "offline-features.json"));
   const doc = fs.readFileSync(path.join(repoRoot, "docs", "offline-features.md"), "utf8");
   assert.equal(doc, renderUserDocument(baseline), "regenerate with --promote instead of editing by hand");
   for (const section of baseline.groups.flatMap((group) => group.sections)) {

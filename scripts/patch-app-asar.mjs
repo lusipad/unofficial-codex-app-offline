@@ -51,7 +51,7 @@
  *    Migrated to init.cjs runtime interception + the generic
  *    patchDirectStatsigGateCalls(..., DESKTOP_ASAR_KNOWN_GATE_IDS) pass. The
  *    per-gate asar needles were removed; each gate id lives in init.cjs
- *    STATSIG_GATE_OVERRIDES. See docs/plan-b-patch-migration-inventory.md.
+ *    STATSIG_GATE_OVERRIDES. See docs/architecture/plan-b-patch-migration-inventory.md.
  *
  * 35. Enable Fast mode speed selector for offline builds
  *    The "Fast / Standard" speed selector button in the model picker is
@@ -3431,7 +3431,7 @@ try {
   // generic patchDirectStatsigGateCalls(..., DESKTOP_ASAR_KNOWN_GATE_IDS)
   // pass below. Every gate id lives in init.cjs STATSIG_GATE_OVERRIDES, so the
   // per-gate asar needles were removed. See
-  // docs/plan-b-patch-migration-inventory.md.
+  // docs/architecture/plan-b-patch-migration-inventory.md.
 
   // ── Enable the Fast mode speed selector for offline builds ─────────────
   //

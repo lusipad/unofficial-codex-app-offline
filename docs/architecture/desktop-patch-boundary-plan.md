@@ -8,7 +8,7 @@
 
 **Tech Stack:** Node.js（CommonJS 契约 + ESM 脚本）、`node:test`、PowerShell 5.1 构建/验证脚本、`@electron/asar`。
 
-**Spec:** `docs/superpowers/specs/2026-09-11-desktop-patch-boundary-design.md`
+**Spec:** `docs/architecture/desktop-patch-boundary-design.md`
 
 ## Global Constraints
 

@@ -36,7 +36,7 @@ minified 函数名每个版本都会变，所以读取函数是从 bundle 里学
 ## 新版本的审阅流程
 
 1. 看 **Changes since \<baseline\>**：
-   - **New ids**：判断默认开启是否合适。需要登录或云端的、引导页、遥测等，按 `docs/renderer-gate-atom-default-on.md` 的方法做界面 A/B 后再决定是否加入 denylist。
+   - **New ids**：判断默认开启是否合适。需要登录或云端的、引导页、遥测等，按 `docs/architecture/renderer-gate-atom-default-on.md` 的方法做界面 A/B 后再决定是否加入 denylist。
    - **No longer read**：对应的契约条目可能已经过时。
    - **Changed kind/name/surface**：id 可能被复用了。例如 26.1007 的 `1193530394` 从应用快照变成了实时语音配置。
 2. 看 **Contract entries to review**：
@@ -47,7 +47,7 @@ minified 函数名每个版本都会变，所以读取函数是从 bundle 里学
 3. 审阅完成后，更新基线：
 
 ```powershell
-node scripts/gate-report.mjs --asar <原始 app.asar> --version <x> --write-baseline docs/gate-baseline.json
+node scripts/gate-report.mjs --asar <原始 app.asar> --version <x> --write-baseline docs/baselines/gate-baseline.json
 ```
 
 基线只保存跨版本稳定的字段（id、种类、名称、所在层），每个 gate 一行，便于 diff 审阅。chunk 文件名带内容哈希，所以不写进基线。

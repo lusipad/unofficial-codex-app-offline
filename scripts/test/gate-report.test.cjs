@@ -111,7 +111,7 @@ test("gate report diff lists new, removed and repurposed ids against a baseline"
 });
 
 test("committed gate baseline parses and matches the report schema", async () => {
-  const baseline = require(path.join(repoRoot, "docs", "gate-baseline.json"));
+  const baseline = require(path.join(repoRoot, "docs", "baselines", "gate-baseline.json"));
   assert.equal(baseline.schemaVersion, 1);
   assert.ok(baseline.gates.length > 0);
   for (const gate of baseline.gates) {

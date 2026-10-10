@@ -1,6 +1,6 @@
 # 离线功能探针（offline-feature-probe）
 
-`scripts/offline-feature-probe.mjs` 记录离线包实际显示了哪些官方设置分区，用来回答“离线版里哪些功能能用”。gate 报告（`docs/gate-report.md`）是维护者排查用的；这份清单面向用户，以界面上实际显示的内容为准，不做推断。
+`scripts/offline-feature-probe.mjs` 记录离线包实际显示了哪些官方设置分区，用来回答“离线版里哪些功能能用”。gate 报告（`docs/maintenance/gate-report.md`）是维护者排查用的；这份清单面向用户，以界面上实际显示的内容为准，不做推断。
 
 ## 方法
 
@@ -40,7 +40,7 @@ node scripts/offline-feature-probe.mjs --portable-root <便携包根目录> --ou
 
 ## 基线、用户文档与 Release 说明
 
-- **基线**：`docs/offline-features.json` 是维护者审阅过的状态。面向用户的 [`docs/offline-features.md`](offline-features.md) 由它生成，不要手工编辑；测试会检查两者是否一致。
+- **基线**：`docs/baselines/offline-features.json` 是维护者审阅过的状态。面向用户的 [`docs/offline-features.md`](../offline-features.md) 由它生成，不要手工编辑；测试会检查两者是否一致。
 - **差异**：每次运行都会和基线对比。结果写入报告的“相对 X 的变化”一节，同时生成 `offline-features-release.md`：
   - 只有通过全部检查的运行才会生成这个文件；
   - 没有变化时内容为空，Release 说明里不会出现这一段；

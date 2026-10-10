@@ -19,7 +19,7 @@
  *
  * Usage:
  *   node scripts/gate-report.mjs --asar <app.asar> --out-dir <dir>
- *        [--baseline docs/gate-baseline.json] [--version <x>]
+ *        [--baseline docs/baselines/gate-baseline.json] [--version <x>]
  *        [--write-baseline <path>] [--summary <file to append markdown to>]
  */
 
@@ -364,7 +364,7 @@ function main() {
     },
   });
   if (!values.asar) throw new Error('--asar is required');
-  const baselinePath = values.baseline ?? path.join(repoRoot, 'docs', 'gate-baseline.json');
+  const baselinePath = values.baseline ?? path.join(repoRoot, 'docs', 'baselines', 'gate-baseline.json');
   const baseline = fs.existsSync(baselinePath) ? JSON.parse(fs.readFileSync(baselinePath, 'utf8')) : null;
   const { report, diff, markdown } = generateGateReport({
     files: readAsarFiles(values.asar),
