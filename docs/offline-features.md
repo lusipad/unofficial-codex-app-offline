@@ -15,7 +15,7 @@
 | --- | --- | --- |
 | 常规 (`general-settings`) | ✅ |  |
 | 通知 (`notifications`) | — | 需要登录 ChatGPT 账号 |
-| 导入 (`import`) | — | 原因待确认 |
+| 导入 (`import`) | ✅ |  |
 | 个人资料 (`profile`) | — | 需要 ChatGPT 账号资料 |
 | 外观 (`appearance`) | ✅ |  |
 | 账户安全与登录 (`security`) | — | 上游当前对所有用户隐藏 |

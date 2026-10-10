@@ -100,6 +100,11 @@ const STATSIG_DEFAULT_FEATURE_OVERRIDES = Object.freeze({
 //   电脑操控 surface) and mirrors it into `BROWSER_USE_TINYSKY_ENABLED`. Denying it
 //   hides the new computer-control entry while the legacy computer-use plugin
 //   keeps working; verified against the 26.928.21956 bundle.
+//
+// Inverted kill switches (true DISABLES a local feature; keep the upstream offline false):
+// - 2373428540: external agent import (Claude Code etc.) — checkGate seeds the atom
+//   that hides Settings → Import and short-circuits the import flows, command palette
+//   entry and onboarding import (26.1007). Found via the offline feature probe.
 const DESKTOP_GATE_DENYLIST = Object.freeze([
   "131713", "8119044", "13323501", "60299493", "67629032", "68267662", "85924660", "87569714",
   "88729972", "89600278", "93596649", "107580212", "110872417", "131701769", "140487509", "183402703",
@@ -126,7 +131,7 @@ const DESKTOP_GATE_DENYLIST = Object.freeze([
   "2083739836", "2107644292", "2125321167", "2126931955", "2128165686", "2133596510", "2138468235", "2144562623",
   "2148883851", "2151067420", "2160290604", "2165992955", "2186196265", "2196156952", "2199204045", "2199741681",
   "2220834113", "2221440816", "2248542797", "2251074964", "2272277762", "2277470408", "2303743841", "2305612616",
-  "2327881676", "2337831332", "2347841422", "2369306882", "2369709783", "2401070674", "2404437118", "2413345355",
+  "2327881676", "2337831332", "2347841422", "2369306882", "2369709783", "2373428540", "2401070674", "2404437118", "2413345355",
   "2423536643", "2437304967", "2458863263", "2460218704", "2465577016", "2468797591", "2470976080", "2484414311",
   "2493948789", "2513446768", "2521882900", "2533914996", "2534086513", "2537605702", "2546594521", "2561885426",
   "2562735250", "2619337129", "2620175081", "2656155954", "2658206886", "2664309699", "2673474834", "2679405192",
