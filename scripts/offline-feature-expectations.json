@@ -12,7 +12,8 @@
     "pets",
     "worktrees",
     "plugins-settings",
-    "browser-use"
+    "browser-use",
+    "import"
   ],
   "expectHidden": [
     "billing",
@@ -24,10 +25,6 @@
     "notifications": {
       "label": "通知",
       "reason": "需要登录 ChatGPT 账号"
-    },
-    "import": {
-      "label": "导入",
-      "reason": "原因待确认"
     },
     "profile": {
       "label": "个人资料",

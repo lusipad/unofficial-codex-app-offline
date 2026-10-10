@@ -261,6 +261,8 @@ test("gate denylist never closes a gate the offline contract opens", () => {
   // for unified-computer-use plugin availability (the computer-control surface) and
   // mirrors it into BROWSER_USE_TINYSKY_ENABLED.
   assert.equal(denylist.includes("1892382740"), false, "browserUseTinysky gate");
+  // Inverted kill switch: opening it disables external agent import (Settings → Import).
+  assert.equal(denylist.includes("2373428540"), true, "external agent import kill switch");
   // Opening this one starts the durable host connection, which needs a ChatGPT sign-in.
   assert.equal(denylist.includes("375130565"), true);
 });

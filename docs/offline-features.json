@@ -20,9 +20,9 @@
         },
         {
           "slug": "import",
-          "visible": false,
+          "visible": true,
           "label": "导入",
-          "reason": "原因待确认"
+          "reason": null
         },
         {
           "slug": "profile",
