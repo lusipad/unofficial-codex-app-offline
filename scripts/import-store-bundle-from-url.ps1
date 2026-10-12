@@ -4,7 +4,10 @@ param(
     [string]$Destination = 'build/source-app',
     [string]$PackageFamilyName = 'OpenAI.Codex_2p2nqsd0c76g0',
     [string]$DownloadedFileName = '',
-    [string]$ExpectedSha1 = ''
+    [string]$ExpectedSha1 = '',
+    [ValidateSet('rg_adguard', 'official_cdn')][string]$SourceMode = 'rg_adguard',
+    [string]$ExpectedEtag = '',
+    [long]$ExpectedSize = 0
 )
 
 Set-StrictMode -Version Latest
@@ -106,6 +109,28 @@ try {
         }
     }
 
+    # The official CDN publishes no file hash; the resolver records the blob ETag
+    # and size instead, so re-check both here to prove the download is the same
+    # blob the resolver saw. The MSIX itself stays Store-signed either way.
+    if (-not [string]::IsNullOrWhiteSpace($ExpectedEtag)) {
+        $headResponse = Invoke-WebRequest -Uri $BundleUrl -Method Head
+        $actualEtag = $headResponse.Headers['ETag']
+        if ($actualEtag -is [array]) {
+            $actualEtag = $actualEtag[0]
+        }
+        if ([string]::IsNullOrWhiteSpace([string]$actualEtag) -or
+            -not [string]::Equals(([string]$actualEtag).Trim(), $ExpectedEtag.Trim(), [System.StringComparison]::OrdinalIgnoreCase)) {
+            throw "Official CDN package ETag mismatch. Expected $ExpectedEtag but the server now reports $actualEtag"
+        }
+    }
+
+    if ($ExpectedSize -gt 0) {
+        $actualSize = (Get-Item -LiteralPath $downloadPath).Length
+        if ($actualSize -ne $ExpectedSize) {
+            throw "Downloaded package size mismatch. Expected $ExpectedSize bytes but got $actualSize"
+        }
+    }
+
     $downloadExtension = [System.IO.Path]::GetExtension($downloadPath).ToLowerInvariant()
     $packageArchivePath = $downloadPath
 
@@ -158,11 +183,12 @@ try {
         exportedAt = (Get-Date).ToString('o')
         exportedAppPath = 'app'
         manifestPath = 'metadata/AppxManifest.xml'
-        sourceMode = 'rg_adguard'
+        sourceMode = $SourceMode
         sourceBundleUrl = $BundleUrl
         sourceFileName = $downloadName
         sourcePackageArchivePath = "metadata/$preservedArchiveName"
         sourceSha1 = if ([string]::IsNullOrWhiteSpace($ExpectedSha1)) { $null } else { $ExpectedSha1.ToLowerInvariant() }
+        sourceEtag = if ([string]::IsNullOrWhiteSpace($ExpectedEtag)) { $null } else { $ExpectedEtag }
     }
 
     $metadata | ConvertTo-Json -Depth 6 | Set-Content -Path (Join-Path $metadataPath 'package-metadata.json') -Encoding UTF8

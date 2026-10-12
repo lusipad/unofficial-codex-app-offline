@@ -278,6 +278,33 @@ function Resolve-AppSourceTarget {
 
             return $resolved
         }
+        'official_cdn' {
+            $resolverArgs = @('--package-family-name', [string]$Config.appSource.packageFamilyName)
+            $cdnUrl = [string](Get-OptionalProperty -Object $Config.appSource -Name 'cdnUrl')
+            if (-not [string]::IsNullOrWhiteSpace($cdnUrl)) {
+                $resolverArgs += @('--url', $cdnUrl)
+            }
+
+            $resolverJson = node (Join-Path $ScriptRoot 'resolve-official-cdn-url.mjs') @resolverArgs
+            if ($LASTEXITCODE -ne 0) {
+                throw 'The official CDN resolver failed.'
+            }
+
+            $resolved = $resolverJson | ConvertFrom-Json
+            $resolvedFamily = [string](Get-OptionalProperty -Object $resolved -Name 'packageFamilyName')
+            $resolvedVersion = [string](Get-OptionalProperty -Object $resolved -Name 'version')
+            $selected = Get-OptionalProperty -Object $resolved -Name 'selected'
+            $selectedFileName = [string](Get-OptionalProperty -Object $selected -Name 'fileName')
+            $selectedEtag = [string](Get-OptionalProperty -Object $selected -Name 'etag')
+            if (-not [string]::Equals($resolvedFamily, [string]$Config.appSource.packageFamilyName, [System.StringComparison]::OrdinalIgnoreCase) -or
+                [string]::IsNullOrWhiteSpace($resolvedVersion) -or
+                [string]::IsNullOrWhiteSpace($selectedFileName) -or
+                [string]::IsNullOrWhiteSpace($selectedEtag)) {
+                throw 'The official CDN resolver returned an incomplete or unexpected app source target.'
+            }
+
+            return $resolved
+        }
         'installed_store' {
             $package = Get-AppxPackage -Name $Config.packageId |
                 Sort-Object Version -Descending |
@@ -361,6 +388,30 @@ function Test-AppSourceCacheCompatible {
 
             return $true
         }
+        'official_cdn' {
+            if ($null -eq $ResolvedSource) {
+                return $false
+            }
+
+            $resolvedVersion = [string](Get-OptionalProperty -Object $ResolvedSource -Name 'version')
+            $resolvedSelected = Get-OptionalProperty -Object $ResolvedSource -Name 'selected'
+            $resolvedFileName = [string](Get-OptionalProperty -Object $resolvedSelected -Name 'fileName')
+            $resolvedEtag = [string](Get-OptionalProperty -Object $resolvedSelected -Name 'etag')
+            $cachedFileName = [string](Get-OptionalProperty -Object $SourceMetadata -Name 'sourceFileName')
+            $cachedEtag = [string](Get-OptionalProperty -Object $SourceMetadata -Name 'sourceEtag')
+            if ([string]::IsNullOrWhiteSpace($resolvedVersion) -or
+                [string]::IsNullOrWhiteSpace($resolvedFileName) -or
+                [string]::IsNullOrWhiteSpace($resolvedEtag) -or
+                [string]::IsNullOrWhiteSpace($cachedFileName) -or
+                [string]::IsNullOrWhiteSpace($cachedEtag) -or
+                -not [string]::Equals($cachedVersion, $resolvedVersion, [System.StringComparison]::OrdinalIgnoreCase) -or
+                -not [string]::Equals($cachedFileName, $resolvedFileName, [System.StringComparison]::OrdinalIgnoreCase) -or
+                -not [string]::Equals($cachedEtag, $resolvedEtag, [System.StringComparison]::OrdinalIgnoreCase)) {
+                return $false
+            }
+
+            return $true
+        }
         default {
             return $false
         }
@@ -401,6 +452,29 @@ function Export-AppSource {
             return [ordered]@{
                 mode = $mode
                 resolver = 'rg-adguard'
+                packageFamilyName = $resolved.packageFamilyName
+                selected = $resolved.selected
+                version = $resolved.version
+            }
+        }
+        'official_cdn' {
+            $resolved = if ($null -ne $ResolvedSource) {
+                $ResolvedSource
+            } else {
+                Resolve-AppSourceTarget -Config $Config -ScriptRoot $ScriptRoot
+            }
+            & (Join-Path $ScriptRoot 'import-store-bundle-from-url.ps1') `
+                -BundleUrl $resolved.selected.href `
+                -DownloadedFileName $resolved.selected.fileName `
+                -ExpectedEtag $resolved.selected.etag `
+                -ExpectedSize ([long]$resolved.selected.size) `
+                -SourceMode 'official_cdn' `
+                -Destination $SourceExportRoot `
+                -PackageFamilyName $Config.appSource.packageFamilyName | Out-Null
+
+            return [ordered]@{
+                mode = $mode
+                resolver = 'official-cdn'
                 packageFamilyName = $resolved.packageFamilyName
                 selected = $resolved.selected
                 version = $resolved.version

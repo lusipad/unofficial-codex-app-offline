@@ -18,6 +18,7 @@
 
 - `gate-report.md`（现行）— gate 报告工具的输出位置、诊断用途和新 Store 版本的审阅流程。
 - `offline-feature-probe.md`（现行）— 离线功能探针的测量方法、基线/用户文档生成流程和 Release 说明约定。
+- `official-cdn-app-source.md`（现行）— 默认包源 `official_cdn` 的直链来源、HEAD 解析方式、ETag 完整性校验与 `rg_adguard` 回退条件。
 
 ## architecture/ — 架构边界与设计决策
 

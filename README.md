@@ -17,7 +17,7 @@
 构建时自动拉取 [openai/skills](https://github.com/openai/skills)，离线 seed 打包；首次 Setup 仅安装基础 profile，其余技能留在包内按需同步。
 
 > [!TIP]
-> **只想装官方原版、不需要离线重打包？** → **[点击直接下载官方 MSIX](https://github.com/lusipad/unofficial-codex-app-offline/releases/latest/download/OpenAI.Codex-x64.msix)**（未做任何修改，双击即可安装）。更多方式见 [只要官方原版：MSIX 直链下载](#msix-直链下载)。
+> **只想装官方原版、不需要离线重打包？** → **[点击直接下载官方 MSIX](https://persistent.oaistatic.com/codex-app-prod/ChatGPT-x64.msix)**（OpenAI 官方直链，始终为最新 Store 签名包，双击即可安装）。更多方式见 [只要官方原版：MSIX 直链下载](#msix-直链下载)。
 
 ## 快速开始
 
@@ -97,21 +97,25 @@ LAN / 公网模式务必设密码。浏览器 UI 控制的是 gateway 所在机�
 
 官方 Codex 的 MSIX 现在可以直接安装。如果不需要本项目的离线重打包，只想装官方版本：
 
-**一键直链（推荐）**：**[下载 OpenAI.Codex-x64.msix](https://github.com/lusipad/unofficial-codex-app-offline/releases/latest/download/OpenAI.Codex-x64.msix)** —— 随每次发布同步为最新官方版本，文件未做任何修改（SHA256 见同一 release 的 `SHA256SUMS.txt`）。下载后双击安装，或用 PowerShell：
+**一键直链（推荐）**：**[下载官方 ChatGPT-x64.msix](https://persistent.oaistatic.com/codex-app-prod/ChatGPT-x64.msix)** —— 这是 OpenAI 在企业部署文档中公布的直链，始终指向最新的 Store 签名包，文件未做任何修改。下载后双击安装，或用 PowerShell：
 
 ```powershell
-Add-AppxPackage .\OpenAI.Codex-x64.msix
+Add-AppxPackage .\ChatGPT-x64.msix
 ```
 
-**备用方式一（网页）**：打开 [store.rg-adguard.net](https://store.rg-adguard.net)，左侧类型选 `PackageFamilyName`，输入 `OpenAI.Codex_2p2nqsd0c76g0`，通道选 `Retail`，点 ✔。在结果表格里下载最新的 `OpenAI.Codex_<版本号>_x64__2p2nqsd0c76g0.msix`（ARM 设备选 `_arm64_` 那个；链接带时效，表格里同时给出 SHA1 可校验）。
+ARM 设备把链接中的 `x64` 换成 `arm64`（[ChatGPT-arm64.msix](https://persistent.oaistatic.com/codex-app-prod/ChatGPT-arm64.msix)）；离线批量部署还需要配套的 [ChatGPT-License.xml](https://persistent.oaistatic.com/codex-app-prod/ChatGPT-License.xml)（见 [官方部署指南](https://learn.chatgpt.com/docs/enterprise/windows-deployment?deployment=user&user-source=offline)）。
 
-**备用方式二（脚本）**：本仓库的解析脚本直接输出直链 JSON（含全部候选与 SHA1）：
+**备用方式一（本项目 Release）**：[下载 OpenAI.Codex-x64.msix](https://github.com/lusipad/unofficial-codex-app-offline/releases/latest/download/OpenAI.Codex-x64.msix) —— 每次发布随包附带同一版本的未修改副本（SHA256 见同一 release 的 `SHA256SUMS.txt`），适合留档或官方直链不可达时使用。
+
+**备用方式二（网页）**：打开 [store.rg-adguard.net](https://store.rg-adguard.net)，左侧类型选 `PackageFamilyName`，输入 `OpenAI.Codex_2p2nqsd0c76g0`，通道选 `Retail`，点 ✔。在结果表格里下载最新的 `OpenAI.Codex_<版本号>_x64__2p2nqsd0c76g0.msix`（ARM 设备选 `_arm64_` 那个；链接带时效，表格里同时给出 SHA1 可校验）。
+
+**备用方式三（脚本）**：本仓库的解析脚本直接输出官方直链 JSON（含版本、ETag 与大小）：
 
 ```powershell
-node scripts/resolve-store-bundle-url.mjs --package-family-name OpenAI.Codex_2p2nqsd0c76g0
+node scripts/resolve-official-cdn-url.mjs --package-family-name OpenAI.Codex_2p2nqsd0c76g0
 ```
 
-> `store.rg-adguard.net` 是第三方解析服务，可能失效；失效时脚本会自动回退到 Playwright 浏览器流程。
+> `store.rg-adguard.net` 是第三方解析服务，可能失效；`rg_adguard` 备用包源的解析脚本（`resolve-store-bundle-url.mjs`）在失效时会自动回退到 Playwright 浏览器流程。
 
 ## 包内结构
 
@@ -159,14 +163,15 @@ pwsh -NoProfile -File ./scripts/build-offline-package.ps1
 | 脚本 | 用途 |
 |------|------|
 | `build-offline-package.ps1` | 主编排：拉取 Store 包 → 打补丁 → 打包 |
-| `resolve-store-bundle-url.mjs` | 解析 Microsoft Store CDN 下载链接 |
+| `resolve-official-cdn-url.mjs` | 解析 OpenAI 官方 CDN 直链（HEAD 读取包版本，默认包源） |
+| `resolve-store-bundle-url.mjs` | 解析 Microsoft Store CDN 下载链接（`rg_adguard` 备用包源） |
 | `patch-app-asar.mjs` | 给官方 app.asar 打兼容补丁 |
 | `setup-linux.sh` | Linux 安装与管理入口：install/start/stop/status/restart/update |
 | `build-cross-platform.sh` | 独立跨平台 Web 包构建 |
 
 ### 构建流程
 
-1. 解析 Microsoft Store 上 `OpenAI.Codex` 最新 Retail 版 CDN 链接
+1. 解析最新 Retail 版包源：默认 HEAD 请求 OpenAI 官方部署文档公布的直链（`persistent.oaistatic.com/codex-app-prod/`），也可用 `rg_adguard` 模式走 Store CDN
 2. 下载 x64 `.msix`（旧列表为 `.msixbundle` 时先提取其中的 x64 应用载荷）
 3. 给 `app.asar` 打补丁（脱离 MSIX、绕 feature gate、路径修复等）
 4. 拉取官方 skills、下载 primary runtime 插件、Chrome 扩展
@@ -205,7 +210,7 @@ Web gateway 变量（`start.sh` 同级 `.env` 文件或环境变量）：
 ## 风险与限制
 
 - 离线版能用哪些官方功能、哪些不能用以及原因，见 [离线功能清单](docs/offline-features.md)。清单在离线包上实测生成；设置分区有变化时，Release 说明会单独列出。
-- `store.rg-adguard.net` 是第三方服务，可能失效
+- 默认包源是 OpenAI 官方部署文档公布的 CDN 直链（只提供最新 Retail 版）；备用的 `store.rg-adguard.net` 是第三方服务，可能失效
 - Store 包内部结构变化后解包逻辑可能需调整
 - Web gateway 需要 Node.js 18+ 和 `@openai/codex` CLI，当前包不捆绑这两者
 - Chrome 扩展仍需用户手动加载一次
@@ -228,7 +233,7 @@ Two ways to use Codex, sharing the same offline skill seed:
 - **Browser** (Web Gateway): A local web server that lets you use Codex from any browser. The gateway serves the frontend UI and proxies requests to a locally installed `@openai/codex` CLI. Architecture is **"Codex CLI as backend, browser as frontend"** — hence cross-platform.
 
 > [!TIP]
-> **Only want the official app, without this offline repack?** → **[Download the official MSIX directly](https://github.com/lusipad/unofficial-codex-app-offline/releases/latest/download/OpenAI.Codex-x64.msix)** (unmodified; double-click to install). More options in [Official MSIX via direct link](#msix-direct-link).
+> **Only want the official app, without this offline repack?** → **[Download the official MSIX directly](https://persistent.oaistatic.com/codex-app-prod/ChatGPT-x64.msix)** (OpenAI's official link, always the latest Store-signed package; double-click to install). More options in [Official MSIX via direct link](#msix-direct-link).
 
 ### Quick Start
 
@@ -251,21 +256,25 @@ bash setup-linux.sh update
 
 The official Codex MSIX now installs directly. If you only want the official app without this offline repack:
 
-**One-click link (recommended):** **[Download OpenAI.Codex-x64.msix](https://github.com/lusipad/unofficial-codex-app-offline/releases/latest/download/OpenAI.Codex-x64.msix)** — refreshed to the latest official version with every release, unmodified (see `SHA256SUMS.txt` in the same release). Double-click to install, or via PowerShell:
+**One-click link (recommended):** **[Download the official ChatGPT-x64.msix](https://persistent.oaistatic.com/codex-app-prod/ChatGPT-x64.msix)** — the direct link published in OpenAI's enterprise deployment guide, always pointing at the latest Store-signed package, unmodified. Double-click to install, or via PowerShell:
 
 ```powershell
-Add-AppxPackage .\OpenAI.Codex-x64.msix
+Add-AppxPackage .\ChatGPT-x64.msix
 ```
 
-**Fallback 1 (web):** open [store.rg-adguard.net](https://store.rg-adguard.net), pick `PackageFamilyName` on the left, enter `OpenAI.Codex_2p2nqsd0c76g0`, select the `Retail` ring, and click ✔. Download the latest `OpenAI.Codex_<version>_x64__2p2nqsd0c76g0.msix` from the results table (pick `_arm64_` on ARM devices; links expire, and the table also lists the SHA1 for verification).
+On ARM devices swap `x64` for `arm64` ([ChatGPT-arm64.msix](https://persistent.oaistatic.com/codex-app-prod/ChatGPT-arm64.msix)); offline provisioning also needs the matching [ChatGPT-License.xml](https://persistent.oaistatic.com/codex-app-prod/ChatGPT-License.xml) (see the [official deployment guide](https://learn.chatgpt.com/docs/enterprise/windows-deployment?deployment=user&user-source=offline)).
 
-**Fallback 2 (script):** this repo's resolver prints the link as JSON (all candidates plus SHA1):
+**Fallback 1 (this project's Release):** [Download OpenAI.Codex-x64.msix](https://github.com/lusipad/unofficial-codex-app-offline/releases/latest/download/OpenAI.Codex-x64.msix) — an unmodified copy of the same version ships with every release (SHA256 in `SHA256SUMS.txt`), handy for archiving or when the official link is unreachable.
+
+**Fallback 2 (web):** open [store.rg-adguard.net](https://store.rg-adguard.net), pick `PackageFamilyName` on the left, enter `OpenAI.Codex_2p2nqsd0c76g0`, select the `Retail` ring, and click ✔. Download the latest `OpenAI.Codex_<version>_x64__2p2nqsd0c76g0.msix` from the results table (pick `_arm64_` on ARM devices; links expire, and the table also lists the SHA1 for verification).
+
+**Fallback 3 (script):** this repo's resolver prints the official link as JSON (version, ETag and size):
 
 ```powershell
-node scripts/resolve-store-bundle-url.mjs --package-family-name OpenAI.Codex_2p2nqsd0c76g0
+node scripts/resolve-official-cdn-url.mjs --package-family-name OpenAI.Codex_2p2nqsd0c76g0
 ```
 
-> `store.rg-adguard.net` is a third-party resolver and may go down; the script then falls back to a Playwright browser flow automatically.
+> `store.rg-adguard.net` is a third-party resolver and may go down; the `rg_adguard` fallback resolver (`resolve-store-bundle-url.mjs`) then falls back to a Playwright browser flow automatically.
 
 ### Building from Source
 
@@ -288,7 +297,8 @@ See `config/offline-package.json`. Key fields:
 | Field | Description |
 |-------|-------------|
 | `appSource.ring` | `Retail` / `Preview` / `Insider` |
-| `appSource.mode` | `rg_adguard` (download) or `installed_store` (local) |
+| `appSource.mode` | `official_cdn` (default, OpenAI CDN direct link), `rg_adguard` (Store download), or `installed_store` (local) |
+| `appSource.cdnUrl` | Official CDN package URL used by the `official_cdn` mode |
 | `packaging.portableZip` | Generate portable ZIP |
 | `packaging.crossPlatformWeb` | Generate cross-platform web ZIP |
 | `packaging.setupExe` | Generate Inno Setup installer |
@@ -300,7 +310,7 @@ Each Release also includes an optional, version-matched `models-api.json` for AP
 ### Risks
 
 - Which official features work offline, which do not, and why: see the [offline feature list](docs/offline-features.md) (Chinese). It is measured on the offline package; when the Settings sections change, the release notes list the changes.
-- Relies on third-party `store.rg-adguard.net`
+- The default package source is the official CDN direct link from OpenAI's deployment guide (latest Retail only); the fallback `store.rg-adguard.net` is a third-party service that may go down
 - Store package structure changes may break extraction
 - Web gateway requires Node.js 18+ and `@openai/codex` CLI (not bundled)
 - Chrome extension still needs manual install step

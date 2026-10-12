@@ -1092,6 +1092,73 @@ test("rg_adguard app-source cache requires the current resolver target", {
   });
 });
 
+test("official_cdn app-source cache requires the current resolver target", {
+  skip: process.platform !== "win32",
+}, (t) => {
+  const helperStart = buildScriptSource.indexOf("function Get-OptionalProperty {");
+  const helperEnd = buildScriptSource.indexOf("\n\n$scriptRoot =", helperStart);
+  assert.notEqual(helperStart, -1, "Get-OptionalProperty is missing");
+  assert.notEqual(helperEnd, -1, "build helper terminator is missing");
+  const helperSource = buildScriptSource.slice(helperStart, helperEnd);
+  const packageFamilyName = "OpenAI.Codex_2p2nqsd0c76g0";
+  const config = {
+    appSource: { mode: "official_cdn", packageFamilyName },
+  };
+  const resolved = {
+    packageFamilyName,
+    version: "26.1007.2314.0",
+    selected: {
+      fileName: "ChatGPT-x64.msix",
+      etag: '"0x8DF265427C674A5"',
+    },
+  };
+  const cached = {
+    packageFamilyName,
+    sourceMode: "official_cdn",
+    version: "26.1007.2314.0",
+    sourceFileName: resolved.selected.fileName,
+    sourceEtag: resolved.selected.etag,
+  };
+  const encode = (value) =>
+    Buffer.from(JSON.stringify(value), "utf8").toString("base64");
+  const command = [
+    "$ErrorActionPreference='Stop'",
+    helperSource,
+    `$config = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${encode(config)}')) | ConvertFrom-Json`,
+    `$resolved = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${encode(resolved)}')) | ConvertFrom-Json`,
+    `$cached = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${encode(cached)}')) | ConvertFrom-Json`,
+    `$staleVersion = $cached | ConvertTo-Json | ConvertFrom-Json; $staleVersion.version = '26.930.3930.0'`,
+    `$wrongEtag = $cached | ConvertTo-Json | ConvertFrom-Json; $wrongEtag.sourceEtag = '"0xDEADBEEF"'`,
+    `$missingEtag = $cached | ConvertTo-Json | ConvertFrom-Json; $missingEtag.sourceEtag = $null`,
+    `$wrongMode = $cached | ConvertTo-Json | ConvertFrom-Json; $wrongMode.sourceMode = 'rg_adguard'`,
+    "[ordered]@{matching=(Test-AppSourceCacheCompatible -SourceMetadata $cached -Config $config -ResolvedSource $resolved);versionMismatch=(Test-AppSourceCacheCompatible -SourceMetadata $staleVersion -Config $config -ResolvedSource $resolved);etagMismatch=(Test-AppSourceCacheCompatible -SourceMetadata $wrongEtag -Config $config -ResolvedSource $resolved);missingEtag=(Test-AppSourceCacheCompatible -SourceMetadata $missingEtag -Config $config -ResolvedSource $resolved);sourceModeMismatch=(Test-AppSourceCacheCompatible -SourceMetadata $wrongMode -Config $config -ResolvedSource $resolved)} | ConvertTo-Json -Compress",
+  ].join("\n");
+  // The helper block is far past the Windows command-line limit, so -Command cannot carry it.
+  const scriptRoot = fs.mkdtempSync(path.join(os.tmpdir(), "codex-official-cdn-cache-"));
+  const scriptPath = path.join(scriptRoot, "official-cdn-cache.ps1");
+  fs.writeFileSync(scriptPath, command, "utf8");
+  t.after(() => fs.rmSync(scriptRoot, { recursive: true, force: true }));
+
+  const result = spawnSync(
+    "powershell.exe",
+    ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", scriptPath],
+    { encoding: "utf8" },
+  );
+  assert.equal(
+    result.status,
+    0,
+    result.error ? result.error.message : result.stderr || result.stdout,
+  );
+  const values = JSON.parse(result.stdout.trim());
+  assert.deepEqual(values, {
+    matching: true,
+    versionMismatch: false,
+    etagMismatch: false,
+    missingEtag: false,
+    sourceModeMismatch: false,
+  });
+});
+
 test("26.825 verifier rejects a disabled quoted shared node_repl config", () => {
   const verifierBlock = verifierSourceSlice(
     "const NODE_REPL_FEATURE_CONFIG_CURRENT_DISABLED_RE =",

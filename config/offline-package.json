@@ -4,9 +4,10 @@
   "releaseNamePrefix": "codex-offline",
   "installDirName": "Codex Offline",
   "appSource": {
-    "mode": "rg_adguard",
+    "mode": "official_cdn",
     "packageFamilyName": "OpenAI.Codex_2p2nqsd0c76g0",
-    "ring": "Retail"
+    "ring": "Retail",
+    "cdnUrl": "https://persistent.oaistatic.com/codex-app-prod/ChatGPT-x64.msix"
   },
   "skills": {
     "sources": [

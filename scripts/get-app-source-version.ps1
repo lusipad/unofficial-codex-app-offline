@@ -43,6 +43,29 @@ switch ($mode) {
             selected = $resolved.selected
         } | ConvertTo-Json -Depth 8
     }
+    'official_cdn' {
+        $resolverArgs = @('--package-family-name', $config.appSource.packageFamilyName)
+        $cdnUrlProperty = $config.appSource.PSObject.Properties['cdnUrl']
+        if ($null -ne $cdnUrlProperty -and -not [string]::IsNullOrWhiteSpace([string]$cdnUrlProperty.Value)) {
+            $resolverArgs += @('--url', [string]$cdnUrlProperty.Value)
+        }
+
+        $resolverJson = node (Join-Path $scriptRoot 'resolve-official-cdn-url.mjs') @resolverArgs
+        if ($LASTEXITCODE -ne 0) {
+            throw 'The official CDN resolver failed.'
+        }
+
+        $resolved = $resolverJson | ConvertFrom-Json
+        [ordered]@{
+            packageId = $config.packageId
+            sourceMode = $mode
+            version = $resolved.version
+            releaseTag = 'offline-v{0}' -f $resolved.version
+            releaseName = '{0} Offline {1}' -f $config.appName, $resolved.version
+            packageFamilyName = $resolved.packageFamilyName
+            selected = $resolved.selected
+        } | ConvertTo-Json -Depth 8
+    }
     'installed_store' {
         $package = Get-AppxPackage -Name $config.packageId | Sort-Object Version -Descending | Select-Object -First 1
         if ($null -eq $package) {
