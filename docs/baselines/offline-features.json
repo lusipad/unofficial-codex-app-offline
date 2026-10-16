@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "version": "26.1007.2314.0",
+  "version": "26.1013.3656.0",
   "mode": "api-key",
   "groups": [
     {
@@ -57,7 +57,7 @@
         {
           "slug": "archived-chats",
           "visible": true,
-          "label": "Archived chats",
+          "label": "已归档的聊天",
           "reason": null
         },
         {
@@ -191,6 +191,12 @@
           "reason": "安装了提供文件处理入口的插件后才显示"
         },
         {
+          "slug": "rosalind",
+          "visible": false,
+          "label": "Rosalind",
+          "reason": "OpenAI 云端科学研究助手，离线未安装对应插件"
+        },
+        {
           "slug": "passwords",
           "visible": false,
           "label": "密码",
@@ -287,9 +293,9 @@
         },
         {
           "slug": "code-review",
-          "visible": true,
+          "visible": false,
           "label": "代码审查",
-          "reason": null
+          "reason": "26.1013 起上游要求登录 ChatGPT 账号，API Key 与未登录模式不可用"
         },
         {
           "slug": "git-settings",

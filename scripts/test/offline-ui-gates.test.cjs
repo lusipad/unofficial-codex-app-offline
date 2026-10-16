@@ -482,16 +482,18 @@ test("priority surface carries its dedicated static gate marker", () => {
     "escapeRegExp",
     `"use strict";\n${helperSource}\nreturn patchSidebarActivitySurface;`,
   )(sidebarMarker, escapeRegExp);
-  // 26.924 also subscribes to the sidebar layout atom inside the return.
+  // 26.1013 folded the layout subscription out of the return statement; the
+  // surface is a two-read function with the gate id assigned to the captured
+  // variable later in the module init.
   const fixture =
-    "function jon(){let e=Ei(Non),t=Y(Of);return Y(rA),e&&(t.status===`allowed`||t.status===`loading`)}" +
-    "Non=`4039078146`";
+    "function vza(){let e=Kv(bza),t=q(t_);return e&&(t.status===`allowed`||t.status===`loading`)}" +
+    "bza=`4039078146`";
   const result = patchSidebarActivitySurface(fixture);
 
   assert.equal(result.patched, true);
   assert.equal(result.sidebarSurfaceSeen, true);
   assert.equal(result.sidebarCorrect, true);
-  assert.ok(result.content.includes(`e=!0${sidebarMarker},t=Y(Of);return Y(rA),e&&`));
+  assert.ok(result.content.includes(`e=!0${sidebarMarker},t=q(t_);return e&&`));
 
   const secondPass = patchSidebarActivitySurface(result.content);
   assert.equal(secondPass.patched, false);

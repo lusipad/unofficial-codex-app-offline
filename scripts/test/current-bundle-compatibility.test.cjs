@@ -70,18 +70,18 @@ test("portable extraction path budget is the guard against deep dependency paths
   );
 });
 
-test("26.715 settings IPC keeps its native config handler while patching settings routes", () => {
+test("26.1013 settings IPC keeps its native config handler while patching settings routes", () => {
   const needleSource = sourceSlice(
     "  // 26.825: open-config-toml has its own Electron implementation.",
     "  // Helper: reload the renderer at a given settings route.",
   );
   const replacementSource = sourceSlice(
-    "  const SETTINGS_REPLACEMENT_V5 =",
+    "  function buildSettingsReplacement(messageVar) {",
     "\n  const AUTOMATION_CWD_NORMALIZER_INLINE =",
   );
-  const { needle, replacement } = Function(
+  const { needleRe, buildReplacement } = Function(
     "buildSettingsRouteStatement",
-    `"use strict";\n${needleSource}\n${replacementSource}\nreturn { needle: NOT_IMPLEMENTED_NEEDLE_V5, replacement: SETTINGS_REPLACEMENT_V5 };`,
+    `"use strict";\n${needleSource}\n${replacementSource}\nreturn { needleRe: SETTINGS_NOT_IMPLEMENTED_CASE_BLOCK_RE, buildReplacement: buildSettingsReplacement };`,
   )((urlVariable, messageVariable) =>
     `${urlVariable}.searchParams.set("initialRoute","/settings/"+${messageVariable}.section);`,
   );
@@ -89,14 +89,20 @@ test("26.715 settings IPC keeps its native config handler while patching setting
     "case`navigate-in-new-editor-tab`:case`open-vscode-command`:" +
     "case`open-extension-settings`:case`open-keyboard-shortcuts`:" +
     "case`show-settings`:case`install-wsl`:" +
-    "throw Error(`\"${t.type}\" is not implemented in Electron.`);" +
+    "throw Error(`\"${n.type}\" is not implemented in Electron.`);" +
     "case`open-config-toml`:{await c.shell.openPath(`config.toml`);break}";
 
-  const patched = fixture.replace(needle, replacement);
+  const patched = fixture.replace(needleRe, (...match) => buildReplacement(match[1]));
   assert.notEqual(patched, fixture);
   assert.match(patched, /case`show-settings`:\{let _win=c\.BrowserWindow\.fromWebContents\(e\)/);
-  assert.match(patched, /_url\.searchParams\.set\("initialRoute","\/settings\/"\+t\.section\)/);
+  assert.match(patched, /_url\.searchParams\.set\("initialRoute","\/settings\/"\+n\.section\)/);
   assert.ok(patched.includes("case`open-config-toml`:{await c.shell.openPath(`config.toml`);break}"));
+
+  // The case block text is stable; only the minified message variable drifts.
+  const renamedVar = fixture.replaceAll("n.type", "t.type");
+  const renamedPatched = renamedVar.replace(needleRe, (...match) => buildReplacement(match[1]));
+  assert.match(renamedPatched, /_url\.searchParams\.set\("initialRoute","\/settings\/"\+t\.section\)/);
+  assert.ok(renamedPatched.includes('throw Error(`"${t.type}" is not implemented in Electron.`)'));
 });
 
 test("26.727 archive verifier accepts the current isError prop layout", () => {
@@ -1003,9 +1009,10 @@ test("26.1007 archived thread generator patch fails closed on the 26.1002 queryF
   assert.equal(patchArchivedThreadsPartialList(retired).patched, false);
 });
 
-test("26.825 patcher keeps only current Settings and Worktree resolver shapes", () => {
-  assert.match(patchScriptSource, /const NOT_IMPLEMENTED_NEEDLE_V5 =/);
-  assert.match(patchScriptSource, /const SETTINGS_REPLACEMENT_V5 =/);
+test("26.1013 patcher keeps only current Settings and Worktree resolver shapes", () => {
+  assert.match(patchScriptSource, /const SETTINGS_NOT_IMPLEMENTED_CASE_BLOCK_RE =/);
+  assert.doesNotMatch(patchScriptSource, /NOT_IMPLEMENTED_NEEDLE/);
+  assert.doesNotMatch(patchScriptSource, /SETTINGS_REPLACEMENT_V5/);
   assert.doesNotMatch(patchScriptSource, /NOT_IMPLEMENTED_NEEDLE_V[1-4]/);
   assert.doesNotMatch(patchScriptSource, /SETTINGS_REPLACEMENT_V[1-4]/);
   assert.doesNotMatch(patchScriptSource, /resolverLegacyRe/);

@@ -1462,13 +1462,19 @@ const LEGACY_PLUGIN_RENDERER_PATCH_MARKERS = [
   '/*codex-offline:plugin-query-network-mode*/',
   '/*codex-offline:plugin-cloud-fallback*/',
 ];
+// 26.1013 folded the layout subscription out of the return statement; the
+// surface is now a two-read function whose gate variable is assigned the
+// 4039078146 id later in the module init.
 const sidebarActivityPatchedSurfaceRe = new RegExp(
   `([A-Za-z_$][\\w$]*)=!0${escapeRegExp(SIDEBAR_ACTIVITY_VIEW_PATCH_MARKER)},` +
-    `([A-Za-z_$][\\w$]*)=[A-Za-z_$][\\w$]*\\([A-Za-z_$][\\w$]*\\);return [A-Za-z_$][\\w$]*\\([A-Za-z_$][\\w$]*\\),\\1&&` +
+    `([A-Za-z_$][\\w$]*)=[A-Za-z_$][\\w$]*\\([A-Za-z_$][\\w$]*\\);return \\1&&` +
     '\\(\\2\\.status===`allowed`\\|\\|\\2\\.status===`loading`\\)'
 );
-const sidebarActivityUnpatchedSurfaceRe =
-  /([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*)\),([A-Za-z_$][\w$]*)=[A-Za-z_$][\w$]*\([A-Za-z_$][\w$]*\);return [A-Za-z_$][\w$]*\([A-Za-z_$][\w$]*\),\1&&\(\4\.status===`allowed`\|\|\4\.status===`loading`\)\}[^]*?\3=`4039078146`/;
+const sidebarActivityUnpatchedSurfaceRe = new RegExp(
+  '([A-Za-z_$][\\w$]*)=([A-Za-z_$][\\w$]*)\\(([A-Za-z_$][\\w$]*)\\),' +
+    '([A-Za-z_$][\\w$]*)=[A-Za-z_$][\\w$]*\\([A-Za-z_$][\\w$]*\\);return \\1&&' +
+    '\\(\\4\\.status===`allowed`\\|\\|\\4\\.status===`loading`\\)\\}[^]*?\\3=`4039078146`'
+);
 const offlineNetworkModePatchedSurfaceRe = new RegExp(
   `([A-Za-z_$][\\w$]*)=\\{defaultOptions:\\{` +
     'mutations:\\{networkMode:`always`' +

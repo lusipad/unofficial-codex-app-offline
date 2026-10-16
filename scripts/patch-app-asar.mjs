@@ -942,13 +942,21 @@ function removeLegacyOfflinePluginQueryPatches(content) {
 function patchSidebarActivitySurface(content) {
   let next = content;
   let patched = false;
+  // 26.1013 folded the layout subscription out of the return statement. The
+  // surface is now a two-read function:
+  //   function vza(){let e=Kv(bza),t=q(t_);return e&&(t.status===`allowed`||t.status===`loading`)}
+  // with the gate id assigned to the captured variable later in the module
+  // init (bza=`4039078146`).
   const sidebarPatchedSurfaceRe = new RegExp(
     `([A-Za-z_$][\\w$]*)=!0${escapeRegExp(SIDEBAR_ACTIVITY_VIEW_PATCH_MARKER)},` +
-      `([A-Za-z_$][\\w$]*)=[A-Za-z_$][\\w$]*\\([A-Za-z_$][\\w$]*\\);return [A-Za-z_$][\\w$]*\\([A-Za-z_$][\\w$]*\\),\\1&&` +
+      `([A-Za-z_$][\\w$]*)=[A-Za-z_$][\\w$]*\\([A-Za-z_$][\\w$]*\\);return \\1&&` +
       '\\(\\2\\.status===`allowed`\\|\\|\\2\\.status===`loading`\\)',
   );
-  const sidebarUnpatchedSurfaceRe =
-    /([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*)\),([A-Za-z_$][\w$]*)=[A-Za-z_$][\w$]*\([A-Za-z_$][\w$]*\);return [A-Za-z_$][\w$]*\([A-Za-z_$][\w$]*\),\1&&\(\4\.status===`allowed`\|\|\4\.status===`loading`\)\}[^]*?\3=`4039078146`/;
+  const sidebarUnpatchedSurfaceRe = new RegExp(
+    '([A-Za-z_$][\\w$]*)=([A-Za-z_$][\\w$]*)\\(([A-Za-z_$][\\w$]*)\\),' +
+      '([A-Za-z_$][\\w$]*)=[A-Za-z_$][\\w$]*\\([A-Za-z_$][\\w$]*\\);return \\1&&' +
+      '\\(\\4\\.status===`allowed`\\|\\|\\4\\.status===`loading`\\)\\}[^]*?\\3=`4039078146`',
+  );
   const sidebarAlreadyCorrect = sidebarPatchedSurfaceRe.test(next);
   const sidebarSurfaceSeen =
     sidebarAlreadyCorrect ||
@@ -2009,13 +2017,12 @@ try {
   //
   // The remaining cases (open-vscode-command, etc.) keep throwing.
 
-  // 26.825: open-config-toml has its own Electron implementation. message=t,
-  // webContents=e, electron=c.
-  const NOT_IMPLEMENTED_NEEDLE_V5 =
-    'case`navigate-in-new-editor-tab`:case`open-vscode-command`:' +
-    'case`open-extension-settings`:case`open-keyboard-shortcuts`:' +
-    'case`show-settings`:case`install-wsl`:' +
-    'throw Error(`"${t.type}" is not implemented in Electron.`)';
+  // 26.825: open-config-toml has its own Electron implementation. The case
+  // block text is stable; only the minified message variable drifts (26.1013
+  // renamed it from t to n), so capture it from the throw instead of
+  // hardcoding a name. webContents=e, electron=c.
+  const SETTINGS_NOT_IMPLEMENTED_CASE_BLOCK_RE =
+    /case`navigate-in-new-editor-tab`:case`open-vscode-command`:case`open-extension-settings`:case`open-keyboard-shortcuts`:case`show-settings`:case`install-wsl`:throw Error\(`"\$\{([A-Za-z_$][\w$]*)\.type\}" is not implemented in Electron\.`\)/;
 
   // Helper: reload the renderer at a given settings route.
   const NAV_HELPER =
@@ -2026,28 +2033,31 @@ try {
   const SETTINGS_ROUTE_DIRECT_RE_GLOBAL =
     /([A-Za-z_$][\w$]*)\.searchParams\.set\("initialRoute","\/settings\/"\+\(([A-Za-z_$][\w$]*)\.section\|\|"agent"\)\);/g;
 
-  const SETTINGS_REPLACEMENT_V5 =
-    'case`show-settings`:{' +
-      'let _win=c.BrowserWindow.fromWebContents(e);' +
-      'if(_win){let _url=new URL(_win.getURL());' +
-      buildSettingsRouteStatement('_url', 't') +
-      '_win.loadURL(_url.toString())}' +
-      'break}' +
-    'case`open-extension-settings`:{' +
-      'let _win=c.BrowserWindow.fromWebContents(e);' +
-      'if(_win){let _url=new URL(_win.getURL());' +
-      '_url.searchParams.set("initialRoute","/settings/general-settings");' +
-      '_win.loadURL(_url.toString())}' +
-      'break}' +
-    'case`open-keyboard-shortcuts`:{' +
-      'let _win=c.BrowserWindow.fromWebContents(e);' +
-      'if(_win){let _url=new URL(_win.getURL());' +
-      '_url.searchParams.set("initialRoute","/settings/general-settings");' +
-      '_win.loadURL(_url.toString())}' +
-      'break}' +
-    'case`navigate-in-new-editor-tab`:case`open-vscode-command`:' +
-    'case`install-wsl`:' +
-    'throw Error(`"${t.type}" is not implemented in Electron.`)';
+  function buildSettingsReplacement(messageVar) {
+    return (
+      'case`show-settings`:{' +
+        'let _win=c.BrowserWindow.fromWebContents(e);' +
+        'if(_win){let _url=new URL(_win.getURL());' +
+        buildSettingsRouteStatement('_url', messageVar) +
+        '_win.loadURL(_url.toString())}' +
+        'break}' +
+      'case`open-extension-settings`:{' +
+        'let _win=c.BrowserWindow.fromWebContents(e);' +
+        'if(_win){let _url=new URL(_win.getURL());' +
+        '_url.searchParams.set("initialRoute","/settings/general-settings");' +
+        '_win.loadURL(_url.toString())}' +
+        'break}' +
+      'case`open-keyboard-shortcuts`:{' +
+        'let _win=c.BrowserWindow.fromWebContents(e);' +
+        'if(_win){let _url=new URL(_win.getURL());' +
+        '_url.searchParams.set("initialRoute","/settings/general-settings");' +
+        '_win.loadURL(_url.toString())}' +
+        'break}' +
+      'case`navigate-in-new-editor-tab`:case`open-vscode-command`:' +
+      'case`install-wsl`:' +
+      `throw Error(\`"\${${messageVar}.type}" is not implemented in Electron.\`)`
+    );
+  }
   const AUTOMATION_CWD_NORMALIZER_INLINE =
     'e=>typeof e==`string`&&e.startsWith(`\\\\\\\\?\\\\`)&&/^[A-Za-z]:/.test(e.slice(4))?e.slice(4):e';
   const AUTOMATION_RUNTIME_TARGET_CWD_RE =
@@ -2737,10 +2747,11 @@ try {
 
     settingsHandlerSeen ||= content.includes('case`show-settings`:{');
 
-    if (content.includes(NOT_IMPLEMENTED_NEEDLE_V5)) {
+    const settingsCaseMatch = SETTINGS_NOT_IMPLEMENTED_CASE_BLOCK_RE.exec(content);
+    if (settingsCaseMatch) {
       content = content.replace(
-        NOT_IMPLEMENTED_NEEDLE_V5,
-        SETTINGS_REPLACEMENT_V5,
+        SETTINGS_NOT_IMPLEMENTED_CASE_BLOCK_RE,
+        () => buildSettingsReplacement(settingsCaseMatch[1]),
       );
       modified = true;
       settingsPatchedFiles.push(path.relative(tmpDir, filePath));

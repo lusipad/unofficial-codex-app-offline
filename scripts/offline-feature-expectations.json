@@ -19,7 +19,9 @@
     "billing",
     "cloud-settings",
     "codex-cloud",
-    "debug"
+    "debug",
+    "code-review",
+    "rosalind"
   ],
   "notes": {
     "notifications": {
@@ -137,6 +139,14 @@
     "environments": {
       "label": "云端环境",
       "reason": "开启云端环境时替代本地「环境」；离线显示本地「环境」"
+    },
+    "code-review": {
+      "label": "代码审查",
+      "reason": "26.1013 起上游要求登录 ChatGPT 账号，API Key 与未登录模式不可用"
+    },
+    "rosalind": {
+      "label": "Rosalind",
+      "reason": "OpenAI 云端科学研究助手，离线未安装对应插件"
     }
   }
 }

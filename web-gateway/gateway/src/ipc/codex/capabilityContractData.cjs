@@ -105,6 +105,36 @@ const STATSIG_DEFAULT_FEATURE_OVERRIDES = Object.freeze({
 // - 2373428540: external agent import (Claude Code etc.) — checkGate seeds the atom
 //   that hides Settings → Import and short-circuits the import flows, command palette
 //   entry and onboarding import (26.1007). Found via the offline feature probe.
+//
+// Added by the 26.1013.3656.0 review (33 new ids scanned, docs/maintenance/gate-report.md):
+// - Account / workspace identity: 217963745 + 1696552190 seed the accountUserId /
+//   requestUserId source atom; 2034334892 (workspace plan), 2259614083 (workspace
+//   account ordering), 2777527054 (ChatGPT-auth + matching account + email),
+//   2438148931 + 3042818307 (account warning banner, both required).
+// - Billing / checkout: 2799430872 (credits checkout loading label).
+// - Cloud enrollment: 1199393483 (student-codex-enrollment).
+// - Cloud sharing: 1665452992 (pet sharing in the pet settings dialog).
+// - Ads / placement: 4101895715 (image card display types, ad impression transitions).
+// - Telemetry: 349610806 (readiness/exposure-log gate, disableExposureLog).
+// - GPTs / agents builder: 1010509169 (deployments / saved-draft API availability).
+// - NUX: 2247892263 (code-review-link GitHub NUX).
+// - Space (cloud workspace): 1442582935 (files search index), 2092319279 (suggested
+//   tab fetch), 2648108507 (landing-page-v2 fetch/redirect).
+// - Unconfirmed general chunk: 3368287113 (capability-gated surface next to the
+//   enhanced-citations namespace).
+// - 581294493 (nativeReplay) is consumed via a direct getFeatureGate business call
+//   (experimentalFeatureGates) so the default-on seams do not touch it today; denied
+//   defensively in case a future build routes it through checkGate / the gate atom.
+// - Surfaced by the review's own seed-set update (learned readers): 494797613
+//   (response favorites / file library), 711121807 + 4117608041 (promote-to-Page
+//   cloud write, both required), 1205965498 (ChatGPT conversation markdown view),
+//   1450219610 (content reference / GPTs), 2230082701 (plugin connector safety
+//   prompt fetch), 2457328746 (pairs with 2092319279 on the space suggested-tab
+//   query), 3104400975 (chronicle recorder history reminder).
+// Left default-on as local/harmless: 1538937767 (localThreadStoreCompression settings
+// surface), 1937538638 (local thread projection params), 3681340459 (response save
+// action), 451195040 (window-transfer route behavior), 2733752831 (composer copy
+// serialization span).
 const DESKTOP_GATE_DENYLIST = Object.freeze([
   "131713", "8119044", "13323501", "60299493", "67629032", "68267662", "85924660", "87569714",
   "88729972", "89600278", "93596649", "107580212", "110872417", "131701769", "140487509", "183402703",
@@ -156,6 +186,11 @@ const DESKTOP_GATE_DENYLIST = Object.freeze([
   "4020418403", "4023951618", "4029789265", "4030542669", "4038208412", "4062279831", "4067531359", "4082596618",
   "4107938382", "4128908571", "4135020696", "4135903789", "4147559047", "4153229570", "4192642686", "4209825986",
   "4218407052", "4231797315", "4263582812", "4277823746", "4285716042", "4290238484",
+  "217963745", "1696552190", "2034334892", "2259614083", "2777527054", "2438148931", "3042818307",
+  "2799430872", "1199393483", "1665452992", "4101895715", "349610806", "1010509169", "2247892263",
+  "1442582935", "2092319279", "2648108507", "3368287113", "581294493",
+  "494797613", "711121807", "4117608041", "1205965498", "1450219610", "2230082701", "2457328746",
+  "3104400975",
 ]);
 
 const DEFAULT_DESKTOP_FEATURE_STATE = Object.freeze({

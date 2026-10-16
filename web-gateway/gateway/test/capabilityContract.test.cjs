@@ -267,6 +267,26 @@ test("gate denylist never closes a gate the offline contract opens", () => {
   assert.equal(denylist.includes("375130565"), true);
 });
 
+test("26.1013 gate review decisions are pinned", () => {
+  const denylist = contractData.DESKTOP_GATE_DENYLIST;
+  // New cloud / account / billing / ads / NUX / telemetry ids from the 26.1013.3656.0
+  // gate-report diff (see the DESKTOP_GATE_DENYLIST header comment).
+  for (const gateId of [
+    "217963745", "1696552190", "2034334892", "2259614083", "2777527054",
+    "2438148931", "3042818307", "2799430872", "1199393483", "1665452992",
+    "4101895715", "349610806", "1010509169", "2247892263", "1442582935",
+    "2092319279", "2648108507", "3368287113", "581294493",
+    "494797613", "711121807", "4117608041", "1205965498", "1450219610",
+    "2230082701", "2457328746", "3104400975",
+  ]) {
+    assert.equal(denylist.includes(gateId), true, gateId);
+  }
+  // Reviewed and deliberately left default-on (local features / harmless behavior).
+  for (const gateId of ["1538937767", "1937538638", "3681340459", "451195040", "2733752831"]) {
+    assert.equal(denylist.includes(gateId), false, gateId);
+  }
+});
+
 test("source data contract covers direct exe asar patch surfaces", () => {
   assert.equal(contractData.STATSIG_DEFAULT_FEATURES_CONFIG, contract.STATSIG_DEFAULT_FEATURES_CONFIG);
   assert.deepEqual(contractData.DESKTOP_BROWSER_USE_CAPABILITY_KEYS, [
