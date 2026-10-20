@@ -335,6 +335,102 @@ test("desktop init.cjs seeds the appshots dynamic config into the fake Statsig i
   assert.ok(defaults && Object.keys(defaults.value).length > 0);
 });
 
+test("desktop init.cjs cancels Statsig POST initialize to achieve 0ms fail-fast offline", () => {
+  const { getWebRequestHandler } = loadInitWithMockElectron({});
+  const handler = getWebRequestHandler();
+  assert.equal(typeof handler, "function");
+  let result;
+  handler({ method: "POST", url: "https://ab.chatgpt.com/v1/initialize" }, (response) => {
+    result = response;
+  });
+  assert.deepEqual(result, { cancel: true });
+});
+
+test("desktop init.cjs cancels outbound telemetry, datadog, sentry, and updates to achieve 0ms fail-fast offline", () => {
+  const { getWebRequestHandler } = loadInitWithMockElectron({});
+  const handler = getWebRequestHandler();
+  assert.equal(typeof handler, "function");
+
+  const blockedUrls = [
+    "https://api.oaistatsig.com/v1/initialize",
+    "https://statsigcdn.openai.com/v1/download",
+    "https://statsigapi.net/v1/sdk_exception",
+    "https://updates.oaistatic.com/codex/app/appcast",
+    "https://persistent.oaistatic.com/codex-app-prod/windows-store-update.json",
+    "https://www.datadoghq-browser-agent.com/datadog-rum-v4.js",
+    "https://browser-intake-datadoghq.com/api/v2/rum",
+    "https://cdn.segment.com/analytics.js/v1/xxx",
+    "https://api.segment.io/v1/t",
+    "https://oai.ingest.sentry.io/api/123/envelope/",
+  ];
+
+  for (const url of blockedUrls) {
+    let result;
+    handler({ method: "POST", url }, (response) => {
+      result = response;
+    });
+    assert.deepEqual(result, { cancel: true }, `URL should be cancelled: ${url}`);
+  }
+});
+
+test("desktop init.cjs appends GPU performance switches and disables spellchecking to eliminate typing/scrolling lag", () => {
+  const appendedSwitches = [];
+  let spellCheckerEnabled = null;
+  const mockElectron = {
+    app: {
+      commandLine: {
+        appendSwitch(sw) {
+          appendedSwitches.push(sw);
+        },
+      },
+      on() {},
+    },
+    session: {
+      defaultSession: {
+        setSpellCheckerEnabled(val) {
+          spellCheckerEnabled = val;
+        },
+        webRequest: {
+          onBeforeRequest() {},
+        },
+      },
+    },
+  };
+
+  loadInitWithMockElectron(mockElectron);
+
+  assert.deepEqual(appendedSwitches, [
+    "ignore-gpu-blocklist",
+    "enable-gpu-rasterization",
+    "enable-zero-copy",
+  ]);
+  assert.equal(spellCheckerEnabled, false);
+});
+
+test("desktop init.cjs forces autoConnect to false for remote WSL connections", async () => {
+  const registeredHandlers = new Map();
+  const mockIpc = {
+    handle(channel, handler) {
+      registeredHandlers.set(channel, handler);
+    },
+    on() {},
+  };
+  const { mockElectron } = loadInitWithMockElectron({ ipcMain: mockIpc });
+
+  // 模拟主进程注册 set-remote-wsl-connections-enabled 处理器
+  mockElectron.ipcMain.handle("set-remote-wsl-connections-enabled", async () => ({
+    remoteWslConnections: [
+      { hostId: "remote-wsl:Ubuntu-24.04", distro: "Ubuntu-24.04", autoConnect: true },
+      { hostId: "remote-wsl:docker-desktop", distro: "docker-desktop", autoConnect: false },
+    ],
+  }));
+
+  const wrappedHandler = registeredHandlers.get("set-remote-wsl-connections-enabled");
+  assert.equal(typeof wrappedHandler, "function");
+  const result = await wrappedHandler({}, {});
+  assert.deepEqual(result.remoteWslConnections.map((c) => c.autoConnect), [false, false]);
+});
+
 test("desktop init.cjs unhides gpt-6.1-sol on wire model/list responses only", () => {
   let windowCreatedHandler;
   const { mockElectron } = loadInitWithMockElectron({

@@ -1608,12 +1608,39 @@ test("26.928 durable sign-in failure stops the reconnect loop instead of retryin
   assert.equal(result.patched, true);
   assert.equal(result.alreadyCorrect, false);
   assert.ok(result.content.includes(
-    "}shouldStopRetryingRemoteConnection(e){if(this.options.hostId===`durable`&&e instanceof Error&&" +
-    "e.message===`Sign in to ChatGPT to start a durable thread.`)return this.stopReconnectTimer(),!0" +
+    "}shouldStopRetryingRemoteConnection(e){if(e instanceof Error&&(e.message.includes(`codex-app-server-version-unsupported`)||" +
+    "(this.options.hostId===`durable`&&e.message===`Sign in to ChatGPT to start a durable thread.`)))return this.stopReconnectTimer(),!0" +
     marker + ";if(!r.Rn(this.options.hostConfig))return!1;",
   ));
   // 调用点不能被当成定义改写。
   assert.ok(result.content.endsWith("f(){this.shouldStopRetryingRemoteConnection(t)?a():b()}"));
+
+  // 行为验证：版本不支持或 durable 未登录均停止定时器并返回 true；其它错误继续走原有逻辑
+  const methodFn = new Function(
+    "r", "wA", "tM",
+    "return { " + result.content.slice(1, result.content.indexOf("f(){")) + " };",
+  )({ Rn: () => false }, () => false, class {});
+
+  let stoppedCount = 0;
+  const ctx = {
+    options: { hostId: "durable", hostConfig: {} },
+    stopReconnectTimer() { stoppedCount++; },
+  };
+
+  // 1. 版本不支持错误（如 WSL / 远程 codex-app-server 0.130.0 vs 0.141.0）
+  const versionError = new Error("AppServerTransportConnectError: codex-app-server-version-unsupported:0.130.0 (minRequiredVersion: 0.141.0)");
+  assert.equal(methodFn.shouldStopRetryingRemoteConnection.call(ctx, versionError), true);
+  assert.equal(stoppedCount, 1);
+
+  // 2. Durable ChatGPT 未登录错误
+  const durableError = new Error("Sign in to ChatGPT to start a durable thread.");
+  assert.equal(methodFn.shouldStopRetryingRemoteConnection.call(ctx, durableError), true);
+  assert.equal(stoppedCount, 2);
+
+  // 3. 其它普通错误：不提前退出，回退到原有逻辑（!Rn 返回 false）
+  const otherError = new Error("Connection reset by peer");
+  assert.equal(methodFn.shouldStopRetryingRemoteConnection.call(ctx, otherError), false);
+  assert.equal(stoppedCount, 2);
 
   const secondPass = patch(result.content, marker);
   assert.equal(secondPass.alreadyCorrect, true);

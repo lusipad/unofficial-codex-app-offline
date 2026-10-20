@@ -1752,8 +1752,9 @@ for (const entry of javaScriptEntries) {
     /if\([A-Za-z_$][\w$]*===`HEAD`\)return\{ref:`HEAD`\}\/\*codex-offline:worktree-head-ref\*\//.test(content);
   durableSignInRetryStopPatched ||=
     content.includes(DURABLE_SIGN_IN_RETRY_STOP_PATCH_MARKER) &&
-    content.includes('.message===`Sign in to ChatGPT to start a durable thread.`)return this.stopReconnectTimer(),!0' +
-      DURABLE_SIGN_IN_RETRY_STOP_PATCH_MARKER);
+    content.includes('codex-app-server-version-unsupported') &&
+    content.includes('.message===`Sign in to ChatGPT to start a durable thread.`') &&
+    content.includes('return this.stopReconnectTimer(),!0' + DURABLE_SIGN_IN_RETRY_STOP_PATCH_MARKER);
   windowsBrowserUseCapabilityPatched ||= content.includes(WINDOWS_BROWSER_USE_CAPABILITY_PATCH_MARKER);
   appServerSandboxOverridePatched ||= content.includes(APP_SERVER_SANDBOX_OVERRIDE);
   nodeReplFeatureConfigPatched ||= content.includes(NODE_REPL_FEATURE_ENABLED_PATCH_MARKER);

@@ -26,6 +26,18 @@
   var ipcMain = _electron.ipcMain;
   var app = _electron.app;
   var session = _electron.session;
+
+  // ── Hardware Acceleration & Chromium Performance Switches ───────────────
+  // Force GPU hardware acceleration and zero-copy rasterization to eliminate
+  // input typing lag and frame drops during chat scrolling/window resizing on
+  // AMD Radeon iGPUs, virtual display drivers (Oray/GameViewer), and laptops.
+  try {
+    if (app && app.commandLine && typeof app.commandLine.appendSwitch === 'function') {
+      app.commandLine.appendSwitch('ignore-gpu-blocklist');
+      app.commandLine.appendSwitch('enable-gpu-rasterization');
+      app.commandLine.appendSwitch('enable-zero-copy');
+    }
+  } catch (_e) { /* ignore */ }
   var _pluginServiceCompat;
   try {
     _pluginServiceCompat = require('./plugin-service-compat.cjs');
@@ -59,6 +71,18 @@
           '[' + new Date().toISOString() + '] [codex-offline-patches] ' + msg + '\n');
       }
     } catch (_e) { /* best-effort */ }
+  }
+
+  function disableSpellchecker(targetSession) {
+    try {
+      var ses = targetSession || (session && session.defaultSession);
+      if (ses && typeof ses.setSpellCheckerEnabled === 'function') {
+        ses.setSpellCheckerEnabled(false);
+        _diag('spellchecker disabled on session');
+      }
+    } catch (_e) {
+      _diag('failed to disable spellchecker: ' + (_e && _e.message));
+    }
   }
 
   if (!_pluginServiceCompat) {
@@ -203,6 +227,9 @@
         if (win && win.webContents) {
           wrapWebContentsSend(win.webContents);
           _diag('webContents.send: wrapped new BrowserWindow');
+          if (win.webContents.session) {
+            disableSpellchecker(win.webContents.session);
+          }
         }
       });
     } catch (_e) {}
@@ -391,40 +418,68 @@
     return body;
   }
 
-  var STATSIG_INITIALIZE_URL_PATTERN = '*://ab.chatgpt.com/v1/initialize*';
+  var OFFLINE_BLOCKED_URL_PATTERNS = [
+    '*://ab.chatgpt.com/*',
+    '*://*.chatgpt.com/backend-api/*',
+    '*://api.oaistatsig.com/*',
+    '*://statsigcdn.openai.com/*',
+    '*://statsigapi.net/*',
+    '*://updates.oaistatic.com/*',
+    '*://persistent.oaistatic.com/codex-app-*',
+    '*://*.datadoghq-browser-agent.com/*',
+    '*://*.browser-intake-datadoghq.com/*',
+    '*://*.datadoghq.com/*',
+    '*://*.segment.com/*',
+    '*://*.segment.io/*',
+    '*://*.sentry.io/*',
+    '*://*.oaiusercontent.com/*',
+  ];
 
   function setupWebRequestInterceptor(targetSession) {
     try {
       var ses = targetSession || session.defaultSession;
-      if (!ses || !ses.webRequest) return;
+      if (!ses) return;
+      disableSpellchecker(ses);
+      if (!ses.webRequest) return;
 
       ses.webRequest.onBeforeRequest(
-        { urls: [STATSIG_INITIALIZE_URL_PATTERN] },
+        { urls: OFFLINE_BLOCKED_URL_PATTERNS },
         function (_details, callback) {
           try {
-            var fakeBody = JSON.stringify(buildStatsigFakeResponse());
-            _diag('webRequest: intercepting Statsig initialize → data: URI (' + fakeBody.length + ' bytes)');
-            callback({
-              redirectURL: 'data:application/json;charset=utf-8,' + encodeURIComponent(fakeBody),
-            });
+            var url = (_details && _details.url) || '';
+            var method = (_details && _details.method) || 'GET';
+            // Statsig GET initialize: return fake JSON response (fallback for default test cases with empty url)
+            if ((!url || url.indexOf('ab.chatgpt.com') !== -1) && method === 'GET') {
+              var fakeBody = JSON.stringify(buildStatsigFakeResponse());
+              _diag('webRequest: intercepting Statsig initialize → data: URI (' + fakeBody.length + ' bytes)');
+              callback({
+                redirectURL: 'data:application/json;charset=utf-8,' + encodeURIComponent(fakeBody),
+              });
+              return;
+            }
+            // All other telemetry, statsig POST, updates, analytics -> fail fast in 0ms (ERR_BLOCKED_BY_CLIENT)
+            _diag('webRequest: blocking offline network request -> ' + (url || method));
+            callback({ cancel: true });
           } catch (_err) {
-            _diag('webRequest: Statsig intercept error: ' + (_err && _err.message));
+            _diag('webRequest: intercept error: ' + (_err && _err.message));
             callback({});
           }
         }
       );
-      _diag('webRequest: Statsig initialize interceptor registered');
+      _diag('webRequest: interceptor registered');
     } catch (_e) { _diag('webRequest: setup failed: ' + (_e && _e.message)); }
   }
 
   // Register as early as possible — before app is ready
   setupWebRequestInterceptor();
+  disableSpellchecker();
 
   if (app && typeof app.on === 'function') {
     // Re-register after session is fully initialized
     try {
       app.on('session-created', function (createdSession) {
         setupWebRequestInterceptor(createdSession);
+        disableSpellchecker(createdSession);
       });
     } catch (_e) {}
   }
@@ -476,6 +531,27 @@
         result.dynamic_configs || result.dynamicConfigs || result.configs) {
       patched = injectStatsigGatesIntoObject(result);
     }
+    // Remote WSL connections: prevent automatic background connection on launch in offline mode
+    if (result.key === 'remote_wsl_connections') {
+      var wslList = Array.isArray(result.value) ? result.value :
+        (result.value && Array.isArray(result.value.connections) ? result.value.connections : null);
+      if (wslList) {
+        for (var w = 0; w < wslList.length; w++) {
+          if (wslList[w] && typeof wslList[w] === 'object') {
+            wslList[w].autoConnect = false;
+          }
+        }
+        patched = true;
+      }
+    }
+    if (Array.isArray(result.remote_wsl_connections)) {
+      for (var rw = 0; rw < result.remote_wsl_connections.length; rw++) {
+        if (result.remote_wsl_connections[rw] && typeof result.remote_wsl_connections[rw] === 'object') {
+          result.remote_wsl_connections[rw].autoConnect = false;
+        }
+      }
+      patched = true;
+    }
     // Single key/value pair — inject overrides for statsig keys
     if (typeof result.key === 'string' && isPlainObject(result.value)) {
       if (result.key === STATSIG_MODEL_AVAILABILITY_CONFIG) {
@@ -522,6 +598,28 @@
   }
 
   ipcMain.handle = function (channel, listener) {
+    // ── Remote WSL connections: force autoConnect to false in offline mode ──
+    if (channel === 'set-remote-wsl-connections-enabled') {
+      _diag('ipc: wrapping WSL channel (handle): ' + channel);
+      return _origHandle(channel, function (_event, payload) {
+        var result = listener(_event, payload);
+        return patchMaybeAsync(result, function (resolved) {
+          if (Array.isArray(resolved)) {
+            for (var i = 0; i < resolved.length; i++) {
+              if (resolved[i] && typeof resolved[i] === 'object') resolved[i].autoConnect = false;
+            }
+          } else if (resolved && Array.isArray(resolved.remoteWslConnections)) {
+            for (var j = 0; j < resolved.remoteWslConnections.length; j++) {
+              if (resolved.remoteWslConnections[j] && typeof resolved.remoteWslConnections[j] === 'object') {
+                resolved.remoteWslConnections[j].autoConnect = false;
+              }
+            }
+          }
+          return resolved;
+        });
+      });
+    }
+
     // ── Statsig shared-object channels: inject gate overrides ──
     if (isStatsigChannel(channel)) {
       _diag('ipc: wrapping Statsig channel (handle): ' + channel);

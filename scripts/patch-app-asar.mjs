@@ -853,8 +853,8 @@ function patchDurableSignInRetryStop(content, patchMarker) {
     definitionRe,
     (match, prefix, errorVar) =>
       `${prefix}shouldStopRetryingRemoteConnection(${errorVar}){` +
-      `if(this.options.hostId===\`durable\`&&${errorVar} instanceof Error&&` +
-      `${errorVar}.message===\`Sign in to ChatGPT to start a durable thread.\`)` +
+      `if(${errorVar} instanceof Error&&(${errorVar}.message.includes(\`codex-app-server-version-unsupported\`)` +
+      `||(this.options.hostId===\`durable\`&&${errorVar}.message===\`Sign in to ChatGPT to start a durable thread.\`)))` +
       `return this.stopReconnectTimer(),!0${patchMarker};`,
   );
   return { content: next, seen: true, patched: true, alreadyCorrect: false };

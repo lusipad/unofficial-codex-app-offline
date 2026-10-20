@@ -1,5 +1,40 @@
 # Changelog
 
+## 2026-10-21
+
+### 中文
+
+- 修复 26.1002+ 离线环境下严重卡顿 / 冻结问题（issue #136）：
+  1. **根因 1（WSL 高频重连风暴）**：26.1002 提高 app-server 最低版本要求至 0.141.0，Windows 自动发现的默认 WSL 分发自动标记 `autoConnect: true`，启动即建立连接。当系统 WSL 内安装的 codex-app-server 低于 0.141.0 时抛出 `codex-app-server-version-unsupported`，`shouldStopRetryingRemoteConnection` 未拦截该错误，导致主进程进入 0 延迟无限重连循环（几分钟内反复拉起 `wsl.exe` 数百次），主事件循环与 IPC 广播被严重淹没，窗口出现极高延迟与卡死（Jank）。
+     - 修复落点 1（`scripts/patch-app-asar.mjs` 中的 `patchDurableSignInRetryStop`）：扩展注入在 `shouldStopRetryingRemoteConnection` 开头的守卫，当错误包含 `codex-app-server-version-unsupported` 时，与 durable 未登录错误同样执行 `stopReconnectTimer()` 并返回 `true`，两条失败路径均以 `restart_retry_limit_reached` 结束本次尝试，杜绝零延迟死循环。
+     - 修复落点 2（`scripts/desktop-patches/init.cjs`）：在 `patchSharedObjectPayload` 和 `set-remote-wsl-connections-enabled` IPC 处理中，将 WSL 连接项的 `autoConnect` 强制归一化为 `false`，离线启动不自动发起后台 WSL 进程连接。
+  2. **根因 2（Statsig 离线 30 秒 TCP 超时）**：离线环境下 Statsig SDK 向 `ab.chatgpt.com/v1/initialize` 发起 POST 请求，Chromium `webRequest` 不支持将 POST 请求重定向到 `data:` URI，导致请求穿透到网络层等待 30 秒 TCP 超时。
+     - 修复落点（`scripts/desktop-patches/init.cjs`）：在 `setupWebRequestInterceptor` 中，对 `*://ab.chatgpt.com/*` 的 POST 请求执行 `callback({ cancel: true })`（0ms Fail-Fast，`ERR_BLOCKED_BY_CLIENT`），配合 Layer 2 的本地 shared-object 补丁使 Statsig 立即回退到本地离线配置，消除 30 秒卡顿。
+  3. **根因 3（拼写检查阻塞打字与 GPU 渲染降级）**：
+     - **打字延迟与光标卡顿**：Electron 默认在主窗口开启拼写检查，ProseMirror 富文本输入框在输入混排中英文、代码变量时触发 Windows 原生拼写检查字典全量比对，造成每次按键 50-200ms 明显上屏延迟。修复落点：在 `init.cjs` 中对 session 显式调用 `setSpellCheckerEnabled(false)`，完全禁用拼写检查。
+     - **滚动掉帧与渲染卡顿**：检测到虚拟显示适配器或特定显卡驱动时，Chromium 将 GPU 光栅化降级为 CPU 软件渲染。修复落点：在 `init.cjs` 启动期通过 `app.commandLine.appendSwitch` 注入 `ignore-gpu-blocklist`、`enable-gpu-rasterization` 和 `enable-zero-copy`，强制硬件光栅化与显存零拷贝传输，消除滚动与窗口缩放掉帧。
+     - **全量遥测 0ms Fail-Fast**：将 `setupWebRequestInterceptor` 拦截范围扩展至 Datadog、Sentry、Segment、Statsig API/CDN 和客户端更新等全部出站遥测端点，一律返回 `{ cancel: true }`，杜绝后台网络阻塞。
+  4. **契约与测试同步**：
+     - `web-gateway/gateway/src/ipc/codex/capabilityContractData.cjs` 登记版本不支持守护；
+     - `scripts/verify-offline-package.ps1` 同步断言 marker 与守卫形态；
+     - `scripts/test/current-bundle-compatibility.test.cjs` 与 `model-availability-patches.test.cjs` 补充针对版本错误断言、WSL autoConnect 过滤、Statsig/遥测 0ms 取消、硬件加速开关及拼写检查禁用的自动化测试。
+- 验证：`node --test ./scripts/test/*.test.cjs ./web-gateway/gateway/test/*.test.cjs` 全量 264 个测试通过；`npm --prefix ./web-gateway run build:gateway` 构建成功。
+
+### English
+
+- Fixed severe UI stutter / freeze in offline environments on 26.1002+ (issue #136):
+  1. **Root cause 1 (WSL infinite reconnection storm)**: 26.1002 bumped the minimum required app-server version to 0.141.0. On Windows, auto-discovered WSL distros are assigned `autoConnect: true` by default. When the installed version in WSL is outdated, connection fails with `codex-app-server-version-unsupported`. `shouldStopRetryingRemoteConnection` did not recognize this error as non-retryable, throwing the main process into a zero-delay reconnection loop (spawning `wsl.exe` hundreds of times within minutes) that starved the main event loop and flooded IPC, causing severe UI jank.
+     - Fix 1 (`scripts/patch-app-asar.mjs` in `patchDurableSignInRetryStop`): Extended the injected guard in `shouldStopRetryingRemoteConnection` to call `stopReconnectTimer()` and return `true` whenever the error contains `codex-app-server-version-unsupported`, halting retry loops at `restart_retry_limit_reached`.
+     - Fix 2 (`scripts/desktop-patches/init.cjs`): Intercepted `remote_wsl_connections` in `patchSharedObjectPayload` and `set-remote-wsl-connections-enabled` IPC handling to force `autoConnect: false` for offline mode.
+  2. **Root cause 2 (Statsig 30-second TCP timeout offline)**: Statsig SDK sends POST requests to `ab.chatgpt.com/v1/initialize`. Chromium's `webRequest` API disallows redirecting POST requests to `data:` URIs, so the request fell through to the network stack where it hung for a 30s TCP timeout.
+     - Fix (`scripts/desktop-patches/init.cjs`): In `setupWebRequestInterceptor`, intercept POST requests to `*://ab.chatgpt.com/*` with `callback({ cancel: true })` (0ms fail-fast), allowing Statsig to immediately fall back to local shared-object defaults.
+  3. **Root cause 3 (Spellchecker input latency & GPU rasterization fallback)**:
+     - **Typing latency**: Chromium's built-in spellchecker runs dictionary verification on every keystroke in ProseMirror contenteditable inputs, causing 50-200ms input latency in offline developer environments. Fixed by disabling spellchecking across sessions via `setSpellCheckerEnabled(false)` in `init.cjs`.
+     - **Scroll & resize frame drops**: Virtual display drivers or iGPUs trigger Chromium's GPU driver blocklist, falling back to CPU software rasterization. Fixed by injecting `ignore-gpu-blocklist`, `enable-gpu-rasterization`, and `enable-zero-copy` via `app.commandLine.appendSwitch` in `init.cjs`.
+     - **Telemetry 0ms fail-fast**: Expanded `setupWebRequestInterceptor` to block Datadog, Sentry, Segment, Statsig APIs, and update endpoints with `{ cancel: true }`.
+  4. **Contracts & verification**: Synchronized `capabilityContractData.cjs`, `verify-offline-package.ps1`, and unit tests.
+- Verified: All 264 unit tests pass via `node --test ./scripts/test/*.test.cjs ./web-gateway/gateway/test/*.test.cjs`; `npm --prefix ./web-gateway run build:gateway` succeeds.
+
 ## 2026-10-17
 
 ### 中文

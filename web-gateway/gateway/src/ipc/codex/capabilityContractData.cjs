@@ -578,8 +578,8 @@ const DESKTOP_ASAR_PATCHES = Object.freeze([
     tier: "required",
     assert: "marker",
     evidence:
-      "26.928.3736.0: the renderer always adds the durable host manager and lists its recent threads; without a ChatGPT sign-in the main-process durable transport throws 'Sign in to ChatGPT to start a durable thread.' and AppServerConnection reschedules a reconnect forever (14 attempts in 3.5 minutes offline, each logging stack traces). The patch makes shouldStopRetryingRemoteConnection stop the timer for that one durable error; a later on-demand request (e.g. after signing in) still connects because no non-retryable fatal error is recorded.",
-    reverify: "Check that both AppServerConnection failure paths still consult shouldStopRetryingRemoteConnection and that the durable transport still throws the same sign-in error text.",
+      "26.928.3736.0: the renderer always adds the durable host manager and lists its recent threads; without a ChatGPT sign-in the main-process durable transport throws 'Sign in to ChatGPT to start a durable thread.' and AppServerConnection reschedules a reconnect forever (14 attempts in 3.5 minutes offline, each logging stack traces). In 26.1002+, unsupported remote app-server versions (e.g. WSL with outdated codex-app-server) also trigger tight reconnect loops. The patch makes shouldStopRetryingRemoteConnection stop the timer for both durable auth errors and unsupported app-server version errors; a later on-demand request (e.g. after signing in or updating) still connects because no non-retryable fatal error is recorded.",
+    reverify: "Check that both AppServerConnection failure paths still consult shouldStopRetryingRemoteConnection and that the durable transport and version check still throw the expected error texts.",
   }),
   Object.freeze({
     marker: "/*codex-offline:model-id-display-name-fallback*/",
