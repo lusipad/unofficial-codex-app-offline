@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "version": "26.1013.3656.0",
+  "version": "26.1016.6573.0",
   "mode": "api-key",
   "groups": [
     {
@@ -265,6 +265,12 @@
           "slug": "hooks-settings",
           "visible": true,
           "label": "钩子",
+          "reason": null
+        },
+        {
+          "slug": "gateways",
+          "visible": true,
+          "label": "模型提供商",
           "reason": null
         },
         {

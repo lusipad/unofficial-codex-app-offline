@@ -1462,18 +1462,18 @@ const LEGACY_PLUGIN_RENDERER_PATCH_MARKERS = [
   '/*codex-offline:plugin-query-network-mode*/',
   '/*codex-offline:plugin-cloud-fallback*/',
 ];
-// 26.1013 folded the layout subscription out of the return statement; the
-// surface is now a two-read function whose gate variable is assigned the
-// 4039078146 id later in the module init.
+// 26.1016 simplified the second read check to !== `denied`; the surface is
+// a two-read function whose gate variable is assigned the 4039078146 id later
+// in the module init.
 const sidebarActivityPatchedSurfaceRe = new RegExp(
   `([A-Za-z_$][\\w$]*)=!0${escapeRegExp(SIDEBAR_ACTIVITY_VIEW_PATCH_MARKER)},` +
     `([A-Za-z_$][\\w$]*)=[A-Za-z_$][\\w$]*\\([A-Za-z_$][\\w$]*\\);return \\1&&` +
-    '\\(\\2\\.status===`allowed`\\|\\|\\2\\.status===`loading`\\)'
+    '\\2\\.status!==`denied`'
 );
 const sidebarActivityUnpatchedSurfaceRe = new RegExp(
   '([A-Za-z_$][\\w$]*)=([A-Za-z_$][\\w$]*)\\(([A-Za-z_$][\\w$]*)\\),' +
     '([A-Za-z_$][\\w$]*)=[A-Za-z_$][\\w$]*\\([A-Za-z_$][\\w$]*\\);return \\1&&' +
-    '\\(\\4\\.status===`allowed`\\|\\|\\4\\.status===`loading`\\)\\}[^]*?\\3=`4039078146`'
+    '\\4\\.status!==`denied`\\}[^]*?\\3=`4039078146`'
 );
 const offlineNetworkModePatchedSurfaceRe = new RegExp(
   `([A-Za-z_$][\\w$]*)=\\{defaultOptions:\\{` +

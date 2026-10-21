@@ -942,20 +942,19 @@ function removeLegacyOfflinePluginQueryPatches(content) {
 function patchSidebarActivitySurface(content) {
   let next = content;
   let patched = false;
-  // 26.1013 folded the layout subscription out of the return statement. The
-  // surface is now a two-read function:
-  //   function vza(){let e=Kv(bza),t=q(t_);return e&&(t.status===`allowed`||t.status===`loading`)}
+  // 26.1016 simplified the second read check:
+  //   function PWa(){let e=Qv(IWa),t=Z(l_);return e&&t.status!==`denied`}
   // with the gate id assigned to the captured variable later in the module
-  // init (bza=`4039078146`).
+  // init (IWa=`4039078146`).
   const sidebarPatchedSurfaceRe = new RegExp(
     `([A-Za-z_$][\\w$]*)=!0${escapeRegExp(SIDEBAR_ACTIVITY_VIEW_PATCH_MARKER)},` +
       `([A-Za-z_$][\\w$]*)=[A-Za-z_$][\\w$]*\\([A-Za-z_$][\\w$]*\\);return \\1&&` +
-      '\\(\\2\\.status===`allowed`\\|\\|\\2\\.status===`loading`\\)',
+      '\\2\\.status!==`denied`',
   );
   const sidebarUnpatchedSurfaceRe = new RegExp(
     '([A-Za-z_$][\\w$]*)=([A-Za-z_$][\\w$]*)\\(([A-Za-z_$][\\w$]*)\\),' +
       '([A-Za-z_$][\\w$]*)=[A-Za-z_$][\\w$]*\\([A-Za-z_$][\\w$]*\\);return \\1&&' +
-      '\\(\\4\\.status===`allowed`\\|\\|\\4\\.status===`loading`\\)\\}[^]*?\\3=`4039078146`',
+      '\\4\\.status!==`denied`\\}[^]*?\\3=`4039078146`',
   );
   const sidebarAlreadyCorrect = sidebarPatchedSurfaceRe.test(next);
   const sidebarSurfaceSeen =

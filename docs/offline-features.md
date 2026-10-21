@@ -2,7 +2,7 @@
 
 <!-- 由 scripts/offline-feature-probe.mjs --promote 生成，请勿手工编辑；不可见原因在 scripts/offline-feature-expectations.json 中维护。 -->
 
-本清单在 **26.1013.3656.0** 离线包上实测生成，读取「设置」导航中实际显示的分区。启动方式：API Key / 未登录 ChatGPT，网络已阻断。
+本清单在 **26.1016.6573.0** 离线包上实测生成，读取「设置」导航中实际显示的分区。启动方式：API Key / 未登录 ChatGPT，网络已阻断。
 
 - ✅ 离线可用：设置中可见。
 - — 离线不可见：「说明」列给出原因。
@@ -69,6 +69,7 @@
 | 设置项 | 离线可见 | 说明 |
 | --- | --- | --- |
 | 钩子 (`hooks-settings`) | ✅ |  |
+| 模型提供商 (`gateways`) | ✅ |  |
 | 连接 (`connections`) | ✅ |  |
 | 云端偏好设置 (`cloud-settings`) | — | 需要 ChatGPT 云端 |
 | Codex 云端 (`codex-cloud`) | — | 需要 ChatGPT 云端访问 |
