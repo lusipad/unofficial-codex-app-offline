@@ -12,7 +12,8 @@
      - `scripts/test/offline-ui-gates.test.cjs`：更新单元测试 fixture 与断言至 26.1016 真实结构。
 - 功能探针与基线更新：
   - 运行 `offline-feature-probe` 实测确认 20/51 分区可见（金标准全部满足，新增离线可见设置分区「模型提供商」`gateways`）；
-  - 执行 `--promote` 刷新基线至 26.1016.6573.0，同步更新 `docs/baselines/offline-features.json` 与 `docs/offline-features.md`。
+  - 执行 `--promote` 刷新基线至 26.1016.6573.0，同步更新 `docs/baselines/offline-features.json` 与 `docs/offline-features.md`；
+  - 完成 26.1016.6573.0 全量 Statsig gate 审阅并更新 `docs/baselines/gate-baseline.json`（共 853 个 ID，26 new / 10 gone / 7 changed，二次扫描收敛至 0 差异）。
 - 验证：`node --test ./scripts/test/*.test.cjs ./web-gateway/gateway/test/*.test.cjs` 266 项全过；`build-offline-package.ps1 -RequireInstaller` 构建成功；`verify-offline-package.ps1` 完整性与冒烟验证全量通过。产物：`dist\offline\codex-offline-26.1016.6573.0\`，setup.exe SHA256=`494954595C4DAC9FCFAFE8FC9C44404F3932245500FAD979F097F7F32B37ECBC`。
 
 ### English
@@ -25,7 +26,8 @@
      - `scripts/test/offline-ui-gates.test.cjs`: Updated unit test fixture and assertions.
 - Feature probe & baseline promotion:
   - `offline-feature-probe` verified 20/51 settings sections visible (gold-standard assertions met; new offline-visible panel "Model Gateways" / `gateways`);
-  - Promoted baseline to 26.1016.6573.0 via `--promote`, synchronizing `docs/baselines/offline-features.json` and `docs/offline-features.md`.
+  - Promoted baseline to 26.1016.6573.0 via `--promote`, synchronizing `docs/baselines/offline-features.json` and `docs/offline-features.md`;
+  - Completed Statsig gate review and updated `docs/baselines/gate-baseline.json` for 26.1016.6573.0 (853 total IDs, 0 diff after baseline sync).
 - Verified: All 266 unit tests pass; `build-offline-package.ps1 -RequireInstaller` succeeds; `verify-offline-package.ps1` passes full integrity and smoke tests. Artifact: `dist\offline\codex-offline-26.1016.6573.0\`, setup.exe SHA256=`494954595C4DAC9FCFAFE8FC9C44404F3932245500FAD979F097F7F32B37ECBC`.
 
 ## 2026-10-21
