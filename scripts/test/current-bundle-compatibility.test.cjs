@@ -549,6 +549,54 @@ test("26.1002 package verification accepts the app-server host resolver bridge",
   );
 });
 
+const DYNAMIC_TOOL_HANDLER_26_1021 =
+  "async function Lk(e){try{var t=j();let{scope:n,serverRequest:r,hostId:i,signal:a,transport:o}=e,{id:s,params:c}=r," +
+  "{threadId:l,tool:u}=c,d={callId:c.callId,isRemoteHost:i!==ke,tool:u,turnId:c.turnId};" +
+  "if(Y.info(`dynamic_app_tool_renderer_execution_started`,{safe:d,sensitive:{}}),!l)" +
+  "return Y.error(`Missing threadId for dynamic tool call request`,{safe:{},sensitive:{id:s,params:c}}),!1;" +
+  "let f=X(l),p=jd(n,i),m=e.callerSource!==`chatgpt`&&!qc(l);" +
+  "if(a?.aborted||H.dynamicToolCalls!=null&&!await H.dynamicToolCalls.tryClaimExecution({callId:c.callId,hostId:i,threadId:l,turnId:c.turnId})||a?.aborted)return!1;" +
+  "let b=async()=>{return!1};" +
+  "return await Ik({metrics:Oo(n),tool:void 0,isCancelled:b},async t=>{" +
+  "try{({executeDynamicToolCallRequest:n}=await _r(()=>import(`./execution-839e368507d8.js`),import.meta.url))}" +
+  "catch(e){return!await b()&&(Y.warning(`dynamic_app_tool_dispatcher_load_failed`,{safe:d,sensitive:{error:e}})," +
+  "t({success:!1}),Pc({dispatchMessageFromView:(e,t)=>tt.dispatchMessage(e,t),hostId:i,method:r.method,threadId:l," +
+  "response:{id:Tn(s),result:$a(`The app could not load this tool. Please try again.`)}}),!0)}" +
+  "return!await b()&&n(e,{onToolResult:t})})}";
+
+test("26.1021 dynamic tool handler bridges node_repl through the imported host resolver", () => {
+  const patchComputerUseNodeReplDynamicToolCall = loadDynamicToolCallPatch();
+  const patched = patchComputerUseNodeReplDynamicToolCall(DYNAMIC_TOOL_HANDLER_26_1021);
+
+  assert.equal(patched.patched, true);
+  assert.match(
+    patched.content,
+    /await jd\(n,i\)\.sendRequest\(`mcpServer\/tool\/call`,\{threadId:l,server:`node_repl`,tool:`js`,arguments:c\.arguments\}\)/,
+  );
+  assert.match(
+    patched.content,
+    /return Pc\(\{dispatchMessageFromView:\(e,t\)=>tt\.dispatchMessage\(e,t\),hostId:i,method:r\.method,threadId:l,response:\{id:Tn\(s\),result:_codexOfflineNodeReplResponse\}\}\),!0\}/,
+  );
+  assert.match(patched.content, /codex-offline:computer-use-node-repl-dynamic-tool-call/);
+});
+
+test("26.1021 package verification accepts the imported app-server host resolver bridge", () => {
+  const verifierBridgeSource = verifierSourceSlice(
+    "function findAppServerRequestBusName",
+    "const PLUGINS_API_KEY_NAV_PATCH_MARKER =",
+  );
+  const verifierBridge = Function(
+    `"use strict";\n${verifierBridgeSource}\nreturn { findAppServerRequestBusName, hasComputerUseNodeReplDynamicToolCallBridge };`,
+  )();
+  const bridgeCall =
+    "jd(n,i).sendRequest(`mcpServer/tool/call`,{threadId:l,server:`node_repl`," +
+    "tool:`js`,arguments:c.arguments})";
+  const fixture = DYNAMIC_TOOL_HANDLER_26_1021 + bridgeCall;
+
+  assert.equal(verifierBridge.findAppServerRequestBusName(fixture), "jd");
+  assert.equal(verifierBridge.hasComputerUseNodeReplDynamicToolCallBridge(fixture), true);
+});
+
 test("26.803 Chrome pipe filter accepts platform-aware listing functions", () => {
   const matchSource = sourceSlice(
     "    const legacyPipeListMatch =",

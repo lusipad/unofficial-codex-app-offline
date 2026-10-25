@@ -1499,10 +1499,15 @@ const bundledPluginCacheLockCurrentFatalResultRe =
 // that 26.1002 uses in place of the retired `AppServerManager RPC is not
 // connected` bus.
 function findAppServerRequestBusName(content) {
-  const match = content.match(
+  const definitionMatch = content.match(
     /function ([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*),([A-Za-z_$][\w$]*)\)\{try\{var [A-Za-z_$][\w$]*=[A-Za-z_$][\w$]*\(\);let ([A-Za-z_$][\w$]*)=\2\.get\([A-Za-z_$][\w$]*,\3\),([A-Za-z_$][\w$]*)=\2\.get\([A-Za-z_$][\w$]*\);if\(\5!=null&&[^{};]*\)try\{return \5\.forHost\(\3\)\}catch\{\}let\{client:([A-Za-z_$][\w$]*)\}=\4;if\(\6!=null\)return \6\.rpc;[\s\S]{0,1200}?Error\(`AppServerManager RPC is unavailable for hostId: \$\{\3\}`\)/,
   );
-  return match?.[1] ?? null;
+  if (definitionMatch?.[1]) return definitionMatch[1];
+
+  const handlerCallerMatch = content.match(
+    /`dynamic_app_tool_renderer_execution_started`[\s\S]{0,300}?`Missing threadId for dynamic tool call request`[\s\S]{0,200}?let [A-Za-z_$][\w$]*=[A-Za-z_$][\w$]*\([A-Za-z_$][\w$]*\),[A-Za-z_$][\w$]*=([A-Za-z_$][\w$]*)\(/,
+  );
+  return handlerCallerMatch?.[1] ?? null;
 }
 function hasComputerUseNodeReplDynamicToolCallBridge(content) {
   const requestFn = findAppServerRequestBusName(content);

@@ -1,5 +1,37 @@
 # Changelog
 
+## 2026-10-25
+
+### 中文
+
+- 修复 26.1021.3705.0 离线包构建与 CI 失败（issue #138）：
+  1. **根因**：上游在 26.1021 中对渲染进程动态工具调用（dynamic tool call）进行了代码分割（拆分至 `initialize-app-host-services-*.js`）。函数体新增 `try { var t = j(); ... }` 包裹，移除了 `record_private_review` 工具特权判断；且 host resolver 函数（`function kg(e, t)`）移至 `app-initial-*.js`，在当前模块中以 `import { irr as jd }` 引入并在调用点 `let f = X(l), p = jd(n, i)` 直接调用。原有基于单文件就地定义搜索的 `findAppServerRequestBusName` 与旧形态严格正则失配，触发 fail-closed 退出。
+  2. **修复落点**：
+     - `scripts/patch-app-asar.mjs`：
+       - 更新 `COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_CANONICAL_RE`，将 `try` 序言与 `record_private_review` 守卫设为可选，适配 26.1021 代码分割后结构并植入 `COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_PATCH_MARKER`；
+       - 增强 `findAppServerRequestBusName`：支持直接匹配 handler 内 `dynamic_app_tool_renderer_execution_started` 后的导入调用点标识符。
+     - `scripts/verify-offline-package.ps1`：同步更新离线包验证器中 `findAppServerRequestBusName` 双模式匹配逻辑；
+     - `scripts/test/current-bundle-compatibility.test.cjs`：新增 `DYNAMIC_TOOL_HANDLER_26_1021` 真实 fixture 及其对补丁和验证器断言的单元测试。
+- 功能探针与 Gate 基线更新：
+  - 运行 `offline-feature-probe` 实测确认 20/51 分区可见（金标准全部满足，保持 26.1016 可见集一致）；
+  - 执行 `--promote` 刷新基线至 26.1021.3705.0，同步更新 `docs/baselines/offline-features.json` 与 `docs/offline-features.md`；
+  - 完成 26.1021.3705.0 全量 Statsig gate 审阅并更新 `docs/baselines/gate-baseline.json`（共 885 个 ID，二次扫描收敛至 0 new / 0 gone / 0 changed 差异）。
+- 验证：`node --test ./scripts/test/*.test.cjs ./web-gateway/gateway/test/*.test.cjs` 268 项全过；`npm --prefix ./web-gateway run build:gateway` 成功；`build-offline-package.ps1 -RequireInstaller` 成功构建；`verify-offline-package.ps1` 冒烟与功能探针全量通过（20/51 设置分区可见，金标准断言满足）。产物：`dist\offline\codex-offline-26.1021.3705.0\`，setup.exe SHA256=`5F8626710B4AC6F435AB7AF49D4D6615CD106B8D6255EB44A224614537B40427`。
+
+### English
+
+- Fixed offline build and CI failure on 26.1021.3705.0 (issue #138):
+  1. **Root cause**: Upstream in 26.1021 code-split renderer dynamic tool call handling into `initialize-app-host-services-*.js`. The handler body was wrapped in `try { var t = j(); ... }` and the `record_private_review` claim bypass was removed. Furthermore, the host resolver (`kg(e, t)`) remained in `app-initial-*.js` and was imported into `initialize-app-host-services` (as `jd(n, i)`). `findAppServerRequestBusName` failed to locate the inline definition in the split file and failed closed.
+  2. **Fixes**:
+     - `scripts/patch-app-asar.mjs`: Updated `COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_CANONICAL_RE` to make the `try` prologue and `record_private_review` disjunct optional; enhanced `findAppServerRequestBusName` to locate the imported host resolver identifier right after `dynamic_app_tool_renderer_execution_started`;
+     - `scripts/verify-offline-package.ps1`: Synchronized the dual-lookup logic in `findAppServerRequestBusName`;
+     - `scripts/test/current-bundle-compatibility.test.cjs`: Added `DYNAMIC_TOOL_HANDLER_26_1021` real fixture and verified patch and verification acceptance.
+- Feature probe & gate baseline update:
+  - `offline-feature-probe` verified 20/51 settings sections visible (gold-standard assertions met, unchanged from 26.1016);
+  - Promoted baseline to 26.1021.3705.0 via `--promote`, synchronizing `docs/baselines/offline-features.json` and `docs/offline-features.md`;
+  - Completed Statsig gate review and refreshed `docs/baselines/gate-baseline.json` for 26.1021.3705.0 (885 total IDs, 0 diff after baseline sync).
+- Verified: All 268 unit tests pass; `npm --prefix ./web-gateway run build:gateway` succeeds; `build-offline-package.ps1 -RequireInstaller` succeeds; `verify-offline-package.ps1` passes all smoke and probe assertions (20/51 settings sections visible). Artifact: `dist\offline\codex-offline-26.1021.3705.0\`, setup.exe SHA256=`5F8626710B4AC6F435AB7AF49D4D6615CD106B8D6255EB44A224614537B40427`.
+
 ## 2026-10-22
 
 ### 中文

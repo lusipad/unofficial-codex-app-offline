@@ -2338,8 +2338,10 @@ try {
   // 26.928 always destructures `transport` and lets the mcp `codex_app`
   // `record_private_review` tool skip the execution claim, so the anchor keeps
   // that exact disjunct rather than widening to any claim condition.
+  // 26.1021 wraps the handler body in a try block and removes the
+  // `record_private_review` claim bypass.
   const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_CANONICAL_RE =
-    /(?<prefix>async function [A-Za-z_$][\w$]*\((?<options>[A-Za-z_$][\w$]*)\)\{let\{scope:(?<scope>[A-Za-z_$][\w$]*),serverRequest:(?<serverRequest>[A-Za-z_$][\w$]*),hostId:(?<hostId>[A-Za-z_$][\w$]*),signal:(?<signal>[A-Za-z_$][\w$]*),transport:(?<transport>[A-Za-z_$][\w$]*)\}=\k<options>,\{id:(?<requestId>[A-Za-z_$][\w$]*),params:(?<params>[A-Za-z_$][\w$]*)\}=\k<serverRequest>,\{threadId:(?<threadId>[A-Za-z_$][\w$]*),tool:(?<tool>[A-Za-z_$][\w$]*)\}=\k<params>[\s\S]{0,4000}?if\(\k<signal>\?\.aborted\|\|\(\k<transport>!==`mcp`\|\|\k<params>\.namespace!==`codex_app`\|\|\k<tool>!==`record_private_review`\)&&[A-Za-z_$][\w$]*\.dynamicToolCalls!=null&&!await [A-Za-z_$][\w$]*\.dynamicToolCalls\.tryClaimExecution\(\{callId:\k<params>\.callId,hostId:\k<hostId>,threadId:\k<threadId>,turnId:\k<params>\.turnId\}\)\|\|\k<signal>\?\.aborted\)return!1;)/;
+    /(?<prefix>async function [A-Za-z_$][\w$]*\((?<options>[A-Za-z_$][\w$]*)\)\{(?:try\{var [A-Za-z_$][\w$]*=[A-Za-z_$][\w$]*\(\);)?let\{scope:(?<scope>[A-Za-z_$][\w$]*),serverRequest:(?<serverRequest>[A-Za-z_$][\w$]*),hostId:(?<hostId>[A-Za-z_$][\w$]*),signal:(?<signal>[A-Za-z_$][\w$]*),transport:(?<transport>[A-Za-z_$][\w$]*)\}=\k<options>,\{id:(?<requestId>[A-Za-z_$][\w$]*),params:(?<params>[A-Za-z_$][\w$]*)\}=\k<serverRequest>,\{threadId:(?<threadId>[A-Za-z_$][\w$]*),tool:(?<tool>[A-Za-z_$][\w$]*)\}=\k<params>[\s\S]{0,4000}?if\(\k<signal>\?\.aborted\|\|(?:\(\k<transport>!==`mcp`\|\|\k<params>\.namespace!==`codex_app`\|\|\k<tool>!==`record_private_review`\)&&)?[A-Za-z_$][\w$]*\.dynamicToolCalls!=null&&!await [A-Za-z_$][\w$]*\.dynamicToolCalls\.tryClaimExecution\(\{callId:\k<params>\.callId,hostId:\k<hostId>,threadId:\k<threadId>,turnId:\k<params>\.turnId\}\)\|\|\k<signal>\?\.aborted\)return!1;)/;
   const COMPUTER_USE_NODE_REPL_RESULT_TEXT_CODE =
     'let _codexOfflineNodeReplStringify=e=>{try{return JSON.stringify(e)}catch{return String(e)}};' +
     'let _codexOfflineNodeReplContentText=e=>Array.isArray(e)?e.map(e=>(e?.type===`text`||e?.type===`inputText`)?String(e.text??``):e?.text!=null?String(e.text):_codexOfflineNodeReplStringify(e)).join(`\\n`):``;' +
@@ -2355,11 +2357,19 @@ try {
   // that prefers the AppServerManager RPC, falls back to the host's own client
   // and rejects with `AppServerManager RPC is unavailable for hostId`, and its
   // native callers chain `.sendRequest` on the result.
+  // 26.1021 code-split the dynamic tool handler into initialize-app-host-services,
+  // which imports the host resolver and invokes it inside the handler itself
+  // right after dynamic_app_tool_renderer_execution_started.
   function findAppServerRequestBusName(content) {
-    const match = content.match(
+    const definitionMatch = content.match(
       /function ([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*),([A-Za-z_$][\w$]*)\)\{try\{var [A-Za-z_$][\w$]*=[A-Za-z_$][\w$]*\(\);let ([A-Za-z_$][\w$]*)=\2\.get\([A-Za-z_$][\w$]*,\3\),([A-Za-z_$][\w$]*)=\2\.get\([A-Za-z_$][\w$]*\);if\(\5!=null&&[^{};]*\)try\{return \5\.forHost\(\3\)\}catch\{\}let\{client:([A-Za-z_$][\w$]*)\}=\4;if\(\6!=null\)return \6\.rpc;[\s\S]{0,1200}?Error\(`AppServerManager RPC is unavailable for hostId: \$\{\3\}`\)/,
     );
-    return match?.[1] ?? null;
+    if (definitionMatch?.[1]) return definitionMatch[1];
+
+    const handlerCallerMatch = content.match(
+      /`dynamic_app_tool_renderer_execution_started`[\s\S]{0,300}?`Missing threadId for dynamic tool call request`[\s\S]{0,200}?let [A-Za-z_$][\w$]*=[A-Za-z_$][\w$]*\([A-Za-z_$][\w$]*\),[A-Za-z_$][\w$]*=([A-Za-z_$][\w$]*)\(/,
+    );
+    return handlerCallerMatch?.[1] ?? null;
   }
   // The response helpers are minified per build; reuse the ones the handler
   // itself calls for this request instead of naming them. 26.1002 passes the
