@@ -1401,13 +1401,14 @@ const CODEX_MOBILE_REMOTE_CONTROL_MFA_ENDPOINT = '/wham/remote/control/mfa_requi
 const CODEX_MOBILE_AUTH_RELOGIN_MARKER = patchMarker('/*codex-offline:codex-mobile-auth-relogin*/');
 const BUNDLED_BROWSER_PLUGINS_PATCH_MARKER = patchMarker('/*codex-offline:bundled-browser-plugins-no-force-reload*/');
 const BROWSER_USE_DESCRIPTOR_CURRENT_PATCHED_RE =
-  /\{\.\.\.[A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*\.browser,autoInstallOptOutKey:[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\),installWhenMissing:!0,isAvailable:\(\{features:[A-Za-z_$][\w$]*\}\)=>\/\*codex-offline:bundled-browser-plugins-no-force-reload\*\/!0,migrate:[A-Za-z_$][\w$]*\}/;
+  /\{\.\.\.[A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*\.browser,autoInstallOptOutKey:(?:\(0,[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\)|[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\),installWhenMissing:!0,isAvailable:\(\{features:[A-Za-z_$][\w$]*\}\)=>\/\*codex-offline:bundled-browser-plugins-no-force-reload\*\/!0,migrate:[A-Za-z_$][\w$]*\}/;
 const BUNDLED_RUNTIME_PLUGINS_PATCH_MARKER = patchMarker('/*codex-offline:bundled-runtime-plugins*/');
 const WINDOWS_BROWSER_USE_CAPABILITY_PATCH_MARKER = patchMarker('/*codex-offline:windows-browser-use-capability*/');
 const APP_SERVER_SANDBOX_OVERRIDE = '`-c`,`windows.sandbox=\'unelevated\'`,`app-server`,`--analytics-default-enabled`';
+const APP_SERVER_SANDBOX_OVERRIDE_DQ = '"-c","windows.sandbox=\'unelevated\'","app-server","--analytics-default-enabled"';
 const NODE_REPL_FEATURE_ENABLED_PATCH_MARKER = patchMarker('/*codex-offline:node-repl-feature-enabled*/');
 const NODE_REPL_FEATURE_CONFIG_CURRENT_DISABLED_RE =
-  /[A-Za-z_$][\w$]*=\{(?=[\s\S]{0,120}include_permissions_instructions:!1,)[\s\S]{0,800}?["']features\.js_repl["']:\s*!1[\s\S]{0,500}?web_search:`disabled`\}(?=[,;)\]])/;
+  /[A-Za-z_$][\w$]*=\{(?=[\s\S]{0,120}include_permissions_instructions:!1,)[\s\S]{0,800}?["']features\.js_repl["']:\s*!1[\s\S]{0,500}?web_search:(?:`disabled`|"disabled")\}(?=[,;)\]])/;
 const NODE_REPL_DISABLE_SANDBOX_PATCH_MARKER =
   patchMarker('/*codex-offline:node-repl-disable-sandbox*/');
 const NODE_REPL_TOOL_SEARCH_FEATURE_PATCH_MARKER =
@@ -1415,7 +1416,7 @@ const NODE_REPL_TOOL_SEARCH_FEATURE_PATCH_MARKER =
 const COMPUTER_USE_RESOURCE_RUNTIME_PATHS_PATCH_MARKER =
   patchMarker('/*codex-offline:computer-use-resource-runtime-paths*/');
 const COMPUTER_USE_CANONICAL_RUNTIME_PATHS_PATCHED_RE =
-  /function [A-Za-z_$][\w$]*\(\{codexHome:[^}]+,env:[^}]+\}\)\{[^]*?source\.type===`local`\)\?\.source\.type===`local`\)return [A-Za-z_$][\w$]*\(\{codexHome:[^}]+pathExists:[A-Za-z_$][\w$]*\}\);return [A-Za-z_$][\w$]*\(\{env:[^}]+pathExists:[A-Za-z_$][\w$]*\}\)\}\/\*codex-offline:computer-use-resource-runtime-paths\*\//;
+  /function [A-Za-z_$][\w$]*\(\{codexHome:[^}]+,env:[^}]+\}\)\{[\s\S]*?(?:source\.type===`local`|source\.type==="local")[\s\S]*?return [A-Za-z_$][\w$]*\(\{codexHome:[^}]+pathExists:[A-Za-z_$][\w$]*\}\);?\}?return [A-Za-z_$][\w$]*\(\{env:[^}]+pathExists:[A-Za-z_$][\w$]*\}\)\}\/\*codex-offline:computer-use-resource-runtime-paths\*\//;
 const COMPUTER_USE_INPUT_SKILL_PATCH_MARKER =
   patchMarker('/*codex-offline:computer-use-input-skill*/');
 const COMPUTER_USE_THREAD_START_TOOL_SEARCH_PATCH_MARKER =
@@ -1761,7 +1762,9 @@ for (const entry of javaScriptEntries) {
     content.includes('.message===`Sign in to ChatGPT to start a durable thread.`') &&
     content.includes('return this.stopReconnectTimer(),!0' + DURABLE_SIGN_IN_RETRY_STOP_PATCH_MARKER);
   windowsBrowserUseCapabilityPatched ||= content.includes(WINDOWS_BROWSER_USE_CAPABILITY_PATCH_MARKER);
-  appServerSandboxOverridePatched ||= content.includes(APP_SERVER_SANDBOX_OVERRIDE);
+  appServerSandboxOverridePatched ||=
+    content.includes(APP_SERVER_SANDBOX_OVERRIDE) ||
+    content.includes(APP_SERVER_SANDBOX_OVERRIDE_DQ);
   nodeReplFeatureConfigPatched ||= content.includes(NODE_REPL_FEATURE_ENABLED_PATCH_MARKER);
   nodeReplDisableSandboxPatched ||=
     content.includes(NODE_REPL_DISABLE_SANDBOX_PATCH_MARKER) &&

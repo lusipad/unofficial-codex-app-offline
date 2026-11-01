@@ -1,5 +1,77 @@
 # Changelog
 
+## 2026-11-01
+
+### 中文
+
+- 修复 26.1027.3384.0 离线包构建与 CI 失败（issue #139）：
+  1. **根因**：上游在 26.1027 中调整了前端构建与压缩混淆工具链，导致多处代码模式漂移：
+     - 字符串规范化由反引号变更为双引号（`"HEAD"`、`"@"===t`、`"legacy"`、`"disabled"` 等）；
+     - 操作数规范化顺序颠倒（`t.target==null` -> `null==t.target`、`"win32"===n` -> `n==="win32"`、`k.length===0` -> `0===k.length`）；
+     - ES Module 间接调用转换（`(0, r6.Tg)(e)`、`(0, ec.kTr)(...)`）；
+     - 函数定义内联化与动态提取（Settings BrowserWindow 依赖的 electron 变量名由固定标识符变为动态提取）；
+     - 代码拆分漂移：Workspace Dependencies Gate（`3026692602`）相邻的 Gate `3693343337` 被移至 `general-settings-*.js`，导致相邻 gate 的 lookahead 匹配失败；
+     - 主进程 app-server sandbox override 参数结构更新（新增包含 `features.code_mode_host=true` 的数组结构）。
+  2. **修复落点**：
+     - `scripts/patch-app-asar.mjs`：
+       - 更新 `patchWorktreeHeadRefResolver`，适配双引号与可选的 `var` 变量提升；
+       - 更新 `SETTINGS_NOT_IMPLEMENTED_CASE_BLOCK_RE` 与 `buildSettingsReplacement`，支持引号兼容并动态捕获 electron 模块变量名；
+       - 更新 `AUTOMATION_RUNTIME_TARGET_CWD_RE` 与替换函数，支持操作数反转与双引号；
+       - 更新 `APP_SERVER_SANDBOX_OVERRIDE_PATCHES`，支持包含 `code_mode_host` 的新启动参数数组；
+       - 更新 `WINDOWS_BROWSER_USE_CAPABILITY_CANONICAL_RE`，支持操作数颠倒；
+       - 更新 `NODE_REPL_FEATURE_CONFIG_CURRENT_RE`、`FEATURE_OVERRIDES_CONFIG_NAMESPACE_RE`、`NODE_REPL_CONFIG_HELPER_RE`，适配匿名内联函数与长度比较；
+       - 更新 `COMPUTER_USE_RUNTIME_PATHS_CANONICAL_RE`、`COMPUTER_USE_SCHEDULED_FORWARD_REQUEST_NEEDLE`、`CHROME_DESCRIPTOR_CURRENT_RE`、`BROWSER_USE_DESCRIPTOR_CURRENT_RE`，适配间接调用 `(0, ...)` 与双引号；
+       - 更新 `patchWorkspaceDependenciesSettingsGate`，将相邻 gate `3693343337` 设为可选 lookahead。
+     - `scripts/verify-offline-package.ps1`：
+       - 同步放宽 `APP_SERVER_SANDBOX_OVERRIDE`、`BROWSER_USE_DESCRIPTOR_CURRENT_PATCHED_RE`、`NODE_REPL_FEATURE_CONFIG_CURRENT_DISABLED_RE`、`COMPUTER_USE_CANONICAL_RUNTIME_PATHS_PATCHED_RE` 验证规则。
+     - `scripts/test/current-bundle-compatibility.test.cjs`：
+       - 新增 26.1027 bundle 真实 fixtures（settings、worktree、computer-use runtime paths、browser descriptors、automation cwd、workspace dependencies gate）并验证补丁与断言。
+  3. **功能探针与 Gate 基线更新**：
+     - 运行 `offline-feature-probe` 实测确认 20/51 设置分区可见（金标准全部满足）；
+     - 执行 `--promote` 刷新基线至 26.1027.3384.0，同步更新 `docs/baselines/offline-features.json` 与 `docs/offline-features.md`；
+     - 完成 26.1027.3384.0 全量 Statsig gate 审阅并更新 `docs/baselines/gate-baseline.json`（共 819 个 ID，33 new / 99 gone / 144 changed，44 个核心离线 gate 同步生效）。
+  4. **验证**：
+     - `node --test ./scripts/test/*.test.cjs ./web-gateway/gateway/test/*.test.cjs` 269 项全过；
+     - `npm --prefix ./web-gateway run build:gateway` 成功；
+     - `build-offline-package.ps1 -RequireInstaller` 构建成功；
+     - `verify-offline-package.ps1` 完整性与冒烟验证全量通过。
+     - 产物：`dist\offline\codex-offline-26.1027.3384.0\`，setup.exe SHA256=`E76E0490E8E782C5CF79A94098143C022DFE17EFEFF88596AB43C0F68F187052`。
+
+### English
+
+- Fixed offline build and CI failure on 26.1027.3384.0 (issue #139):
+  1. **Root cause**: Upstream bundle toolchain and minifier adjustments caused multiple code pattern drifts:
+     - String literals canonicalized from template backticks to double quotes (`"HEAD"`, `"@"===t`, `"legacy"`, `"disabled"`, etc.);
+     - Normalized operand ordering inverted (`t.target==null` -> `null==t.target`, `"win32"===n` -> `n==="win32"`, `k.length===0` -> `0===k.length`);
+     - Module calls transformed into indirect calls (`(0, r6.Tg)(e)`, `(0, ec.kTr)(...)`);
+     - Helper functions inlined/dynamically referenced (the electron variable in Settings BrowserWindow dynamically matched instead of hardcoded);
+     - Code splitting drift: Gate `3693343337` moved from `configuration-panel-*.js` to `general-settings-*.js`, causing adjacent lookahead for Workspace Dependencies Gate `3026692602` to fail;
+     - App-server sandbox launch argument updated with an array including `features.code_mode_host=true`.
+  2. **Fixes**:
+     - `scripts/patch-app-asar.mjs`:
+       - Updated `patchWorktreeHeadRefResolver` to handle double quotes and optional hoisted `var`;
+       - Updated `SETTINGS_NOT_IMPLEMENTED_CASE_BLOCK_RE` and `buildSettingsReplacement` to dynamically capture the electron module variable and support quotes;
+       - Updated `AUTOMATION_RUNTIME_TARGET_CWD_RE` and its replacer to support inverted operands and quotes;
+       - Added double-quoted and `code_mode_host`-enabled launch patterns to `APP_SERVER_SANDBOX_OVERRIDE_PATCHES`;
+       - Updated `WINDOWS_BROWSER_USE_CAPABILITY_CANONICAL_RE` to match inverted operands;
+       - Updated `NODE_REPL_FEATURE_CONFIG_CURRENT_RE`, `FEATURE_OVERRIDES_CONFIG_NAMESPACE_RE`, and `NODE_REPL_CONFIG_HELPER_RE`;
+       - Updated `COMPUTER_USE_RUNTIME_PATHS_CANONICAL_RE`, `COMPUTER_USE_SCHEDULED_FORWARD_REQUEST_NEEDLE`, `CHROME_DESCRIPTOR_CURRENT_RE`, and `BROWSER_USE_DESCRIPTOR_CURRENT_RE` to accommodate indirect calls and double quotes;
+       - Updated `patchWorkspaceDependenciesSettingsGate` to make adjacent gate `3693343337` optional in lookahead.
+     - `scripts/verify-offline-package.ps1`:
+       - Relaxed verification patterns for `APP_SERVER_SANDBOX_OVERRIDE`, `BROWSER_USE_DESCRIPTOR_CURRENT_PATCHED_RE`, `NODE_REPL_FEATURE_CONFIG_CURRENT_DISABLED_RE`, and `COMPUTER_USE_CANONICAL_RUNTIME_PATHS_PATCHED_RE`.
+     - `scripts/test/current-bundle-compatibility.test.cjs`:
+       - Added 26.1027 bundle fixtures and tests for settings, worktree, computer-use runtime paths, browser descriptors, automation cwd, and workspace dependencies gate.
+  3. **Feature probe & gate baseline update**:
+     - `offline-feature-probe` confirmed 20/51 settings sections visible (gold-standard assertions met);
+     - Promoted baseline to 26.1027.3384.0 via `--promote`, updating `docs/baselines/offline-features.json` and `docs/offline-features.md`;
+     - Reviewed Statsig gates and refreshed `docs/baselines/gate-baseline.json` for 26.1027.3384.0 (819 total IDs, 33 new / 99 gone / 144 changed, 44 core offline gates verified).
+  4. **Verified**:
+     - All 269 unit tests pass;
+     - Web gateway builds cleanly;
+     - `build-offline-package.ps1 -RequireInstaller` succeeds;
+     - `verify-offline-package.ps1` passes all package integrity, smoke, and probe checks.
+     - Artifact: `dist\offline\codex-offline-26.1027.3384.0\`, setup.exe SHA256=`E76E0490E8E782C5CF79A94098143C022DFE17EFEFF88596AB43C0F68F187052`.
+
 ## 2026-10-25
 
 ### 中文

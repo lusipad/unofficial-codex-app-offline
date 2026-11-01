@@ -76,7 +76,7 @@ test("26.1013 settings IPC keeps its native config handler while patching settin
     "  // Helper: reload the renderer at a given settings route.",
   );
   const replacementSource = sourceSlice(
-    "  function buildSettingsReplacement(messageVar) {",
+    "  function buildSettingsReplacement(messageVar, electronVar = 'c') {",
     "\n  const AUTOMATION_CWD_NORMALIZER_INLINE =",
   );
   const { needleRe, buildReplacement } = Function(
@@ -103,6 +103,18 @@ test("26.1013 settings IPC keeps its native config handler while patching settin
   const renamedPatched = renamedVar.replace(needleRe, (...match) => buildReplacement(match[1]));
   assert.match(renamedPatched, /_url\.searchParams\.set\("initialRoute","\/settings\/"\+t\.section\)/);
   assert.ok(renamedPatched.includes('throw Error(`"${t.type}" is not implemented in Electron.`)'));
+
+  // 26.1027 bundle uses double quotes and minified electron identifier (eo).
+  const fixture1027 =
+    'case"navigate-in-new-editor-tab":case"open-vscode-command":' +
+    'case"open-extension-settings":case"open-keyboard-shortcuts":' +
+    'case"show-settings":case"install-wsl":' +
+    'throw Error(`"${t.type}" is not implemented in Electron.`);' +
+    'case"open-config-toml":{await eo.shell.openPath("config.toml");break}';
+  const patched1027 = fixture1027.replace(needleRe, (...match) => buildReplacement(match[1], "eo"));
+  assert.notEqual(patched1027, fixture1027);
+  assert.match(patched1027, /case`show-settings`:\{let _win=eo\.BrowserWindow\.fromWebContents\(e\)/);
+  assert.match(patched1027, /_url\.searchParams\.set\("initialRoute","\/settings\/"\+t\.section\)/);
 });
 
 test("26.727 archive verifier accepts the current isError prop layout", () => {
@@ -337,6 +349,14 @@ test("26.814 Computer Use path resolver accepts the canonical bundled runtime", 
     "return Xr({env:t,pathExists:o})}";
 
   assert.match(fixture, currentResolverRe);
+
+  const fixture1027 =
+    'function rK({codexHome:e,env:t=process.env,marketplaceName:r=(0,rF.rx)(e$.x.resolve()),' +
+    'marketplaces:n,pathExists:i=eb.existsSync}){for(let s of rj({marketplaceName:r,marketplaces:n})){' +
+    'let r=s.plugins.find(e=>e.name===rF.t_&&e.installed&&e.enabled&&"local"===e.source.type);' +
+    'if(r?.source.type==="local")return rz({codexHome:e,env:t,pathExists:i})}' +
+    'return rz({env:t,pathExists:i})}';
+  assert.match(fixture1027, currentResolverRe);
 });
 
 test("26.814 package verification accepts the canonical Computer Use runtime marker", () => {
@@ -355,6 +375,14 @@ test("26.814 package verification accepts the canonical Computer Use runtime mar
     "return Xr({env:t,pathExists:o})}/*codex-offline:computer-use-resource-runtime-paths*/";
 
   assert.match(fixture, currentResolverRe);
+
+  const fixture1027Patched =
+    'function rK({codexHome:e,env:t=process.env,marketplaceName:r=(0,rF.rx)(e$.x.resolve()),' +
+    'marketplaces:n,pathExists:i=eb.existsSync}){for(let s of rj({marketplaceName:r,marketplaces:n})){' +
+    'let r=s.plugins.find(e=>e.name===rF.t_&&e.installed&&e.enabled&&"local"===e.source.type);' +
+    'if(r?.source.type==="local")return rz({codexHome:e,env:t,pathExists:i})}' +
+    'return rz({env:t,pathExists:i})}/*codex-offline:computer-use-resource-runtime-paths*/';
+  assert.match(fixture1027Patched, currentResolverRe);
 });
 
 test("26.814 browser descriptors patch shared plugin descriptor spreads", () => {
@@ -418,6 +446,44 @@ test("26.814 browser descriptors patch shared plugin descriptor spreads", () => 
       "...n.Ds.browser,autoInstallOptOutKey:n.As(n.Ds.browser.name)," +
       "installWhenMissing:!0,isAvailable:({features:e})=>" +
       "/*codex-offline:bundled-browser-plugins-no-force-reload*/!0,migrate:Ms",
+    ));
+
+    // 26.1027 bundle with indirect function calls (0, ...)
+    const fixture1027 =
+      "{...ec.iRL.chrome,syncInstallStateWithChromeExtension:!0," +
+      "isAvailable:({buildFlavor:e,features:t})=>t.externalBrowserUseAllowed&&(0,r6.Tg)(e)}\n" +
+      "{...ec.iRL.browser,autoInstallOptOutKey:(0,ec.kTr)(ec.iRL.browser.name)," +
+      "isAvailable:({features:e})=>e.inAppBrowserUseAllowed||e.externalBrowserUseAllowed,migrate:ln}";
+    fs.writeFileSync(filePath, fixture1027, "utf8");
+    const result1027 = patchBundledBrowserPlugins([filePath], {
+      browserUseDescriptorPatchedRe: /never/,
+      browserUseDescriptorRe: /never/,
+      browserUseDescriptorCurrentPatchedRe: /never/,
+      browserUseDescriptorCurrentRe: Function(
+        `"use strict";\n${browserUseRegexSource}\nreturn BROWSER_USE_DESCRIPTOR_CURRENT_RE;`,
+      )(),
+      chromeDescriptorCurrentPatchedRe: /never/,
+      chromeDescriptorCurrentRe: Function(
+        `"use strict";\n${regexSource}\nreturn CHROME_DESCRIPTOR_CURRENT_RE;`,
+      )(),
+      chromeDescriptorPatchedRe: /never/,
+      chromeDescriptorRe: /never/,
+      inAppBrowserDescriptorPatchedRe: /never/,
+      inAppBrowserDescriptorRe: /never/,
+      patchMarker: "/*codex-offline:bundled-browser-plugins-no-force-reload*/",
+      syncExternalBrowserDescriptorPatchedRe: /never/,
+      syncExternalBrowserDescriptorRe: /never/g,
+    });
+    assert.deepEqual(result1027.patchedFiles, [filePath]);
+    const patched1027 = fs.readFileSync(filePath, "utf8");
+    assert.ok(patched1027.includes(
+      "...ec.iRL.chrome,installWhenMissing:!0,syncInstallStateWithChromeExtension:!0," +
+      "isAvailable:({buildFlavor:e,features:t})=>/*codex-offline:bundled-browser-plugins-no-force-reload*/!0",
+    ));
+    assert.ok(patched1027.includes(
+      "...ec.iRL.browser,autoInstallOptOutKey:(0,ec.kTr)(ec.iRL.browser.name)," +
+      "installWhenMissing:!0,isAvailable:({features:e})=>" +
+      "/*codex-offline:bundled-browser-plugins-no-force-reload*/!0,migrate:ln",
     ));
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true });
@@ -753,6 +819,13 @@ test("26.721 automation runtime normalizes cwd before creating legacy targets", 
   assert.notEqual(patched, fixture);
   assert.ok(patched.includes("t.cwds.map(e=>typeof e==`string`?e:e).map(e=>"));
   assert.ok(patched.includes("type:`legacy`,cwd:e"));
+
+  // 26.1027 bundle with null==n.target and double quotes
+  const fixture1027 = 'if(null==n.target)b=n.cwds.map(e=>({type:"legacy",cwd:e}));else';
+  const patched1027 = fixture1027.replace(patch.re, patch.replacement);
+  assert.notEqual(patched1027, fixture1027);
+  assert.ok(patched1027.includes("n.cwds.map(e=>typeof e==`string`?e:e).map(e=>"));
+  assert.ok(patched1027.includes("type:`legacy`,cwd:e"));
 });
 
 test("26.721 plugin cache lock failures remain nonfatal in both reconcile branches", () => {
@@ -933,6 +1006,19 @@ test("26.825 worktree resolver keeps the upstream HEAD fast-path explicit", () =
   assert.equal(secondPass.patched, false);
   assert.equal(secondPass.content, patched.content);
 
+  // 26.1027 bundle with var declaration and double quotes
+  const fixture1027 =
+    'async function _o(e,t,r){var n;if("HEAD"===t||"@"===t)return await _r(e,`${t}^{commit}`,r)==null?null:{ref:t};' +
+    'let i=(n=t).startsWith("refs/heads/")?n:n.startsWith("refs/")?null:_i(n),a=await _n(e,t,r);if(null!=a){let n=`refs/remotes/${a}`,' +
+    'o=await _r(e,`${n}^{commit}`,r)!=null?n:_i(a),s=await g7(e,i??t,o,r);return s?.state==="right-ahead"?{ref:o}:{ref:i??t}}';
+  const patched1027 = patchWorktreeHeadRefResolver(fixture1027, marker);
+  assert.equal(patched1027.patched, true);
+  assert.equal(patched1027.count, 1);
+  assert.match(
+    patched1027.content,
+    /async function _o\(e,t,r\)\{if\(t===`HEAD`\)return\{ref:`HEAD`\}\/\*codex-offline:worktree-head-ref\*\/;var n;if\("HEAD"===t\|\|"@"===t\)/,
+  );
+
   const unknown = patchWorktreeHeadRefResolver(unknownFixture, marker);
   assert.equal(unknown.patched, false);
   assert.equal(unknown.alreadyCorrect, false);
@@ -964,6 +1050,14 @@ test("26.825 node_repl config enables quoted features.js_repl without touching j
   const alreadyPatched = patched.replace(currentRe, `$1!0${marker}$3`);
   assert.equal(alreadyPatched, patched);
   assert.doesNotMatch(unknownFixture, currentRe);
+
+  // 26.1027 bundle with double-quoted web_search:"disabled"
+  const fixture1027 =
+    'let defaults={include_permissions_instructions:!1,"features.apps":!1,' +
+    '"features.js_repl":!1,"features.js_repl_tools_only":!1,web_search:"disabled"};';
+  const patched1027 = fixture1027.replace(currentRe, `$1!0${marker}$3`);
+  assert.notEqual(patched1027, fixture1027);
+  assert.match(patched1027, currentPatchedRe);
 
   const retiredFixture = 'let defaults={"features.js_repl":!1};';
   assert.doesNotMatch(retiredFixture, currentRe);
@@ -1321,6 +1415,32 @@ test("26.727 Workspace Dependencies enables the current adjacent gate layout", (
   );
 });
 
+test("26.1027 Workspace Dependencies enables the gate layout without adjacent gate 3693343337", () => {
+  const patchSource = sourceSlice(
+    "function patchWorkspaceDependenciesSettingsGate(",
+    "// end patchWorkspaceDependenciesSettingsGate",
+  );
+  const patchWorkspaceDependenciesSettingsGate = Function(
+    "escapeRegExp",
+    `"use strict";\n${patchSource}\nreturn patchWorkspaceDependenciesSettingsGate;`,
+  )((value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  const fixture =
+    "settings.agent.dependencies.enabled.description;" +
+    "s=je(hn),c=je(`2106641128`),l;";
+
+  const result = patchWorkspaceDependenciesSettingsGate(
+    fixture,
+    "/*codex-offline:workspace-dependencies-settings*/",
+    "/*codex-offline:renderer-known-statsig-gates*/",
+  );
+  assert.equal(result.patched, true);
+  assert.ok(
+    result.content.includes(
+      "s=!0/*codex-offline:workspace-dependencies-settings*/,c=je(`2106641128`),l;",
+    ),
+  );
+});
+
 test("26.727 verifier recognizes the current agent settings surface", () => {
   const helperSource = verifierSourceSlice(
     "function hasWorkspaceDependenciesSettingsSurface(",
@@ -1534,6 +1654,22 @@ test("26.917 Windows Browser Use capability override matches the reduced upstrea
   }
   assert.ok(patched.includes(marker));
   assert.ok(patched.endsWith("}:e,o=t===a.in.Dev?Mte(n):null;return o==null?{...i}:{...i,...o}}"));
+
+  // 26.1027 bundle with reversed operands and double quotes
+  const fixture1027 =
+    'function Ar(e,{buildFlavor:t=a.in.resolve(),env:r=w.default.env,platform:n=w.default.platform}={})' +
+    '{let i="win32"===n&&"1"===r.CODEX_ELECTRON_ENABLE_WINDOWS_COMPUTER_USE?{...e,computerUse:!0}:e,' +
+    'o=t===a.in.Dev?Mte(r):null;return o==null?{...i}:{...i,...o}}';
+  const patched1027 = apply(
+    fixture1027,
+    capabilityKeys.map(key => `${key}:!0`).join(","),
+    marker,
+  );
+  assert.notEqual(patched1027, fixture1027);
+  assert.ok(patched1027.includes(marker));
+  for (const key of capabilityKeys) {
+    assert.ok(patched1027.includes(`${key}:!0`));
+  }
 });
 
 test("26.928 unauthenticated capability default-on splits the selector loading branch", () => {

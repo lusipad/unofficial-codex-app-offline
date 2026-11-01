@@ -404,7 +404,7 @@ function patchWorktreeHeadRefResolver(content, patchMarker) {
   // remote branch resolution. Match the complete stable prefix and the
   // beginning of that resolver, while leaving minified helper names variable.
   const resolverRe =
-    /async function (?<resolver>[A-Za-z_$][\w$]*)\((?<repository>[A-Za-z_$][\w$]*),(?<branch>[A-Za-z_$][\w$]*),(?<signal>[A-Za-z_$][\w$]*)\)\{(?=if\(\k<branch>===`HEAD`\|\|\k<branch>===`@`\)return await [A-Za-z_$][\w$]*\(\k<repository>,`\$\{\k<branch>\}\^\{commit\}`,\k<signal>\)==null\?null:\{ref:\k<branch>\};let [A-Za-z_$][\w$]*=[A-Za-z_$][\w$]*\(\k<branch>\),[A-Za-z_$][\w$]*=await [A-Za-z_$][\w$]*\(\k<repository>,\k<branch>,\k<signal>\);if\([A-Za-z_$][\w$]*!=null\)\{let [A-Za-z_$][\w$]*=`refs\/remotes\/\$\{[A-Za-z_$][\w$]*\}`)/g;
+    /async function (?<resolver>[A-Za-z_$][\w$]*)\((?<repository>[A-Za-z_$][\w$]*),(?<branch>[A-Za-z_$][\w$]*),(?<signal>[A-Za-z_$][\w$]*)\)\{(?=(?:var [A-Za-z_$][\w$]*;)?if\((?:\k<branch>===(?:`HEAD`|"HEAD")\|\|\k<branch>===(?:`@`|"@")|(?:"HEAD"|`HEAD`)===\k<branch>\|\|(?:"@"|`@`)===\k<branch>)\)return await [A-Za-z_$][\w$]*\(\k<repository>,`\$\{\k<branch>\}\^\{commit\}`,(?:\k<signal>|arguments\[2\])\)==null\?null:\{ref:\k<branch>\};let [\s\S]{0,120}?=await [A-Za-z_$][\w$]*\(\k<repository>,\k<branch>,\k<signal>\);if\((?:null!=[A-Za-z_$][\w$]*|[A-Za-z_$][\w$]*!=null)\)\{let [A-Za-z_$][\w$]*=`refs\/remotes\/\$\{[A-Za-z_$][\w$]*\}`)/g;
   let count = 0;
   const next = content.replace(resolverRe, (...args) => {
     const match = args[0];
@@ -999,8 +999,8 @@ function patchWorkspaceDependenciesSettingsGate(
   const importedWorkspaceGateRe = new RegExp(
     `([A-Za-z_$][\\w$]*)=(?:\\(0,[$\\w]+\\)|[$\\w]+)` +
       `\\([A-Za-z_$][\\w$]*\\),` +
-      `(?=[A-Za-z_$][\\w$]*=${enabledGate('2106641128')},` +
-      `[A-Za-z_$][\\w$]*=${enabledGate('3693343337')}(?:,|;))`,
+      `(?=[A-Za-z_$][\\w$]*=${enabledGate('2106641128')}(?:,` +
+      `[A-Za-z_$][\\w$]*=${enabledGate('3693343337')})?(?:,|;))`,
   );
   const next = content.replace(
     importedWorkspaceGateRe,
@@ -1017,8 +1017,8 @@ function patchWorkspaceDependenciesSettingsGate(
 
   const currentWorkspaceGateRe = new RegExp(
     `([A-Za-z_$][\\w$]*)=([A-Za-z_$][\\w$]*)\\(([A-Za-z_$][\\w$]*)\\),` +
-      `(?=[A-Za-z_$][\\w$]*=[A-Za-z_$][\\w$]*\\(\\\`2106641128\\\`\\),` +
-      `[A-Za-z_$][\\w$]*=[A-Za-z_$][\\w$]*\\(\\\`3693343337\\\`\\))`,
+      `(?=[A-Za-z_$][\\w$]*=[A-Za-z_$][\\w$]*\\(\\\`2106641128\\\`\\)(?:,` +
+      `[A-Za-z_$][\\w$]*=[A-Za-z_$][\\w$]*\\(\\\`3693343337\\\`\\))?(?:,|;))`,
   );
   const currentNext = content.replace(
     currentWorkspaceGateRe,
@@ -2021,7 +2021,7 @@ try {
   // renamed it from t to n), so capture it from the throw instead of
   // hardcoding a name. webContents=e, electron=c.
   const SETTINGS_NOT_IMPLEMENTED_CASE_BLOCK_RE =
-    /case`navigate-in-new-editor-tab`:case`open-vscode-command`:case`open-extension-settings`:case`open-keyboard-shortcuts`:case`show-settings`:case`install-wsl`:throw Error\(`"\$\{([A-Za-z_$][\w$]*)\.type\}" is not implemented in Electron\.`\)/;
+    /case[`"]navigate-in-new-editor-tab[`"]:case[`"]open-vscode-command[`"]:case[`"]open-extension-settings[`"]:case[`"]open-keyboard-shortcuts[`"]:case[`"]show-settings[`"]:case[`"]install-wsl[`"]:throw Error\(`"\$\{([A-Za-z_$][\w$]*)\.type\}" is not implemented in Electron\.`\)/;
 
   // Helper: reload the renderer at a given settings route.
   const NAV_HELPER =
@@ -2032,22 +2032,22 @@ try {
   const SETTINGS_ROUTE_DIRECT_RE_GLOBAL =
     /([A-Za-z_$][\w$]*)\.searchParams\.set\("initialRoute","\/settings\/"\+\(([A-Za-z_$][\w$]*)\.section\|\|"agent"\)\);/g;
 
-  function buildSettingsReplacement(messageVar) {
+  function buildSettingsReplacement(messageVar, electronVar = 'c') {
     return (
       'case`show-settings`:{' +
-        'let _win=c.BrowserWindow.fromWebContents(e);' +
+        `let _win=${electronVar}.BrowserWindow.fromWebContents(e);` +
         'if(_win){let _url=new URL(_win.getURL());' +
         buildSettingsRouteStatement('_url', messageVar) +
         '_win.loadURL(_url.toString())}' +
         'break}' +
       'case`open-extension-settings`:{' +
-        'let _win=c.BrowserWindow.fromWebContents(e);' +
+        `let _win=${electronVar}.BrowserWindow.fromWebContents(e);` +
         'if(_win){let _url=new URL(_win.getURL());' +
         '_url.searchParams.set("initialRoute","/settings/general-settings");' +
         '_win.loadURL(_url.toString())}' +
         'break}' +
       'case`open-keyboard-shortcuts`:{' +
-        'let _win=c.BrowserWindow.fromWebContents(e);' +
+        `let _win=${electronVar}.BrowserWindow.fromWebContents(e);` +
         'if(_win){let _url=new URL(_win.getURL());' +
         '_url.searchParams.set("initialRoute","/settings/general-settings");' +
         '_win.loadURL(_url.toString())}' +
@@ -2060,9 +2060,14 @@ try {
   const AUTOMATION_CWD_NORMALIZER_INLINE =
     'e=>typeof e==`string`&&e.startsWith(`\\\\\\\\?\\\\`)&&/^[A-Za-z]:/.test(e.slice(4))?e.slice(4):e';
   const AUTOMATION_RUNTIME_TARGET_CWD_RE =
-    /if\(([A-Za-z_$][\w$]*)\.target==null\)([A-Za-z_$][\w$]*)=\1\.cwds\.map\(([A-Za-z_$][\w$]*)=>\(\{type:`legacy`,cwd:\3\}\)\)/;
-  const AUTOMATION_RUNTIME_TARGET_CWD_REPLACEMENT =
-    `if($1.target==null)$2=$1.cwds.map(${AUTOMATION_CWD_NORMALIZER_INLINE}).map($3=>({type:\`legacy\`,cwd:$3}))`;
+    /if\((?:(?<target1>[A-Za-z_$][\w$]*)\.target==null\)(?<bVar1>[A-Za-z_$][\w$]*)=\k<target1>|null==(?<target2>[A-Za-z_$][\w$]*)\.target\)(?<bVar2>[A-Za-z_$][\w$]*)=\k<target2>)\.cwds\.map\((?<itemVar>[A-Za-z_$][\w$]*)=>\(\{type:[`"]legacy[`"],cwd:\k<itemVar>\}\)\)/;
+  const AUTOMATION_RUNTIME_TARGET_CWD_REPLACEMENT = (...args) => {
+    const groups = args.at(-1);
+    const target = groups.target1 || groups.target2;
+    const bVar = groups.bVar1 || groups.bVar2;
+    const item = groups.itemVar;
+    return `if(${target}.target==null)${bVar}=${target}.cwds.map(${AUTOMATION_CWD_NORMALIZER_INLINE}).map(${item}=>({type:\`legacy\`,cwd:${item}}))`;
+  };
   const AUTOMATION_RUNTIME_CWD_PATCH_MARKER =
     `.cwds.map(${AUTOMATION_CWD_NORMALIZER_INLINE})`;
   const APP_SERVER_SANDBOX_OVERRIDE_PATCHES = [
@@ -2071,8 +2076,16 @@ try {
       replacement: 'args:[`-c`,`windows.sandbox=\'unelevated\'`,`app-server`,`--analytics-default-enabled`]',
     },
     {
+      needle: 'args:["app-server","--analytics-default-enabled"]',
+      replacement: 'args:["-c","windows.sandbox=\'unelevated\'","app-server","--analytics-default-enabled"]',
+    },
+    {
       needle: '[`-c`,`features.code_mode_host=true`,`app-server`,`--analytics-default-enabled`]',
       replacement: '[`-c`,`features.code_mode_host=true`,`-c`,`windows.sandbox=\'unelevated\'`,`app-server`,`--analytics-default-enabled`]',
+    },
+    {
+      needle: '["-c","features.code_mode_host=true","app-server","--analytics-default-enabled"]',
+      replacement: '["-c","features.code_mode_host=true","-c","windows.sandbox=\'unelevated\'","app-server","--analytics-default-enabled"]',
     },
   ];
   const WINDOWS_BROWSER_USE_CAPABILITY_PATCH_MARKER =
@@ -2082,13 +2095,13 @@ try {
   // upstream no longer declares that key anywhere, so the override only has
   // `computerUse` to widen.
   const WINDOWS_BROWSER_USE_CAPABILITY_CANONICAL_RE =
-    /let ([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)===`win32`&&([A-Za-z_$][\w$]*)\.CODEX_ELECTRON_ENABLE_WINDOWS_COMPUTER_USE===`1`\?\{\.\.\.([A-Za-z_$][\w$]*),computerUse:!0\}:\4(?=,)/;
+    /let ([A-Za-z_$][\w$]*)=(?:([A-Za-z_$][\w$]*)===[`"]win32[`"]|[`"]win32[`"]===([A-Za-z_$][\w$]*))&&(?:\b([A-Za-z_$][\w$]*)\.CODEX_ELECTRON_ENABLE_WINDOWS_COMPUTER_USE===[`"]1[`"]|[`"]1[`"]===([A-Za-z_$][\w$]*)\.CODEX_ELECTRON_ENABLE_WINDOWS_COMPUTER_USE)\?\{\.\.\.([A-Za-z_$][\w$]*),computerUse:!0\}:\6(?=,)/;
   const NODE_REPL_FEATURE_ENABLED_PATCH_MARKER =
     contractPatchMarker('/*codex-offline:node-repl-feature-enabled*/');
   const NODE_REPL_FEATURE_CONFIG_CURRENT_RE =
-    /([A-Za-z_$][\w$]*=\{(?=[\s\S]{0,120}include_permissions_instructions:!1,)[\s\S]{0,800}?["']features\.js_repl["']:\s*)(!0|!1)(?:\/\*codex-offline:node-repl-feature-enabled\*\/)?([\s\S]{0,500}?web_search:`disabled`\})(?=[,;)\]])/;
+    /([A-Za-z_$][\w$]*=\{(?=[\s\S]{0,120}include_permissions_instructions:!1,)[\s\S]{0,800}?["']features\.js_repl["']:\s*)(!0|!1)(?:\/\*codex-offline:node-repl-feature-enabled\*\/)?([\s\S]{0,500}?web_search:(?:`disabled`|"disabled")\})(?=[,;)\]])/;
   const NODE_REPL_FEATURE_CONFIG_CURRENT_PATCHED_RE =
-    /[A-Za-z_$][\w$]*=\{(?=[\s\S]{0,120}include_permissions_instructions:!1,)[\s\S]{0,800}?["']features\.js_repl["']:\s*!0\/\*codex-offline:node-repl-feature-enabled\*\/[\s\S]{0,500}?web_search:`disabled`\}(?=[,;)\]])/;
+    /[A-Za-z_$][\w$]*=\{(?=[\s\S]{0,120}include_permissions_instructions:!1,)[\s\S]{0,800}?["']features\.js_repl["']:\s*!0\/\*codex-offline:node-repl-feature-enabled\*\/[\s\S]{0,500}?web_search:(?:`disabled`|"disabled")\}(?=[,;)\]])/;
   const NODE_REPL_DISABLE_SANDBOX_PATCH_MARKER =
     contractPatchMarker('/*codex-offline:node-repl-disable-sandbox*/');
   const NODE_REPL_TOOL_SEARCH_FEATURE_PATCH_MARKER =
@@ -2124,7 +2137,7 @@ try {
   const FEATURE_OVERRIDES_PRESERVE_MCP_CONFIG_PATCH_MARKER =
     contractPatchMarker('/*codex-offline:feature-overrides-preserve-mcp-config*/');
   const FEATURE_OVERRIDES_CONFIG_NAMESPACE_RE =
-    /function\s+([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*)\)\{let\s+([A-Za-z_$][\w$]*)=\{\};for\(let\[([A-Za-z_$][\w$]*),([A-Za-z_$][\w$]*)\]of Object\.entries\(\2\)\)\{let\s+([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\(\4\);([A-Za-z_$][\w$]*)\.has\(\6\)\|\|\(\3\[([A-Za-z_$][\w$]*)\(\6\)\]=\5\)\}return \3\}/;
+    /function(?:\s+([A-Za-z_$][\w$]*))?\(([A-Za-z_$][\w$]*)\)\{let\s+([A-Za-z_$][\w$]*)=\{\};for\(let\[([A-Za-z_$][\w$]*),([A-Za-z_$][\w$]*)\]of Object\.entries\(\2\)\)\{let\s+([A-Za-z_$][\w$]*)=([^;]+);([A-Za-z_$][\w$]*)\.has\(\6\)\|\|\(\3\[([A-Za-z_$][\w$]*)\(\6\)\]=\5\)\}return \3\}/;
   const FEATURE_OVERRIDES_UNIFIED_EXEC_ONLY_RE =
     /return ([A-Za-z_$][\w$]*)\[`features\.unified_exec`\]=!0,\1\}\/\*codex-offline:feature-overrides-preserve-mcp-config\*\//;
   const FEATURE_OVERRIDES_TOOL_SEARCH_PATCHED_RE =
@@ -2155,7 +2168,7 @@ try {
   const BUNDLED_PLUGIN_CACHE_LOCK_CURRENT_CATCH_THROW_RE =
     /catch\(([A-Za-z_$][\w$]*)\)\{if\(([A-Za-z_$][\w$]*)\.warning\(`bundled_plugins_marketplace_install_failed`,\{safe:\{errorCategory:([A-Za-z_$][\w$]*)\(\{error:\1,platformFamily:([A-Za-z_$][\w$]*)\.platformFamily\}\),marketplaceName:([A-Za-z_$][\w$]*),platformFamily:\4\.platformFamily\},sensitive:\{error:\1,marketplaceRoot:\4\.materializedMarketplace\.marketplaceRoot\}\}\),\4\.throwOnReconcileFailure\)throw \1;return\{/;
   const NODE_REPL_CONFIG_HELPER_RE =
-    /\{\[`mcp_servers\.\$\{([A-Za-z_$][\w$]*)\}`\]:\{args:\[\],command:([A-Za-z_$][\w$]*),env:([A-Za-z_$][\w$]*)(,\.\.\.[A-Za-z_$][\w$]*\.length===0\?\{\}:\{env_vars:Array\.from\([A-Za-z_$][\w$]*\)\}),startup_timeout_sec:120\}\}/;
+    /\{\[`mcp_servers\.\$\{([A-Za-z_$][\w$]*)\}`\]:\{args:\[\],command:([A-Za-z_$][\w$]*),env:([A-Za-z_$][\w$]*)(,\.\.\.(?:[A-Za-z_$][\w$]*\.length===0|0===[A-Za-z_$][\w$]*\.length)\?\{\}:\{env_vars:Array\.from\([A-Za-z_$][\w$]*\)\}),startup_timeout_sec:120\}\}/;
   const NODE_REPL_CONFIG_HELPER_REPLACEMENT =
     '{[`mcp_servers.${$1}`]:{args:[`--disable-sandbox`],command:$2,env:$3$4,startup_timeout_sec:120},' +
     '[`features.tool_search`]:!0,' +
@@ -2168,7 +2181,7 @@ try {
     '}' +
     NODE_REPL_DISABLE_SANDBOX_PATCH_MARKER;
   const COMPUTER_USE_RUNTIME_PATHS_CANONICAL_RE =
-    /function (?<functionName>[A-Za-z_$][\w$]*)\(\{codexHome:(?<codexHome>[A-Za-z_$][\w$]*),env:(?<env>[A-Za-z_$][\w$]*)=process\.env,marketplaceName:(?<marketplaceName>[A-Za-z_$][\w$]*)=(?<marketplaceNameDefault>[^,]+),marketplaces:(?<marketplaces>[A-Za-z_$][\w$]*),pathExists:(?<pathExists>[A-Za-z_$][\w$]*)=(?<fsNamespace>[A-Za-z_$][\w$]*)\.existsSync\}\)\{for\(let (?<marketplace>[A-Za-z_$][\w$]*) of (?<listMarketplaces>[A-Za-z_$][\w$]*)\(\{marketplaceName:\k<marketplaceName>,marketplaces:\k<marketplaces>\}\)\)if\(\k<marketplace>\.plugins\.find\((?<pluginEntry>[A-Za-z_$][\w$]*)=>\k<pluginEntry>\.name===`computer-use`&&\k<pluginEntry>\.installed&&\k<pluginEntry>\.enabled&&\k<pluginEntry>\.source\.type===`local`\)\?\.source\.type===`local`\)return (?<computerUsePaths>[A-Za-z_$][\w$]*)\(\{codexHome:\k<codexHome>,env:\k<env>,pathExists:\k<pathExists>\}\);return \k<computerUsePaths>\(\{env:\k<env>,pathExists:\k<pathExists>\}\)\}/;
+    /function (?<functionName>[A-Za-z_$][\w$]*)\(\{codexHome:(?<codexHome>[A-Za-z_$][\w$]*),env:(?<env>[A-Za-z_$][\w$]*)=process\.env,marketplaceName:(?<marketplaceName>[A-Za-z_$][\w$]*)=(?<marketplaceNameDefault>[^]+?),marketplaces:(?<marketplaces>[A-Za-z_$][\w$]*),pathExists:(?<pathExists>[A-Za-z_$][\w$]*)=(?<fsNamespace>[A-Za-z_$][\w$]*)\.existsSync\}\)\{for\(let (?<marketplace>[A-Za-z_$][\w$]*) of (?<listMarketplaces>[A-Za-z_$][\w$]*)\(\{marketplaceName:\k<marketplaceName>,marketplaces:\k<marketplaces>\}\)\)\{?(?:if\(\k<marketplace>\.plugins\.find\((?<pluginEntry1>[A-Za-z_$][\w$]*)=>\k<pluginEntry1>\.name===(?:`computer-use`|"computer-use"|[A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*)&&\k<pluginEntry1>\.installed&&\k<pluginEntry1>\.enabled&&(?:`local`===\k<pluginEntry1>\.source\.type|\k<pluginEntry1>\.source\.type===`local`|"local"===\k<pluginEntry1>\.source\.type|\k<pluginEntry1>\.source\.type==="local")\)\?\.source\.type===[`"]local[`"]\)|let (?<foundVar>[A-Za-z_$][\w$]*)=\k<marketplace>\.plugins\.find\((?<pluginEntry2>[A-Za-z_$][\w$]*)=>\k<pluginEntry2>\.name===(?:`computer-use`|"computer-use"|[A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*)&&\k<pluginEntry2>\.installed&&\k<pluginEntry2>\.enabled&&(?:`local`===\k<pluginEntry2>\.source\.type|\k<pluginEntry2>\.source\.type===`local`|"local"===\k<pluginEntry2>\.source\.type|\k<pluginEntry2>\.source\.type==="local")\);if\(\k<foundVar>\?\.source\.type===[`"]local[`"]\))return (?<computerUsePaths>[A-Za-z_$][\w$]*)\(\{codexHome:\k<codexHome>,env:\k<env>,pathExists:\k<pathExists>\}\);?\}?return \k<computerUsePaths>\(\{env:\k<env>,pathExists:\k<pathExists>\}\)\}/;
   const COMPUTER_USE_RESOURCE_RUNTIME_PATHS_CURRENT_RE =
     /function ([A-Za-z_$][\w$]*)\(\{codexHome:([A-Za-z_$][\w$]*),env:([A-Za-z_$][\w$]*)=process\.env,marketplaceName:([A-Za-z_$][\w$]*)=([^,{}]+),marketplaces:([A-Za-z_$][\w$]*),pathExists:([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\.existsSync\}\)\{for\(let ([A-Za-z_$][\w$]*) of ([A-Za-z_$][\w$]*)\(\{marketplaceName:\4,marketplaces:\6\}\)\)if\(\9\.plugins\.find\(([A-Za-z_$][\w$]*)=>\11\.name===`computer-use`&&\11\.installed&&\11\.enabled&&\11\.source\.type===`local`\)\?\.source\.type===`local`\)return ([A-Za-z_$][\w$]*)\(\{codexHome:\2,env:\3,pathExists:\7\}\);return \12\(\{env:\3,pathExists:\7\}\)\}/;
   const COMPUTER_USE_FORWARD_THREAD_START_DIAGNOSTICS_NEEDLE =
@@ -2215,8 +2228,12 @@ try {
     'if(Array.isArray(_codexOfflineInput)&&_codexOfflineInput.some(e=>e?.type===`mention`&&typeof e?.path===`string`&&e.path.includes(`plugin://computer-use`))&&!_codexOfflineInput.some(e=>e?.type===`skill`&&(e?.name===`computer-use`||typeof e?.path===`string`&&e.path.includes(`computer-use`))))' +
     '_codexOfflineInput.push({type:`skill`,name:`computer-use`,path:_codexOfflineComputerUseSkillPath})}' +
     COMPUTER_USE_INPUT_SKILL_PATCH_MARKER;
-  const COMPUTER_USE_SCHEDULED_FORWARD_REQUEST_NEEDLE =
+  const COMPUTER_USE_SCHEDULED_FORWARD_REQUEST_NEEDLE_BT =
     'this.options.logger.debug(`bridge_forwarded_to_transport`';
+  const COMPUTER_USE_SCHEDULED_FORWARD_REQUEST_NEEDLE_DQ =
+    'this.options.logger.debug("bridge_forwarded_to_transport"';
+  const COMPUTER_USE_SCHEDULED_FORWARD_REQUEST_NEEDLE =
+    COMPUTER_USE_SCHEDULED_FORWARD_REQUEST_NEEDLE_BT;
   const COMPUTER_USE_THREAD_START_TOOL_SEARCH_CODE =
     'if(t.method===`thread/start`&&t.params?.config?.[`mcp_servers.node_repl`]!=null)' +
     '{let _codexOfflineNodeReplConfig=t.params.config[`mcp_servers.node_repl`];' +
@@ -2627,7 +2644,7 @@ try {
   const CHROME_DESCRIPTOR_RE =
     /(\{forceReload:!0,)(?:installWhenMissing:!0,)?(name:lt,isAvailable:\(\{buildFlavor:([A-Za-z_$][\w$]*),features:([A-Za-z_$][\w$]*)\}\)=>)(\4\.externalBrowserUseAllowed&&Yn\(\3\))(\})/;
   const CHROME_DESCRIPTOR_CURRENT_RE =
-    /(\{\.\.\.[A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*\.chrome,)(syncInstallStateWithChromeExtension:!0,isAvailable:\(\{buildFlavor:([A-Za-z_$][\w$]*),features:([A-Za-z_$][\w$]*)\}\)=>)(\4\.externalBrowserUseAllowed&&[A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*\(\3\))(\})/;
+    /(\{\.\.\.[A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*\.chrome,)(syncInstallStateWithChromeExtension:!0,isAvailable:\(\{buildFlavor:([A-Za-z_$][\w$]*),features:([A-Za-z_$][\w$]*)\}\)=>)(\4\.externalBrowserUseAllowed&&(?:[A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*|\(0,[A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*\))\(\3\))(\})/;
   const CHROME_DESCRIPTOR_PATCHED_RE =
     /\{installWhenMissing:!0,name:lt,isAvailable:\(\{buildFlavor:[A-Za-z_$][\w$]*,features:[A-Za-z_$][\w$]*\}\)=>\/\*codex-offline:bundled-browser-plugins-no-force-reload\*\/!0\}/;
   const CHROME_DESCRIPTOR_CURRENT_PATCHED_RE =
@@ -2637,9 +2654,9 @@ try {
   const BROWSER_USE_DESCRIPTOR_PATCHED_RE =
     /\{autoInstallOptOutKey:[A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*\([A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*\),installWhenMissing:!0,name:[A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*,isAvailable:\(\{features:[A-Za-z_$][\w$]*\}\)=>\/\*codex-offline:bundled-browser-plugins-no-force-reload\*\/!0,migrate:[A-Za-z_$][\w$]*\}/;
   const BROWSER_USE_DESCRIPTOR_CURRENT_RE =
-    /(\{\.\.\.[A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*\.browser,)(autoInstallOptOutKey:[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\),)(isAvailable:\(\{features:([A-Za-z_$][\w$]*)\}\)=>)(?:\4\.inAppBrowserUseAllowed(?:\|\|\4\.externalBrowserUseAllowed)?)(,migrate:[A-Za-z_$][\w$]*\})/;
+    /(\{\.\.\.[A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*\.browser,)(autoInstallOptOutKey:(?:\(0,[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\)|[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\),)(isAvailable:\(\{features:([A-Za-z_$][\w$]*)\}\)=>)(?:\4\.inAppBrowserUseAllowed(?:\|\|\4\.externalBrowserUseAllowed)?)(,migrate:[A-Za-z_$][\w$]*\})/;
   const BROWSER_USE_DESCRIPTOR_CURRENT_PATCHED_RE =
-    /\{\.\.\.[A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*\.browser,autoInstallOptOutKey:[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\),installWhenMissing:!0,isAvailable:\(\{features:[A-Za-z_$][\w$]*\}\)=>\/\*codex-offline:bundled-browser-plugins-no-force-reload\*\/!0,migrate:[A-Za-z_$][\w$]*\}/;
+    /\{\.\.\.[A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*\.browser,autoInstallOptOutKey:(?:\(0,[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\)|[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\),installWhenMissing:!0,isAvailable:\(\{features:[A-Za-z_$][\w$]*\}\)=>\/\*codex-offline:bundled-browser-plugins-no-force-reload\*\/!0,migrate:[A-Za-z_$][\w$]*\}/;
   const SYNC_EXTERNAL_BROWSER_DESCRIPTOR_RE =
     /\{(?:forceReload:!0,)?name:([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)?),syncInstallStateWithChromeExtension:!0,isAvailable:\(\{(buildFlavor:[A-Za-z_$][\w$]*(?:,env:[A-Za-z_$][\w$]*)?,features:([A-Za-z_$][\w$]*))\}\)=>(?:(?:[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\([A-Za-z_$][\w$]*(?:,[A-Za-z_$][\w$]*)?\)&&\3\.externalBrowserUseAllowed)|(?:\3\.externalBrowserUseAllowed&&[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\([A-Za-z_$][\w$]*\)))(\})/g;
   const SYNC_EXTERNAL_BROWSER_DESCRIPTOR_PATCHED_RE =
@@ -2705,7 +2722,9 @@ try {
 
   for (const filePath of mainBundleFiles) {
     const content = fs.readFileSync(filePath, 'utf8');
-    durableSignInErrorMessageSeen ||= content.includes(`Error(\`${DURABLE_SIGN_IN_ERROR_MESSAGE}\`)`);
+    durableSignInErrorMessageSeen ||=
+      content.includes(`Error(\`${DURABLE_SIGN_IN_ERROR_MESSAGE}\`)`) ||
+      content.includes(`Error("${DURABLE_SIGN_IN_ERROR_MESSAGE}")`);
     const result = patchDurableSignInRetryStop(content, DURABLE_SIGN_IN_RETRY_STOP_PATCH_MARKER);
     if (result.patched) {
       fs.writeFileSync(filePath, result.content, 'utf8');
@@ -2754,13 +2773,16 @@ try {
     const originalContent = content;
     let modified = false;
 
-    settingsHandlerSeen ||= content.includes('case`show-settings`:{');
+    settingsHandlerSeen ||=
+      content.includes('case`show-settings`:{') ||
+      content.includes('case"show-settings":{');
 
     const settingsCaseMatch = SETTINGS_NOT_IMPLEMENTED_CASE_BLOCK_RE.exec(content);
     if (settingsCaseMatch) {
+      const electronVar = content.match(/([A-Za-z_$][\w$]*)\.BrowserWindow\.fromWebContents/)?.[1] ?? 'c';
       content = content.replace(
         SETTINGS_NOT_IMPLEMENTED_CASE_BLOCK_RE,
-        () => buildSettingsReplacement(settingsCaseMatch[1]),
+        () => buildSettingsReplacement(settingsCaseMatch[1], electronVar),
       );
       modified = true;
       settingsPatchedFiles.push(path.relative(tmpDir, filePath));
@@ -2778,7 +2800,9 @@ try {
       settingsRoutePatchedFiles.push(path.relative(tmpDir, filePath));
     }
 
-    settingsHandlerSeen ||= content.includes('case`show-settings`:{');
+    settingsHandlerSeen ||=
+      content.includes('case`show-settings`:{') ||
+      content.includes('case"show-settings":{');
 
     if (modified) {
       fs.writeFileSync(filePath, content, 'utf8');
@@ -2930,8 +2954,14 @@ try {
     if (WINDOWS_BROWSER_USE_CAPABILITY_CANONICAL_RE.test(content)) {
       content = content.replace(
         WINDOWS_BROWSER_USE_CAPABILITY_CANONICAL_RE,
-        'let $1=$2===`win32`&&$3.CODEX_ELECTRON_ENABLE_WINDOWS_COMPUTER_USE===`1`?' +
-          `{...$4,${DESKTOP_BROWSER_USE_CAPABILITY_PATCH_FIELDS}${WINDOWS_BROWSER_USE_CAPABILITY_PATCH_MARKER}}:$4`,
+        (match, iVar, p1, p2, e1, e2, objVar) => {
+          const platformVar = p1 || p2;
+          const envVar = e1 || e2;
+          return (
+            `let ${iVar}=${platformVar}===\`win32\`&&${envVar}.CODEX_ELECTRON_ENABLE_WINDOWS_COMPUTER_USE===\`1\`?` +
+            `{...${objVar},${DESKTOP_BROWSER_USE_CAPABILITY_PATCH_FIELDS}${WINDOWS_BROWSER_USE_CAPABILITY_PATCH_MARKER}}:${objVar}`
+          );
+        },
       );
     } else {
       continue;
@@ -3070,24 +3100,28 @@ try {
         keyVar,
         valueVar,
         normalizedKeyVar,
-        stripPrefixFunction,
+        stripExpr,
         unsupportedFeaturesSet,
         ensureFeaturePrefixFunction,
-      ) =>
-        `function ${functionName}(${inputVar}){let ${outputVar}={};` +
-        `for(let[${keyVar},${valueVar}]of Object.entries(${inputVar})){` +
-        `if(${keyVar}.startsWith(\`mcp_servers.\`)){${outputVar}[${keyVar}]=${valueVar};continue}` +
-        `let ${normalizedKeyVar}=${stripPrefixFunction}(${keyVar});` +
-        `${unsupportedFeaturesSet}.has(${normalizedKeyVar})||` +
-        `(${outputVar}[${ensureFeaturePrefixFunction}(${normalizedKeyVar})]=${valueVar})}` +
-        `return ${outputVar}[\`features.unified_exec\`]=!0,` +
-        `${outputVar}[\`features.tool_search\`]=!0,` +
-        `${outputVar}[\`features.js_repl_tools_only\`]=!0,` +
-        `${outputVar}[\`features.tool_suggest\`]=!0,` +
-        `${outputVar}[\`features.tool_search_always_defer_mcp_tools\`]=!0,` +
-        `${outputVar}[\`features.non_prefixed_mcp_tool_names\`]=!0,` +
-        `${outputVar}[\`features.unavailable_dummy_tools\`]=!0,${outputVar}}` +
-        FEATURE_OVERRIDES_PRESERVE_MCP_CONFIG_PATCH_MARKER,
+      ) => {
+        const fnDecl = functionName ? `function ${functionName}` : 'function';
+        return (
+          `${fnDecl}(${inputVar}){let ${outputVar}={};` +
+          `for(let[${keyVar},${valueVar}]of Object.entries(${inputVar})){` +
+          `if(${keyVar}.startsWith(\`mcp_servers.\`)){${outputVar}[${keyVar}]=${valueVar};continue}` +
+          `let ${normalizedKeyVar}=${stripExpr};` +
+          `${unsupportedFeaturesSet}.has(${normalizedKeyVar})||` +
+          `(${outputVar}[${ensureFeaturePrefixFunction}(${normalizedKeyVar})]=${valueVar})}` +
+          `return ${outputVar}[\`features.unified_exec\`]=!0,` +
+          `${outputVar}[\`features.tool_search\`]=!0,` +
+          `${outputVar}[\`features.js_repl_tools_only\`]=!0,` +
+          `${outputVar}[\`features.tool_suggest\`]=!0,` +
+          `${outputVar}[\`features.tool_search_always_defer_mcp_tools\`]=!0,` +
+          `${outputVar}[\`features.non_prefixed_mcp_tool_names\`]=!0,` +
+          `${outputVar}[\`features.unavailable_dummy_tools\`]=!0,${outputVar}}` +
+          FEATURE_OVERRIDES_PRESERVE_MCP_CONFIG_PATCH_MARKER
+        );
+      },
     );
     fs.writeFileSync(filePath, content, 'utf8');
     featureOverridesConfigNamespacePatched = true;
@@ -3280,21 +3314,26 @@ try {
 
   for (const filePath of mainBundleFiles) {
     let content = fs.readFileSync(filePath, 'utf8');
+    const scheduledForwardNeedle = content.includes(COMPUTER_USE_SCHEDULED_FORWARD_REQUEST_NEEDLE_BT)
+      ? COMPUTER_USE_SCHEDULED_FORWARD_REQUEST_NEEDLE_BT
+      : content.includes(COMPUTER_USE_SCHEDULED_FORWARD_REQUEST_NEEDLE_DQ)
+      ? COMPUTER_USE_SCHEDULED_FORWARD_REQUEST_NEEDLE_DQ
+      : null;
     if (
       content.includes(COMPUTER_USE_THREAD_START_TOOL_SEARCH_PATCH_MARKER) &&
       content.includes(COMPUTER_USE_INPUT_SKILL_PATCH_MARKER) &&
-      content.includes(COMPUTER_USE_SCHEDULED_FORWARD_REQUEST_NEEDLE)
+      scheduledForwardNeedle
     ) {
       computerUseForwardThreadStartDiagnosticsAlreadyCorrect = true;
       computerUseForwardThreadStartDiagnosticsPatchedFiles.push(path.relative(tmpDir, filePath));
       continue;
     }
-    if (content.includes(COMPUTER_USE_SCHEDULED_FORWARD_REQUEST_NEEDLE)) {
+    if (scheduledForwardNeedle) {
       content = content.replace(
-        COMPUTER_USE_SCHEDULED_FORWARD_REQUEST_NEEDLE,
+        scheduledForwardNeedle,
         COMPUTER_USE_THREAD_START_TOOL_SEARCH_CODE +
           COMPUTER_USE_INPUT_SKILL_INJECTION_CODE +
-          COMPUTER_USE_SCHEDULED_FORWARD_REQUEST_NEEDLE,
+          scheduledForwardNeedle,
       );
       fs.writeFileSync(filePath, content, 'utf8');
       computerUseForwardThreadStartDiagnosticsPatched = true;
