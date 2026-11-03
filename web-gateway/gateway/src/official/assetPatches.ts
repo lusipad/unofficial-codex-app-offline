@@ -174,6 +174,19 @@ function patchConnectAppHostChunk(source) {
   return source;
 }
 
+const FAST_MODE_SERVICE_TIER_ACCESS_PATTERN =
+  /([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)&&!([A-Za-z_$][\w$]*)&&([A-Za-z_$][\w$]*)!=null\?([A-Za-z_$][\w$]*)\(\4\):null(?=,)/;
+
+function patchFastModeChunk(source) {
+  if (FAST_MODE_SERVICE_TIER_ACCESS_PATTERN.test(source)) {
+    return source.replace(
+      FAST_MODE_SERVICE_TIER_ACCESS_PATTERN,
+      (_match, target) => `${target}={fast:!0,ultrafast:!0}`
+    );
+  }
+  return source;
+}
+
 /** 对官方 chunk 做响应期 patch，不落盘改 vendor/官方构建产物。 */
 function patchOfficialAsset(reqPath, data) {
   if (!shouldPatchOfficialAsset(reqPath)) return data;
@@ -191,7 +204,8 @@ function patchOfficialAsset(reqPath, data) {
   const patched = withRpcMock.includes("{type:`connect-app-host`")
     ? patchConnectAppHostChunk(withRpcMock)
     : withRpcMock;
-  return Buffer.from(patched, "utf-8");
+  const withFastMode = patchFastModeChunk(patched);
+  return Buffer.from(withFastMode, "utf-8");
 }
 
 module.exports = {
@@ -200,5 +214,6 @@ module.exports = {
   shouldPatchOfficialAsset,
   patchConnectAppHostChunk,
   patchRpcInitChunk,
+  patchFastModeChunk,
   patchOfficialAsset,
 };

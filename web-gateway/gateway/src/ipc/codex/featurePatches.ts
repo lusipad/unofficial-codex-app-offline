@@ -192,7 +192,17 @@ function patchConfigRequirements(requirements) {
   for (const reviewer of DEFAULT_ALLOWED_APPROVALS_REVIEWERS) {
     if (!nextReviewers.includes(reviewer)) nextReviewers.push(reviewer);
   }
-  if (Array.isArray(reviewers) && nextReviewers.length === reviewers.length) return requirements;
+  let changed = !Array.isArray(reviewers) || nextReviewers.length !== reviewers.length;
+  const featureRequirements = isPlainObject(next.featureRequirements)
+    ? { ...next.featureRequirements }
+    : {};
+  if (featureRequirements.fast_mode !== true || featureRequirements.ultrafast_mode !== true) {
+    featureRequirements.fast_mode = true;
+    featureRequirements.ultrafast_mode = true;
+    next.featureRequirements = featureRequirements;
+    changed = true;
+  }
+  if (!changed) return requirements;
   return {
     ...next,
     allowedApprovalsReviewers: nextReviewers,

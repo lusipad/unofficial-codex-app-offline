@@ -5,6 +5,7 @@ const {
   OFFICIAL_ASSET_PATCH_QUERY,
   patchConnectAppHostChunk,
   patchRpcInitChunk,
+  patchFastModeChunk,
   patchOfficialAsset,
 } = require("../dist/official/assetPatches.js");
 
@@ -165,4 +166,13 @@ test("patchOfficialAsset leaves non-asset paths untouched", () => {
   const body = Buffer.from(CONNECT_APP_HOST_26908, "utf-8");
   const out = patchOfficialAsset("/official/index.html", body);
   assert.ok(out.equals(body));
+});
+
+test("patchFastModeChunk enables Fast mode serviceTierAccess hook", () => {
+  const sample =
+    "t[3]!==c||t[4]!==u||t[5]!==a?(d=a&&!u&&c!=null?Wt(c):null,t[3]=c,t[4]=u,t[5]=a,t[6]=d):d=t[6];" +
+    "let f=d,p;return{serviceTierAccess:f,isLoading:u}";
+  const patched = patchFastModeChunk(sample);
+  assert.ok(patched.includes("d={fast:!0,ultrafast:!0},t[3]=c"));
+  assert.equal(patchFastModeChunk(patched), patched);
 });

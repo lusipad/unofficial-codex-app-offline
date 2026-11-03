@@ -607,6 +607,32 @@ test("current Fast mode availability falls back after legacy patterns do not mat
   const secondPass = patchFastModeAvailability(result.content, marker);
   assert.equal(secondPass.patched, false);
   assert.equal(secondPass.content, result.content);
+
+  const serviceTierAccessBundle =
+    "function VAo(e){let a=i?.authMethod===`chatgpt`," +
+    "u=!!i?.isLoading||a&&l,d;" +
+    "t[3]!==c||t[4]!==u||t[5]!==a?(d=a&&!u&&c!=null?Wt(c):null,t[3]=c,t[4]=u,t[5]=a,t[6]=d):d=t[6];" +
+    "let f=d,p;return{serviceTierAccess:f,isLoading:u}}const feature=`fast_mode`;";
+  const serviceTierAccessResult = patchFastModeAvailability(
+    serviceTierAccessBundle,
+    marker,
+  );
+  assert.equal(serviceTierAccessResult.patched, true);
+  assert.match(
+    serviceTierAccessResult.content,
+    new RegExp(`d={fast:!0,ultrafast:!0}${escapeRegExp(marker)}`),
+  );
+  assert.doesNotThrow(() => Function(serviceTierAccessResult.content));
+
+  const serviceTierAccessSecondPass = patchFastModeAvailability(
+    serviceTierAccessResult.content,
+    marker,
+  );
+  assert.equal(serviceTierAccessSecondPass.patched, false);
+  assert.equal(
+    serviceTierAccessSecondPass.content,
+    serviceTierAccessResult.content,
+  );
 });
 
 test("ultra reasoning effort stays available for models that already support max", () => {

@@ -1488,6 +1488,8 @@ const offlineNetworkModeUnpatchedSurfaceRe =
   /([A-Za-z_$][\w$]*)=\{defaultOptions:\{queries:\{refetchOnWindowFocus:!1,retry:/;
 const ULTRA_REASONING_EFFORT_PATCH_MARKER =
   patchMarker('/*codex-offline:ultra-reasoning-effort*/');
+const FAST_MODE_AUTH_METHOD_PATCH_MARKER =
+  patchMarker('/*codex-offline:fast-mode-auth-method*/');
 const bundledPluginCacheLockFatalResultRe =
   /if\([A-Za-z_$][\w$]*!=null\)\{if\([A-Za-z_$][\w$]*\.warning\(`bundled_plugins_marketplace_install_failed`,\{safe:\{errorCategory:[A-Za-z_$][\w$]*\(\{error:[A-Za-z_$][\w$]*\.error,platformFamily:e\.platformFamily\}\),marketplaceName:t,platformFamily:e\.platformFamily,\.\.\.[A-Za-z_$][\w$]*\.safe\},sensitive:\{error:[A-Za-z_$][\w$]*\.error,marketplaceRoot:e\.materializedMarketplace\.marketplaceRoot,\.\.\.[A-Za-z_$][\w$]*\.sensitive\}\}\),n\)throw [A-Za-z_$][\w$]*\.error;return!1\}return!0\}/;
 const bundledPluginCacheLockFatalCatchRe =
@@ -1650,6 +1652,10 @@ let offlineQueryNetworkModePatched = false;
 let offlineMutationNetworkModePatched = false;
 let ultraReasoningEffortSurfaceSeen = false;
 let ultraReasoningEffortPatched = false;
+let fastModeAuthPatched = false;
+const fastModeResiduals = [];
+const fastModeUnpatchedSurfaceRe =
+  /([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)&&!([A-Za-z_$][\w$]*)&&([A-Za-z_$][\w$]*)!=null\?([A-Za-z_$][\w$]*)\(\4\):null(?=,)/;
 let codexMobileRemoteControlMfaEndpointSeen = false;
 let codexMobileAuthReloginPatched = false;
 let defaultOnGateAtomPatched = false;
@@ -1696,6 +1702,12 @@ for (const entry of javaScriptEntries) {
     }
     if (unauthCapabilityUnpatchedBranchRe.test(content)) {
       unauthCapabilityResiduals.push(entry);
+    }
+    if (content.includes(FAST_MODE_AUTH_METHOD_PATCH_MARKER)) {
+      fastModeAuthPatched = true;
+    }
+    if (fastModeUnpatchedSurfaceRe.test(content)) {
+      fastModeResiduals.push(entry);
     }
     if (sidebarActivityPatchedSurfaceRe.test(content)) {
       sidebarActivityViewSurfaceSeen = true;
@@ -1965,6 +1977,15 @@ if (!ultraReasoningEffortSurfaceSeen) {
 }
 if (!ultraReasoningEffortPatched) {
   throw new Error('Renderer Ultra reasoning effort availability patch is missing from app.asar.');
+}
+if (fastModeResiduals.length > 0) {
+  throw new Error(
+    'Unpatched Fast mode availability check found in: ' +
+      fastModeResiduals.join(', ')
+  );
+}
+if (!fastModeAuthPatched) {
+  throw new Error('Renderer Fast mode availability patch marker is missing from app.asar.');
 }
 
 const webviewEntry = entries.find(entry => /(^|\/)webview\/assets\/index-[^/]+\.js$/.test(entry));

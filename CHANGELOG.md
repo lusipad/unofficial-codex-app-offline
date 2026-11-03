@@ -1,5 +1,67 @@
 # Changelog
 
+## 2026-11-03
+
+### 中文
+
+- 修复最新版本快速模式（Fast mode）选项消失问题（issue #140）：
+  1. **根因**：上游在 26.1027+ 中重构了快速模式（serviceTier）可用性判断逻辑，由原有的内联属性检查重构为 `useServiceTierAccess` hook。由于 hook 内部将可用性强绑定至官方在线鉴权方式（`chatgpt`、`personalAccessToken`、`amazonBedrock`），在离线/自定义 API-Key 模式下返回 `serviceTierAccess = null`：
+     - `availableOptions` 计算过滤掉 `fast` / `priority`，剩余长度为 1（仅 `default`）；
+     - Composer 模型选择器检查 `availableOptions.length > 1` 判定为假，从而彻底隐藏快速模式切换控件；
+     - 设置页 General 选项中 `availableOptions.length <= 1` 判定为假，隐藏默认速度等级设置；
+     - `/fast` 快捷命令因 `isFastModeAvailable` 为假被禁用。
+     - 同时，旧版 `patchFastModeAvailability` 正则无法匹配新版 `useServiceTierAccess` 形态，且因缺少 fail-closed 断言导致静默失配跳过。
+  2. **修复落点**：
+     - `scripts/patch-app-asar.mjs`：
+       - 更新 `patchFastModeAvailability`，精确定位 `useServiceTierAccess` hook 并强制注入 `{fast:!0,ultrafast:!0}` 及补丁标记 `/*codex-offline:fast-mode-auth-method*/`；
+       - 为 `fastModeAuthPatched` 添加 fail-closed 断言，防止未来前端混淆漂移时静默失效；
+     - `web-gateway/gateway/src/official/assetPatches.ts`：
+       - 新增 `patchFastModeChunk`，在 Web Gateway 静态资源服务层拦截官方 chunk 并应用相同兼容补丁；
+     - `web-gateway/gateway/src/ipc/codex/featurePatches.ts`：
+       - 补齐 `patchConfigRequirements`，确保离线环境返回的 `requirements.featureRequirements` 包含 `fast_mode: true` 与 `ultrafast_mode: true`；
+     - `scripts/verify-offline-package.ps1`：
+       - 增加 `/*codex-offline:fast-mode-auth-method*/` 补丁标记与未补丁模式的完整性断言；
+     - `web-gateway/gateway/src/ipc/codex/capabilityContractData.cjs`：
+       - 同步更新 capability contract 中 `fast-mode-auth-method` 的证据链条与描述；
+     - `scripts/test/offline-ui-gates.test.cjs` & `web-gateway/gateway/test/officialAssetPatches.test.cjs`：
+       - 增加 `useServiceTierAccess` 补丁逻辑及幂等性的单元测试。
+  3. **验证**：
+     - `node --test ./scripts/test/*.test.cjs ./web-gateway/gateway/test/*.test.cjs` 270 项全量通过；
+     - `npm --prefix ./web-gateway run build:gateway` 编译成功；
+     - `build-offline-package.ps1 -RequireInstaller` 离线包与安装程序构建成功；
+     - `verify-offline-package.ps1` 包完整性验证、直接启动冒烟测试与离线功能探针全量通过（20/51 设置分区可见，金标准断言满足）；
+     - 产物：`dist\offline\codex-offline-26.1027.3384.0\`，setup.exe SHA256=`34FEFBEDA91C6406E3A6CDA3E4269AAD47C8EDDFFBA3892FDD6323C93D75A216`。
+
+### English
+
+- Fixed missing Fast mode option in latest versions (issue #140):
+  1. **Root cause**: Upstream refactored the fast mode / service tier availability calculation in 26.1027+ from inline checks into a dedicated `useServiceTierAccess` hook. The hook restricted access strictly to official online auth methods (`chatgpt`, `personalAccessToken`, `amazonBedrock`), returning `serviceTierAccess = null` under offline / API-key configurations:
+     - `availableOptions` filtered out `fast` / `priority`, reducing the list to only `['default']` (`length === 1`);
+     - The composer model picker omitted the speed tier selector entirely when `availableOptions.length <= 1`;
+     - Settings -> General completely hid the default speed tier dropdown when `availableOptions.length <= 1`;
+     - The `/fast` slash command was disabled due to failed feature checks;
+     - The legacy `patchFastModeAvailability` regex did not match the new hook structure, and the absence of a fail-closed assertion allowed silent patch skipping.
+  2. **Fixes**:
+     - `scripts/patch-app-asar.mjs`:
+       - Updated `patchFastModeAvailability` to precisely target the `useServiceTierAccess` hook, injecting `{fast:!0,ultrafast:!0}` and the marker `/*codex-offline:fast-mode-auth-method*/`;
+       - Added a fail-closed assertion on `fastModeAuthPatched` to prevent silent drift;
+     - `web-gateway/gateway/src/official/assetPatches.ts`:
+       - Added `patchFastModeChunk` to patch HTTP-served webview chunks dynamically;
+     - `web-gateway/gateway/src/ipc/codex/featurePatches.ts`:
+       - Updated `patchConfigRequirements` to ensure `featureRequirements.fast_mode` and `ultrafast_mode` are enabled in gateway responses;
+     - `scripts/verify-offline-package.ps1`:
+       - Added integrity assertions for `FAST_MODE_AUTH_METHOD_PATCH_MARKER` and verified zero unpatched residuals;
+     - `web-gateway/gateway/src/ipc/codex/capabilityContractData.cjs`:
+       - Synchronized capability contract evidence for `fast-mode-auth-method`;
+     - `scripts/test/offline-ui-gates.test.cjs` & `web-gateway/gateway/test/officialAssetPatches.test.cjs`:
+       - Added comprehensive unit tests covering the new hook patch pattern and idempotency.
+  3. **Verification**:
+     - All 270 unit tests pass (`node --test`);
+     - Web gateway builds cleanly (`build:gateway`);
+     - Offline package and installer built successfully via `build-offline-package.ps1 -RequireInstaller`;
+     - `verify-offline-package.ps1` passes all integrity, smoke launch, and offline feature probe assertions (20/51 settings sections visible);
+     - Artifact: `dist\offline\codex-offline-26.1027.3384.0\`, setup.exe SHA256=`34FEFBEDA91C6406E3A6CDA3E4269AAD47C8EDDFFBA3892FDD6323C93D75A216`.
+
 ## 2026-11-01
 
 ### 中文

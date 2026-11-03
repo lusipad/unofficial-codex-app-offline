@@ -1119,6 +1119,14 @@ function patchFastModeAvailability(content, patchMarker) {
   const serviceTierAllowedRe =
     /([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)&&!([A-Za-z_$][\w$]*)&&([A-Za-z_$][\w$]*)!=null&&\4\?\.requirements\?\.featureRequirements\?\.fast_mode!==!1(?=,)/;
   next = content.replace(serviceTierAllowedRe, `$1=!0${patchMarker}`);
+  if (next !== content) return { content: next, patched: true };
+
+  const serviceTierAccessRe =
+    /([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)&&!([A-Za-z_$][\w$]*)&&([A-Za-z_$][\w$]*)!=null\?([A-Za-z_$][\w$]*)\(\4\):null(?=,)/;
+  next = content.replace(
+    serviceTierAccessRe,
+    (_match, target) => `${target}={fast:!0,ultrafast:!0}${patchMarker}`,
+  );
   return { content: next, patched: next !== content };
 }
 // end patchFastModeAvailability
@@ -3772,6 +3780,11 @@ try {
         '.');
     } else {
       log('Webview assets already correct (no patching needed).');
+    }
+    if (!fastModeAuthPatched) {
+      throw new Error(
+        'Fast mode availability patch marker is missing from webview assets.',
+      );
     }
     if (computerUseNodeReplDynamicToolPatchedFiles.length > 0) {
       log('Computer Use node_repl.js dynamic tool exposed in ' +

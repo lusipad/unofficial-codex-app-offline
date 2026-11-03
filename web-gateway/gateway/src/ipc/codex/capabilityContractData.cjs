@@ -515,7 +515,7 @@ const DESKTOP_ASAR_PATCHES = Object.freeze([
     tier: "required",
     assert: "marker",
     evidence:
-      "26.903.8094.0: upstream gates the Fast selector on ChatGPT auth plus a backend featureRequirements.fast_mode response, both unavailable to API-key and offline users.",
+      "26.1027.3384.0: upstream gates Fast mode in useServiceTierAccess hook on ChatGPT auth and drops serviceTierAccess to null for API-key/offline users, hiding the speed selector across composer and settings.",
     reverify: "Check whether the fast_mode availability expression still requires backend agreement.",
   }),
   Object.freeze({
