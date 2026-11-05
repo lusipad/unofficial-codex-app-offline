@@ -175,7 +175,7 @@ function patchConnectAppHostChunk(source) {
 }
 
 const FAST_MODE_SERVICE_TIER_ACCESS_PATTERN =
-  /([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)&&!([A-Za-z_$][\w$]*)&&([A-Za-z_$][\w$]*)!=null\?([A-Za-z_$][\w$]*)\(\4\):null(?=,)/;
+  /([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)&&!([A-Za-z_$][\w$]*)&&(?:([A-Za-z_$][\w$]*)!=null|null!=([A-Za-z_$][\w$]*))\?(?:[A-Za-z_$][\w$]*|\(0,[A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*\))\((?:\4|\5)\):null(?=,)/;
 
 function patchFastModeChunk(source) {
   if (FAST_MODE_SERVICE_TIER_ACCESS_PATTERN.test(source)) {

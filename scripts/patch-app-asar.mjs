@@ -718,13 +718,13 @@ function patchExternalAgentConfigDirectGateCalls(content, gateIds, patchMarker) 
 function patchDirectStatsigGateCalls(content, gateIds, patchMarker) {
   let next = content;
   let count = 0;
-  const callablePattern = '(?:\\(0,[$\\w]+\\)|[$\\w]+(?:\\.[$\\w]+)*)';
+  const callablePattern = '(?:\\(0,[$\\w.]+\\)|[$\\w]+(?:\\.[$\\w]+)*)';
 
   for (const gateId of gateIds) {
     if (!next.includes(gateId)) continue;
     const escapedGateId = escapeRegExp(gateId);
     const negatedTwoArgGateCallRe = new RegExp(
-      `!${callablePattern}\\([A-Za-z_$][\\w$]*\\s*,\\s*\\\`${escapedGateId}\\\`\\)`,
+      `!${callablePattern}\\([A-Za-z_$][\\w$]*\\s*,\\s*[\\\`"]${escapedGateId}[\\\`"]\\)`,
       'g',
     );
     next = next.replace(negatedTwoArgGateCallRe, () => {
@@ -733,7 +733,7 @@ function patchDirectStatsigGateCalls(content, gateIds, patchMarker) {
     });
 
     const twoArgGateCallRe = new RegExp(
-      `(?<!!)${callablePattern}\\([A-Za-z_$][\\w$]*\\s*,\\s*\\\`${escapedGateId}\\\`\\)`,
+      `(?<!!)${callablePattern}\\([A-Za-z_$][\\w$]*\\s*,\\s*[\\\`"]${escapedGateId}[\\\`"]\\)`,
       'g',
     );
     next = next.replace(twoArgGateCallRe, () => {
@@ -742,7 +742,7 @@ function patchDirectStatsigGateCalls(content, gateIds, patchMarker) {
     });
 
     const negatedGateCallRe = new RegExp(
-      `!${callablePattern}\\(\`${escapedGateId}\`\\)`,
+      `!${callablePattern}\\([\\\`"]${escapedGateId}[\\\`"]\\)`,
       'g',
     );
     next = next.replace(negatedGateCallRe, () => {
@@ -751,7 +751,7 @@ function patchDirectStatsigGateCalls(content, gateIds, patchMarker) {
     });
 
     const gateCallRe = new RegExp(
-      `(?<!!)${callablePattern}\\(\`${escapedGateId}\`\\)`,
+      `(?<!!)${callablePattern}\\([\\\`"]${escapedGateId}[\\\`"]\\)`,
       'g',
     );
     next = next.replace(gateCallRe, () => {
@@ -785,7 +785,7 @@ function patchDefaultOnStatsigCheckGate(content, patchMarker, denylist, override
 function patchDefaultOnStatsigGateAtom(content, patchMarker, denylist, overrides) {
   if (content.includes(patchMarker)) return { content, seen: true, patched: false, alreadyCorrect: true };
   const predicate =
-    /function ([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*)\)\{return \2\.details\.reason===`LocalOverride`\|\|\2\.details\.reason\?\.endsWith\(`:Recognized`\)===!0\}/.exec(content);
+    /function ([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*)\)\{return\s*(?:\2\.details\.reason===[`"]LocalOverride[`"]|[`"]LocalOverride[`"]===\2\.details\.reason)\|\|\2\.details\.reason\?\.endsWith\([`"]:Recognized[`"]\)===!0\}/.exec(content);
   if (!predicate) return { content, seen: false, patched: false, alreadyCorrect: false };
   const recognized = escapeRegExp(predicate[1]);
   const id = '[A-Za-z_$][\\w$]*';
@@ -821,7 +821,7 @@ function patchUnauthenticatedCapabilityDefaultOn(content, patchMarker) {
   // Exactly one selector carries this branch; more or fewer means the bundle drifted
   // and we fail closed rather than guess.
   const branchRe =
-    /if\(([A-Za-z_$][\w$]*)\.authLoading&&\1\.authMethod==null\|\|\1\.authMethod===`chatgpt`&&\1\.accountLoading\)return\{isLoading:!0,isError:!1,isCapable:!1\};/g;
+    /if\(([A-Za-z_$][\w$]*)\.authLoading&&(?:null==\1\.authMethod|\1\.authMethod==null)\|\|(?:[`"]chatgpt[`"]===\1\.authMethod|\1\.authMethod===[`"]chatgpt[`"])&&\1\.accountLoading\)return\{isLoading:!0,isError:!1,isCapable:!1\};/g;
   const matches = content.match(branchRe);
   if (!matches || matches.length !== 1) {
     return { content, seen: false, patched: false, alreadyCorrect: false };
@@ -868,9 +868,9 @@ function patchOfflineNetworkModeDefaults(
   mutationPatchMarker,
 ) {
   const unpatchedSurfaceRe =
-    /([A-Za-z_$][\w$]*)=\{defaultOptions:\{queries:\{refetchOnWindowFocus:!1,retry:/;
+    /(?<target>[A-Za-z_$][\w$]*)(?<assign>[=:])\{defaultOptions:\{queries:\{refetchOnWindowFocus:!1,retry:/;
   const patchedSurfaceRe = new RegExp(
-    `([A-Za-z_$][\\w$]*)=\\{defaultOptions:\\{` +
+    `([A-Za-z_$][\\w$]*)[=:]\\{defaultOptions:\\{` +
       'mutations:\\{networkMode:`always`' + escapeRegExp(mutationPatchMarker) + '\\},' +
       'queries:\\{networkMode:`offlineFirst`' + escapeRegExp(queryPatchMarker) + ',' +
       'refetchOnWindowFocus:!1,retry:',
@@ -883,7 +883,7 @@ function patchOfflineNetworkModeDefaults(
 
   const next = content.replace(
     unpatchedSurfaceRe,
-    `$1={defaultOptions:{mutations:{networkMode:\`always\`${mutationPatchMarker}},` +
+    `$<target>$<assign>{defaultOptions:{mutations:{networkMode:\`always\`${mutationPatchMarker}},` +
       `queries:{networkMode:\`offlineFirst\`${queryPatchMarker},` +
       'refetchOnWindowFocus:!1,retry:',
   );
@@ -948,8 +948,13 @@ function patchSidebarActivitySurface(content) {
   // init (IWa=`4039078146`).
   const sidebarPatchedSurfaceRe = new RegExp(
     `([A-Za-z_$][\\w$]*)=!0${escapeRegExp(SIDEBAR_ACTIVITY_VIEW_PATCH_MARKER)},` +
-      `([A-Za-z_$][\\w$]*)=[A-Za-z_$][\\w$]*\\([A-Za-z_$][\\w$]*\\);return \\1&&` +
-      '\\2\\.status!==`denied`',
+      `([A-Za-z_$][\\w$]*)=(?:[$\\w.]+|\\(0,[$\\w.]+\\))\\([$\\w.]+\\);return \\1&&` +
+      `(?:\x60denied\x60!==\\2\\.status|\\2\\.status!==\x60denied\x60|"denied"!==\\2\\.status|\\2\\.status!=="denied")`,
+  );
+  const sidebarDirectUnpatchedSurfaceRe = new RegExp(
+    `(?<target>[A-Za-z_$][\\w$]*)=(?:[$\\w.]+|\\(0,[$\\w.]+\\))\\([\x60"]4039078146[\x60"]\\),` +
+      `(?<statusRead>[A-Za-z_$][\\w$]*=(?:[$\\w.]+|\\(0,[$\\w.]+\\))\\([$\\w.]+\\);return \\k<target>&&` +
+      `(?:\x60denied\x60!==[A-Za-z_$][\\w$]*\\.status|[A-Za-z_$][\\w$]*\\.status!==\x60denied\x60|"denied"!==[A-Za-z_$][\\w$]*\\.status|[A-Za-z_$][\\w$]*\\.status!=="denied"))`,
   );
   const sidebarUnpatchedSurfaceRe = new RegExp(
     '([A-Za-z_$][\\w$]*)=([A-Za-z_$][\\w$]*)\\(([A-Za-z_$][\\w$]*)\\),' +
@@ -959,15 +964,23 @@ function patchSidebarActivitySurface(content) {
   const sidebarAlreadyCorrect = sidebarPatchedSurfaceRe.test(next);
   const sidebarSurfaceSeen =
     sidebarAlreadyCorrect ||
-    (next.includes('`4039078146`') && sidebarUnpatchedSurfaceRe.test(next));
+    (next.includes('4039078146') && (sidebarDirectUnpatchedSurfaceRe.test(next) || sidebarUnpatchedSurfaceRe.test(next)));
   if (!sidebarAlreadyCorrect && sidebarSurfaceSeen) {
-    next = next.replace(sidebarUnpatchedSurfaceRe, match =>
-      match.replace(
-        /([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*)\),/,
-        `$1=!0${SIDEBAR_ACTIVITY_VIEW_PATCH_MARKER},`,
-      ),
-    );
-    patched = true;
+    if (sidebarDirectUnpatchedSurfaceRe.test(next)) {
+      next = next.replace(
+        sidebarDirectUnpatchedSurfaceRe,
+        `$<target>=!0${SIDEBAR_ACTIVITY_VIEW_PATCH_MARKER},$<statusRead>`,
+      );
+      patched = true;
+    } else {
+      next = next.replace(sidebarUnpatchedSurfaceRe, match =>
+        match.replace(
+          /([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*)\),/,
+          `$1=!0${SIDEBAR_ACTIVITY_VIEW_PATCH_MARKER},`,
+        ),
+      );
+      patched = true;
+    }
   }
 
   return {
@@ -993,12 +1006,12 @@ function patchWorkspaceDependenciesSettingsGate(
   }
 
   const directGateCall = gateId =>
-    `(?:\\(0,[$\\w]+\\)|[$\\w]+)\\(\\\`${gateId}\\\`\\)`;
+    `(?:\\(0,[$\\w.]+\\)|[$\\w.]+)\\([\\\`"]${gateId}[\\\`"]\\)`;
   const enabledGate = gateId =>
     `(?:${directGateCall(gateId)}|!0${escapeRegExp(rendererPatchMarker)})`;
   const importedWorkspaceGateRe = new RegExp(
-    `([A-Za-z_$][\\w$]*)=(?:\\(0,[$\\w]+\\)|[$\\w]+)` +
-      `\\([A-Za-z_$][\\w$]*\\),` +
+    `([A-Za-z_$][\\w$]*)=(?:\\(0,[$\\w.]+\\)|[$\\w.]+)` +
+      `\\((?:[A-Za-z_$][\\w$]*|[\\\`"]3026692602[\\\`"])\\),` +
       `(?=[A-Za-z_$][\\w$]*=${enabledGate('2106641128')}(?:,` +
       `[A-Za-z_$][\\w$]*=${enabledGate('3693343337')})?(?:,|;))`,
   );
@@ -1017,8 +1030,8 @@ function patchWorkspaceDependenciesSettingsGate(
 
   const currentWorkspaceGateRe = new RegExp(
     `([A-Za-z_$][\\w$]*)=([A-Za-z_$][\\w$]*)\\(([A-Za-z_$][\\w$]*)\\),` +
-      `(?=[A-Za-z_$][\\w$]*=[A-Za-z_$][\\w$]*\\(\\\`2106641128\\\`\\)(?:,` +
-      `[A-Za-z_$][\\w$]*=[A-Za-z_$][\\w$]*\\(\\\`3693343337\\\`\\))?(?:,|;))`,
+      `(?=[A-Za-z_$][\\w$]*=[A-Za-z_$][\\w$]*\\([\\\`"]2106641128[\\\`"]\\)(?:,` +
+      `[A-Za-z_$][\\w$]*=[A-Za-z_$][\\w$]*\\([\\\`"]3693343337[\\\`"]\\))?(?:,|;))`,
   );
   const currentNext = content.replace(
     currentWorkspaceGateRe,
@@ -1044,11 +1057,11 @@ function patchUltraReasoningEffortAvailability(content) {
   }
 
   const capabilityRe =
-    /([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)&&([A-Za-z_$][\w$]*)\.some\(([A-Za-z_$][\w$]*)=>\4\.supportedReasoningEfforts\.some\(\(\{reasoningEffort:([A-Za-z_$][\w$]*)\}\)=>\5===`ultra`\)\)/;
+    /([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)&&([A-Za-z_$][\w$]*)\.some\(([A-Za-z_$][\w$]*)=>\4\.supportedReasoningEfforts\.some\(\(\{reasoningEffort:([A-Za-z_$][\w$]*)\}\)=>(?:\5===[`"]ultra[`"]|[`"]ultra[`"]===\5)\)\)/;
   const patchedCapabilityRe =
-    /[A-Za-z_$][\w$]*=\([A-Za-z_$][\w$]*=!0\)&&[A-Za-z_$][\w$]*\.some\(([A-Za-z_$][\w$]*)=>\1\.supportedReasoningEfforts\.some\(\(\{reasoningEffort:([A-Za-z_$][\w$]*)\}\)=>\2===`max`\|\|\2===`ultra`\)\)\/\*codex-offline:ultra-reasoning-effort\*\//;
+    /[A-Za-z_$][\w$]*=\([A-Za-z_$][\w$]*=!0\)&&[A-Za-z_$][\w$]*\.some\(([A-Za-z_$][\w$]*)=>\1\.supportedReasoningEfforts\.some\(\(\{reasoningEffort:([A-Za-z_$][\w$]*)\}\)=>(?:\2===[`"]max[`"]|[`"]max[`"]===\2)\|\|(?:\2===[`"]ultra[`"]|[`"]ultra[`"]===\2)\)\)\/\*codex-offline:ultra-reasoning-effort\*\//;
   const modelEffortsRe =
-    /let ([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\?([A-Za-z_$][\w$]*)\.supportedReasoningEfforts:\3\.supportedReasoningEfforts\.filter\(\(\{reasoningEffort:([A-Za-z_$][\w$]*)\}\)=>\4!==`ultra`\),/;
+    /let ([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\?([A-Za-z_$][\w$]*)\.supportedReasoningEfforts:\3\.supportedReasoningEfforts\.filter\(\(\{reasoningEffort:([A-Za-z_$][\w$]*)\}\)=>(?:\4!==[`"]ultra[`"]|[`"]ultra[`"]!==\4)\),/;
   const capabilityMatch = capabilityRe.exec(content);
   const modelEffortsMatch = modelEffortsRe.exec(content);
   if (content.includes(patchMarker)) {
@@ -1087,7 +1100,7 @@ function patchUltraReasoningEffortAvailability(content) {
 // end patchUltraReasoningEffortAvailability
 
 function patchFastModeAvailability(content, patchMarker) {
-  if (content.includes(patchMarker) || !content.includes('fast_mode')) {
+  if (content.includes(patchMarker) || (!content.includes('fast_mode') && !content.includes('serviceTierAccess'))) {
     return { content, patched: false };
   }
 
@@ -1122,7 +1135,7 @@ function patchFastModeAvailability(content, patchMarker) {
   if (next !== content) return { content: next, patched: true };
 
   const serviceTierAccessRe =
-    /([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)&&!([A-Za-z_$][\w$]*)&&([A-Za-z_$][\w$]*)!=null\?([A-Za-z_$][\w$]*)\(\4\):null(?=,)/;
+    /([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)&&!([A-Za-z_$][\w$]*)&&(?:([A-Za-z_$][\w$]*)!=null|null!=([A-Za-z_$][\w$]*))\?(?:[A-Za-z_$][\w$]*|\(0,[A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*\))\((?:\4|\5)\):null(?=,)/;
   next = content.replace(
     serviceTierAccessRe,
     (_match, target) => `${target}={fast:!0,ultrafast:!0}${patchMarker}`,
@@ -1149,15 +1162,14 @@ function patchModelDisplayNameFallback(content) {
   }
 
   const descriptor =
-    'id:`composer.mode.local.model.custom`,defaultMessage:`Custom`,' +
-    'description:`Custom model from config`}';
-  const descriptorIndex = content.indexOf(descriptor);
-  if (descriptorIndex < 0) {
+    /id:[`"]composer\.mode\.local\.model\.custom[`"],defaultMessage:[`"]Custom[`"],description:[`"]Custom model from config[`"]\}/;
+  const descriptorMatch = descriptor.exec(content);
+  if (!descriptorMatch) {
     return { content, patched: false, alreadyCorrect: false };
   }
 
-  const functionStart = content.lastIndexOf('function ', descriptorIndex);
-  const nextFunction = content.indexOf('function ', descriptorIndex);
+  const functionStart = content.lastIndexOf('function ', descriptorMatch.index);
+  const nextFunction = content.indexOf('function ', descriptorMatch.index);
   if (functionStart < 0) {
     return { content, patched: false, alreadyCorrect: false };
   }
@@ -1169,18 +1181,18 @@ function patchModelDisplayNameFallback(content) {
   const formatterMatch = displayNameMatch
     ? functionContent.match(
       new RegExp(
-        `(?:let\\s+)?[A-Za-z_$][\\w$]*=([A-Za-z_$][\\w$]*)\\(` +
+        `(?:let\\s+)?[A-Za-z_$][\\w$]*=(?:\\(0,([A-Za-z_$][\\w$.]*)\\)|([A-Za-z_$][\\w$]*))\\(` +
         `${displayNameMatch[1]}(?:,|\\))`,
       ),
     )
     : null;
   const fallbackPattern =
-    /else if\(([A-Za-z_$][\w$]*)\)\{let ([A-Za-z_$][\w$]*);[\s\S]{0,500}?id:`composer\.mode\.local\.model\.custom`,defaultMessage:`Custom`,description:`Custom model from config`\}[\s\S]{0,250}?,([A-Za-z_$][\w$]*)=\2\}else \3=\1/;
+    /else if\(([A-Za-z_$][\w$]*)\)\{let ([A-Za-z_$][\w$]*);[\s\S]{0,500}?id:[`"]composer\.mode\.local\.model\.custom[`"],defaultMessage:[`"]Custom[`"],description:[`"]Custom model from config[`"]\}[\s\S]{0,250}?,([A-Za-z_$][\w$]*)=\2\}else \3=\1/;
   if (!formatterMatch || !fallbackPattern.test(functionContent)) {
     return { content, patched: false, alreadyCorrect: false };
   }
 
-  const formatter = formatterMatch[1];
+  const formatter = formatterMatch[1] ? `(0,${formatterMatch[1]})` : formatterMatch[2];
   const patchedFunction = functionContent.replace(
     fallbackPattern,
     (_match, model, _message, label) =>
@@ -2027,9 +2039,10 @@ try {
   // 26.825: open-config-toml has its own Electron implementation. The case
   // block text is stable; only the minified message variable drifts (26.1013
   // renamed it from t to n), so capture it from the throw instead of
-  // hardcoding a name. webContents=e, electron=c.
+  // hardcoding a name. 26.1029: install-wsl was removed from the throw block.
+  // webContents=e, electron=c.
   const SETTINGS_NOT_IMPLEMENTED_CASE_BLOCK_RE =
-    /case[`"]navigate-in-new-editor-tab[`"]:case[`"]open-vscode-command[`"]:case[`"]open-extension-settings[`"]:case[`"]open-keyboard-shortcuts[`"]:case[`"]show-settings[`"]:case[`"]install-wsl[`"]:throw Error\(`"\$\{([A-Za-z_$][\w$]*)\.type\}" is not implemented in Electron\.`\)/;
+    /case[`"]navigate-in-new-editor-tab[`"]:case[`"]open-vscode-command[`"]:case[`"]open-extension-settings[`"]:case[`"]open-keyboard-shortcuts[`"]:case[`"]show-settings[`"](?::case[`"]install-wsl[`"])?:throw Error\(`"\$\{([A-Za-z_$][\w$]*)\.type\}" is not implemented in Electron\.`\)/;
 
   // Helper: reload the renderer at a given settings route.
   const NAV_HELPER =
@@ -2174,7 +2187,7 @@ try {
   const BUNDLED_PLUGIN_CACHE_LOCK_CATCH_THROW_RE =
     /catch\(([A-Za-z_$][\w$]*)\)\{if\(([A-Za-z_$][\w$]*)\.warning\(`bundled_plugins_marketplace_install_failed`,\{safe:\{errorCategory:([A-Za-z_$][\w$]*)\(\{error:\1,platformFamily:e\.platformFamily\}\),marketplaceName:t,platformFamily:e\.platformFamily\},sensitive:\{error:\1,marketplaceRoot:e\.materializedMarketplace\.marketplaceRoot\}\}\),n\)throw \1;return!1\}/g;
   const BUNDLED_PLUGIN_CACHE_LOCK_CURRENT_CATCH_THROW_RE =
-    /catch\(([A-Za-z_$][\w$]*)\)\{if\(([A-Za-z_$][\w$]*)\.warning\(`bundled_plugins_marketplace_install_failed`,\{safe:\{errorCategory:([A-Za-z_$][\w$]*)\(\{error:\1,platformFamily:([A-Za-z_$][\w$]*)\.platformFamily\}\),marketplaceName:([A-Za-z_$][\w$]*),platformFamily:\4\.platformFamily\},sensitive:\{error:\1,marketplaceRoot:\4\.materializedMarketplace\.marketplaceRoot\}\}\),\4\.throwOnReconcileFailure\)throw \1;return\{/;
+    /catch\(([A-Za-z_$][\w$]*)\)\{if\(([A-Za-z_$][\w$]*)\.warning\([`"]bundled_plugins_marketplace_install_failed[`"],\{safe:\{errorCategory:([A-Za-z_$][\w$]*)\(\{error:\1,platformFamily:([A-Za-z_$][\w$]*)\.platformFamily\}\),marketplaceName:([A-Za-z_$][\w$]*),platformFamily:\4\.platformFamily\},sensitive:\{error:\1,marketplaceRoot:\4\.materializedMarketplace\.marketplaceRoot\}\}\),\4\.throwOnReconcileFailure\)throw \1;return\{/;
   const NODE_REPL_CONFIG_HELPER_RE =
     /\{\[`mcp_servers\.\$\{([A-Za-z_$][\w$]*)\}`\]:\{args:\[\],command:([A-Za-z_$][\w$]*),env:([A-Za-z_$][\w$]*)(,\.\.\.(?:[A-Za-z_$][\w$]*\.length===0|0===[A-Za-z_$][\w$]*\.length)\?\{\}:\{env_vars:Array\.from\([A-Za-z_$][\w$]*\)\}),startup_timeout_sec:120\}\}/;
   const NODE_REPL_CONFIG_HELPER_REPLACEMENT =
@@ -2357,7 +2370,7 @@ try {
   // builds the function tools from a destructured `tools` parameter, so the
   // collection is an identifier rather than an inline array literal.
   const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOLS_TOP_LEVEL_RE =
-    /(?<collection>[A-Za-z_$][\w$]*)\.map\((?<item>[A-Za-z_$][\w$]*)=>\(\{type:`function`,\.\.\.\k<item>,\.\.\.(?<deferLoadingGuard>(?<supportsNamespaces>[A-Za-z_$][\w$]*)&&[^?]+)\?\{deferLoading:!0\}:\{\}\}\)\);return \k<supportsNamespaces>\?\[\{type:`namespace`,name:(?<appNamespace>[A-Za-z_$][\w$]*),description:(?<appDescription>[A-Za-z_$][\w$]*),tools:(?<functionTools>[A-Za-z_$][\w$]*)\},\.\.\.(?<namespaceGroups>[A-Za-z_$][\w$]*)\]:(?<fallbackTools>[A-Za-z_$][\w$]*)/;
+    /(?<collection>[A-Za-z_$][\w$]*)\.map\((?<item>[A-Za-z_$][\w$]*)=>\(\{type:[`"]function[`"],\.\.\.\k<item>,\.\.\.(?<deferLoadingGuard>(?<supportsNamespaces>[A-Za-z_$][\w$]*)&&[^?]+)\?\{deferLoading:!0\}:\{\}\}\)\);return \k<supportsNamespaces>\?\[\{type:[`"]namespace[`"],name:(?<appNamespace>[A-Za-z_$][\w$.]*),description:(?<appDescription>[A-Za-z_$][\w$.]*),tools:(?<functionTools>[A-Za-z_$][\w$]*)\},\.\.\.(?<namespaceGroups>[A-Za-z_$][\w$]*)\]:(?<fallbackTools>[A-Za-z_$][\w$]*)/;
   // 26.924 destructures the handler options inside the body and no longer
   // receives a queryClient.
   // 26.928 always destructures `transport` and lets the mcp `codex_app`
@@ -2366,7 +2379,7 @@ try {
   // 26.1021 wraps the handler body in a try block and removes the
   // `record_private_review` claim bypass.
   const COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_CANONICAL_RE =
-    /(?<prefix>async function [A-Za-z_$][\w$]*\((?<options>[A-Za-z_$][\w$]*)\)\{(?:try\{var [A-Za-z_$][\w$]*=[A-Za-z_$][\w$]*\(\);)?let\{scope:(?<scope>[A-Za-z_$][\w$]*),serverRequest:(?<serverRequest>[A-Za-z_$][\w$]*),hostId:(?<hostId>[A-Za-z_$][\w$]*),signal:(?<signal>[A-Za-z_$][\w$]*),transport:(?<transport>[A-Za-z_$][\w$]*)\}=\k<options>,\{id:(?<requestId>[A-Za-z_$][\w$]*),params:(?<params>[A-Za-z_$][\w$]*)\}=\k<serverRequest>,\{threadId:(?<threadId>[A-Za-z_$][\w$]*),tool:(?<tool>[A-Za-z_$][\w$]*)\}=\k<params>[\s\S]{0,4000}?if\(\k<signal>\?\.aborted\|\|(?:\(\k<transport>!==`mcp`\|\|\k<params>\.namespace!==`codex_app`\|\|\k<tool>!==`record_private_review`\)&&)?[A-Za-z_$][\w$]*\.dynamicToolCalls!=null&&!await [A-Za-z_$][\w$]*\.dynamicToolCalls\.tryClaimExecution\(\{callId:\k<params>\.callId,hostId:\k<hostId>,threadId:\k<threadId>,turnId:\k<params>\.turnId\}\)\|\|\k<signal>\?\.aborted\)return!1;)/;
+    /(?<prefix>async function [A-Za-z_$][\w$]*\((?<options>[A-Za-z_$][\w$]*)\)\{(?:let [A-Za-z_$][\w$]*=\{[^{}]*\};)?(?:try\{)?(?:var [A-Za-z_$][\w$]*=[A-Za-z_$][\w$]*\(\);)?let\{scope:(?<scope>[A-Za-z_$][\w$]*),serverRequest:(?<serverRequest>[A-Za-z_$][\w$]*),hostId:(?<hostId>[A-Za-z_$][\w$]*),signal:(?<signal>[A-Za-z_$][\w$]*),transport:(?<transport>[A-Za-z_$][\w$]*)\}=\k<options>,\{id:(?<requestId>[A-Za-z_$][\w$]*),params:(?<params>[A-Za-z_$][\w$]*)\}=\k<serverRequest>,\{threadId:(?<threadId>[A-Za-z_$][\w$]*),tool:(?<tool>[A-Za-z_$][\w$]*)\}=\k<params>[\s\S]{0,4000}?if\(\k<signal>\?\.aborted\|\|(?:\(\k<transport>!==[`"]mcp[`"]\|\|\k<params>\.namespace!==[`"]codex_app[`"]\|\|\k<tool>!==[`"]record_private_review[`"]\)&&)?(?:[A-Za-z_$][\w$.]*\.dynamicToolCalls!=null|null!=[A-Za-z_$][\w$.]*\.dynamicToolCalls)&&!await [A-Za-z_$][\w$.]*\.dynamicToolCalls\.tryClaimExecution\(\{callId:\k<params>\.callId,hostId:\k<hostId>,threadId:\k<threadId>,turnId:\k<params>\.turnId\}\)\|\|\k<signal>\?\.aborted\)return!1;)/;
   const COMPUTER_USE_NODE_REPL_RESULT_TEXT_CODE =
     'let _codexOfflineNodeReplStringify=e=>{try{return JSON.stringify(e)}catch{return String(e)}};' +
     'let _codexOfflineNodeReplContentText=e=>Array.isArray(e)?e.map(e=>(e?.type===`text`||e?.type===`inputText`)?String(e.text??``):e?.text!=null?String(e.text):_codexOfflineNodeReplStringify(e)).join(`\\n`):``;' +
@@ -2387,14 +2400,19 @@ try {
   // right after dynamic_app_tool_renderer_execution_started.
   function findAppServerRequestBusName(content) {
     const definitionMatch = content.match(
-      /function ([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*),([A-Za-z_$][\w$]*)\)\{try\{var [A-Za-z_$][\w$]*=[A-Za-z_$][\w$]*\(\);let ([A-Za-z_$][\w$]*)=\2\.get\([A-Za-z_$][\w$]*,\3\),([A-Za-z_$][\w$]*)=\2\.get\([A-Za-z_$][\w$]*\);if\(\5!=null&&[^{};]*\)try\{return \5\.forHost\(\3\)\}catch\{\}let\{client:([A-Za-z_$][\w$]*)\}=\4;if\(\6!=null\)return \6\.rpc;[\s\S]{0,1200}?Error\(`AppServerManager RPC is unavailable for hostId: \$\{\3\}`\)/,
+      /function ([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*),([A-Za-z_$][\w$]*)\)\{(?:let [A-Za-z_$][\w$]*=\{[^{}]*\};)?try\{var [A-Za-z_$][\w$]*=[A-Za-z_$][\w$]*\(\);let (?:[A-Za-z_$][\w$]*,)?([A-Za-z_$][\w$]*)=\2\.get\([A-Za-z_$][\w$]*,\3\),([A-Za-z_$][\w$]*)=\2\.get\([A-Za-z_$][\w$]*\);if\((?:\5!=null|null!=\5)&&[^{};]*\)try\{return \5\.forHost\(\3\)\}catch\{\}let\{client:([A-Za-z_$][\w$]*)\}=\4;if\((?:\6!=null|null!=\6)\)return \6\.rpc;[\s\S]{0,1200}?Error\(`AppServerManager RPC is unavailable for hostId: \$\{\3\}`\)/,
     );
     if (definitionMatch?.[1]) return definitionMatch[1];
 
     const handlerCallerMatch = content.match(
-      /`dynamic_app_tool_renderer_execution_started`[\s\S]{0,300}?`Missing threadId for dynamic tool call request`[\s\S]{0,200}?let [A-Za-z_$][\w$]*=[A-Za-z_$][\w$]*\([A-Za-z_$][\w$]*\),[A-Za-z_$][\w$]*=([A-Za-z_$][\w$]*)\(/,
+      /[`"]dynamic_app_tool_renderer_execution_started[`"][\s\S]{0,300}?[`"]Missing threadId for dynamic tool call request[`"][\s\S]{0,200}?let [A-Za-z_$][\w$]*=(?:\(0,)?([A-Za-z_$][\w$.]*)\)?\([A-Za-z_$][\w$]*\),[A-Za-z_$][\w$]*=(?:\(0,)?([A-Za-z_$][\w$.]*)\)?\(/,
     );
-    return handlerCallerMatch?.[1] ?? null;
+    if (handlerCallerMatch?.[2]) {
+      return handlerCallerMatch[0].includes(`(0,${handlerCallerMatch[2]})`)
+        ? `(0,${handlerCallerMatch[2]})`
+        : handlerCallerMatch[2];
+    }
+    return null;
   }
   // The response helpers are minified per build; reuse the ones the handler
   // itself calls for this request instead of naming them. 26.1002 passes the
@@ -2402,15 +2420,18 @@ try {
   function findDynamicToolCallResponder(handlerBody, groups) {
     const match = handlerBody.match(
       new RegExp(
-        `([A-Za-z_$][\\w$]*)\\(\\{dispatchMessageFromView:\\(([A-Za-z_$][\\w$]*),([A-Za-z_$][\\w$]*)\\)=>([A-Za-z_$][\\w$]*)\\.dispatchMessage\\(\\2,\\3\\),` +
+        `(?:\\(0,([A-Za-z_$][\\w$.]*)\\)|([A-Za-z_$][\\w$.]*))` +
+        `\\(\\{dispatchMessageFromView:\\(([A-Za-z_$][\\w$]*),([A-Za-z_$][\\w$]*)\\)=>([A-Za-z_$][\\w$.]*)\\.dispatchMessage\\(\\3,\\4\\),` +
         `hostId:${escapeRegExp(groups.hostId)},method:${escapeRegExp(groups.serverRequest)}\\.method,` +
         `threadId:${escapeRegExp(groups.threadId)},` +
-        `response:\\{id:([A-Za-z_$][\\w$]*)\\(${escapeRegExp(groups.requestId)}\\),`,
+        `response:\\{id:(?:\\(0,([A-Za-z_$][\\w$.]*)\\)|([A-Za-z_$][\\w$.]*))\\(${escapeRegExp(groups.requestId)}\\),`,
       ),
     );
-    return match
-      ? { respond: match[1], messageBus: match[4], requestIdFn: match[5] }
-      : null;
+    if (!match) return null;
+    const respond = match[1] ? `(0,${match[1]})` : match[2];
+    const messageBus = match[5];
+    const requestIdFn = match[6] ? `(0,${match[6]})` : match[7];
+    return { respond, messageBus, requestIdFn };
   }
   function computerUseNodeReplDynamicToolCallReplacement(...args) {
     const groups = args.at(-1);
@@ -2514,7 +2535,7 @@ try {
   // anchor is the generator itself with its exact `throwIfAborted`/`yield`
   // sequencing; an upstream rewrite still fails closed.
   const ARCHIVED_THREADS_DATA_CONTROLS_CURRENT_RE =
-    /async function\*(?<fn>[A-Za-z_$][\w$]*)\((?<client>[A-Za-z_$][\w$]*),(?<host>[A-Za-z_$][\w$]*),(?<signal>[A-Za-z_$][\w$]*)\)\{let (?<send>[A-Za-z_$][\w$]*)=(?<sendFn>[A-Za-z_$][\w$]*)\(\k<client>,\k<host>\),(?<seen>[A-Za-z_$][\w$]*)=new Set,(?<cursor>[A-Za-z_$][\w$]*)=null;do\{\k<signal>\.throwIfAborted\(\);let (?<page>[A-Za-z_$][\w$]*)=await \k<send>\.sendRequest\(`thread\/list`,\{archived:!0,cursor:\k<cursor>,limit:100,modelProviders:null,sortKey:`updated_at`,sourceKinds:(?<sourceKinds>[A-Za-z_$][\w$]*),useStateDbOnly:!0\},\{priority:`background`,source:`thread_list`\}\);if\(\k<signal>\.throwIfAborted\(\),yield \k<page>\.data,\k<cursor>=\k<page>\.nextCursor,\k<cursor>!=null&&\k<seen>\.has\(\k<cursor>\)\)throw Error\(`App Server repeated an archived thread list cursor`\);\k<cursor>!=null&&\k<seen>\.add\(\k<cursor>\)\}while\(\k<cursor>!=null\)\}/;
+    /async function\*(?<fn>[A-Za-z_$][\w$]*)\((?<client>[A-Za-z_$][\w$]*),(?<host>[A-Za-z_$][\w$]*),(?<signal>[A-Za-z_$][\w$]*)\)\{let (?<send>[A-Za-z_$][\w$]*)=(?:(?:\(0,)?(?<sendFn>[A-Za-z_$][\w$.]*)\)?)\(\k<client>,\k<host>\),(?<seen>[A-Za-z_$][\w$]*)=new Set,(?<cursor>[A-Za-z_$][\w$]*)=null;do\{\k<signal>\.throwIfAborted\(\);let (?<page>[A-Za-z_$][\w$]*)=await \k<send>\.sendRequest\([`"]thread\/list[`"],\{archived:!0,cursor:\k<cursor>,limit:100,modelProviders:null,sortKey:[`"]updated_at[`"],sourceKinds:(?<sourceKinds>[A-Za-z_$][\w$.]*),useStateDbOnly:!0\},\{priority:[`"]background[`"],source:[`"]thread_list[`"]\}\);if\(\k<signal>\.throwIfAborted\(\),yield \k<page>\.data,(?:(?:\k<cursor>=\k<page>\.nextCursor,\k<cursor>!=null|\k<cursor>=\k<page>\.nextCursor,null!=\k<cursor>|null!=\(\k<cursor>=\k<page>\.nextCursor\))&&\k<seen>\.has\(\k<cursor>\)\))throw Error\([`"]App Server repeated an archived thread list cursor[`"]\);(?:\k<cursor>!=null|null!=\k<cursor>)&&\k<seen>\.add\(\k<cursor>\)\}while\((?:\k<cursor>!=null|null!=\k<cursor>)\)\}/;
   function archivedThreadsReturnExpression(archived, failed, threads) {
     return `${archived}?(${failed}&&${threads}.length===0?` +
       `(globalThis.__codexOfflineArchivedThreadsCache??${threads}):` +
@@ -2529,12 +2550,13 @@ try {
           const failed = '_codexOfflineArchiveListFailed';
           const threads = '_codexOfflineArchivedThreads';
           const cache = '_codexOfflineArchivedThreadsCache';
+          const invokeSend = sendFn.includes('.') ? `(0,${sendFn})` : sendFn;
           // Pages already yielded stay in the streamed query; a failure is
           // recorded instead of rethrown (aborts still propagate), and the last
           // complete list for this host is replayed only when nothing arrived.
           return (
             `async function*${fn}(${client},${host},${signal}){` +
-            `let ${send}=${sendFn}(${client},${host}),${seen}=new Set,${cursor}=null,` +
+            `let ${send}=${invokeSend}(${client},${host}),${seen}=new Set,${cursor}=null,` +
             `${failed}=!1,${threads}=[];` +
             `try{do{${signal}.throwIfAborted();let ${page}=await ${send}.sendRequest(` +
             `\`thread/list\`,{archived:!0,cursor:${cursor},limit:100,modelProviders:null,` +
@@ -2626,21 +2648,22 @@ try {
     // those network terms for the local error expression passed a few props
     // earlier, so the offline semantics stay items-empty + local query error.
     const currentErrorPropRe =
-      /isLocalArchiveError:(?<localError>[A-Za-z_$][\w$]*&&[A-Za-z_$][\w$]*),(?<between>[^]{0,600}?)isError:(?<items>[A-Za-z_$][\w$]*)\.length===0&&\([A-Za-z_$][\w$]*==null&&[A-Za-z_$][\w$]*\|\|[A-Za-z_$][\w$]*&&[A-Za-z_$][\w$]*==null&&[A-Za-z_$][\w$]*\)(?=,chatGptArchiveError:)/;
+      /isLocalArchiveError:(?<localError>[A-Za-z_$][\w$]*&&[A-Za-z_$][\w$]*),(?<between>[^]{0,600}?)isError:(?:(?<items>[A-Za-z_$][\w$]*)\.length===0|0===(?<itemsInverted>[A-Za-z_$][\w$]*)\.length)&&\((?:[A-Za-z_$][\w$]*==null|null==[A-Za-z_$][\w$]*)&&[A-Za-z_$][\w$]*\|\|[A-Za-z_$][\w$]*&&(?:[A-Za-z_$][\w$]*==null|null==[A-Za-z_$][\w$]*)&&[A-Za-z_$][\w$]*\)(?=,chatGptArchiveError:)/;
     const currentErrorPropMatch = currentErrorPropRe.exec(
       content.slice(archivedPanelAnchor, archivedPanelAnchor + 1200),
     );
     if (!currentErrorPropMatch) {
       return { content, alreadyCorrect: false, patched: false };
     }
-    const { localError, between, items } = currentErrorPropMatch.groups;
+    const { localError, between, items, itemsInverted } = currentErrorPropMatch.groups;
+    const itemsVar = items || itemsInverted;
     const absoluteStart = archivedPanelAnchor + currentErrorPropMatch.index;
     const absoluteEnd = absoluteStart + currentErrorPropMatch[0].length;
     return {
       content:
         content.slice(0, absoluteStart) +
         `isLocalArchiveError:${localError},${between}` +
-        `isError:${items}.length===0&&${localError}` +
+        `isError:${itemsVar}.length===0&&${localError}` +
         ARCHIVED_SETTINGS_OFFLINE_LOCAL_VISIBILITY_PATCH_MARKER +
         content.slice(absoluteEnd),
       alreadyCorrect: false,
@@ -3204,7 +3227,7 @@ try {
 
       const firstFailureRe = new RegExp(
         `let\\{firstFailure:([A-Za-z_$][\\w$]*)\\}=([A-Za-z_$][\\w$]*);` +
-        `if\\(\\1!=null\\)\\{if\\(${escapeRegExp(contextVar)}\\.throwOnReconcileFailure\\)` +
+        `if\\((?:\\1!=null|null!=\\1)\\)\\{if\\(${escapeRegExp(contextVar)}\\.throwOnReconcileFailure\\)` +
         `throw \\1\\.error;return\\{`,
       );
       content = content.replace(

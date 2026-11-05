@@ -175,4 +175,12 @@ test("patchFastModeChunk enables Fast mode serviceTierAccess hook", () => {
   const patched = patchFastModeChunk(sample);
   assert.ok(patched.includes("d={fast:!0,ultrafast:!0},t[3]=c"));
   assert.equal(patchFastModeChunk(patched), patched);
+
+  // 26.1029: inverted operands and indirect calls
+  const sample261029 =
+    "u[3]!==f||u[4]!==_||u[5]!==p?(n=p&&!_&&null!=f?(0,i.W6)(f):null,u[3]=f,u[4]=_,u[5]=p,u[6]=n):n=u[6];let v=n;" +
+    "return u[7]!==_||u[8]!==v?(c={serviceTierAccess:v,isLoading:_},u[7]=_,u[8]=v,u[9]=c):c=u[9],c";
+  const patched261029 = patchFastModeChunk(sample261029);
+  assert.ok(patched261029.includes("n={fast:!0,ultrafast:!0},u[3]=f"));
+  assert.equal(patchFastModeChunk(patched261029), patched261029);
 });

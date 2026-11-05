@@ -139,7 +139,7 @@ unpack_web_zip() {
   fi
   if [ ! -f "$target_dir/cache/official-bundle/manifest.json" ] ||
      [ ! -f "$WEBVIEW_DIR/index.html" ] ||
-     ! find "$WEBVIEW_DIR/assets" -maxdepth 1 -type f -name 'index-*.js' 2>/dev/null | grep -q .; then
+     ! find "$WEBVIEW_DIR/assets" -maxdepth 1 -type f -name '*.js' 2>/dev/null | grep -q .; then
     echo -e "${RED}下载的 Web 包缺少预提取 Codex UI（webview）。${NC}"
     echo "这会导致 WebView 空白或 gateway 启动时找不到 app.asar。"
     echo "请重新下载最新 *-web.zip，或等待发布包重新构建后再运行此脚本。"

@@ -23,9 +23,9 @@ echo "Gateway: $GATEWAY_DIR"
 echo "Webview: $WEBVIEW_SRC"
 echo "输出: $OUTPUT_DIR"
 
-if [ ! -f "$WEBVIEW_SRC/index.html" ] || ! ls "$WEBVIEW_SRC"/assets/index-*.js >/dev/null 2>&1; then
+if [ ! -f "$WEBVIEW_SRC/index.html" ] || ! ls "$WEBVIEW_SRC"/assets/*.js >/dev/null 2>&1; then
   echo "ERROR: webview source is incomplete: $WEBVIEW_SRC" >&2
-  echo "Expected index.html and assets/index-*.js." >&2
+  echo "Expected index.html and assets/*.js." >&2
   exit 1
 fi
 

@@ -3,11 +3,13 @@ param(
     [string]$BuildMetadataPath = 'build-metadata.json',
     [string]$ConfigPath = 'config/offline-package.json',
     [switch]$RequireInstallerAsset,
-    [switch]$SkipDesktopLaunchSmoke
+    [switch]$SkipDesktopLaunchSmoke,
+    [string]$WorkRoot = ''
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
 
 function Resolve-AbsolutePath {
     param(
@@ -348,7 +350,11 @@ if (-not (Test-Path $portableZipPath)) {
     throw "Portable zip was not found: $portableZipPath"
 }
 
-$tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('codex-offline-verify-' + [System.Guid]::NewGuid().ToString('N'))
+$tempRoot = if (-not [string]::IsNullOrWhiteSpace($WorkRoot)) {
+    Join-Path (Resolve-AbsolutePath -BasePath $repoRoot -PathValue $WorkRoot) ('tmp\codex-offline-verify-' + [System.Guid]::NewGuid().ToString('N'))
+} else {
+    Join-Path ([System.IO.Path]::GetTempPath()) ('codex-offline-verify-' + [System.Guid]::NewGuid().ToString('N'))
+}
 $verifyAsarScriptPath = Join-Path $tempRoot 'verify-app-asar.cjs'
 $directLaunchSmokeScriptPath = Join-Path $repoRoot 'scripts\offline-direct-launch-smoke.mjs'
 
@@ -382,7 +388,16 @@ try {
         throw "Portable zip entry exceeds the extraction path budget ($($longestPortableZipEntry.Length) > $portableZipEntryMaxLength): $($longestPortableZipEntry.RelativePath)"
     }
 
-    Expand-Archive -Path $portableZipPath -DestinationPath $tempRoot -Force
+    $tar = Get-Command 'tar.exe' -ErrorAction SilentlyContinue
+    if ($null -ne $tar) {
+        New-Item -ItemType Directory -Force -Path $tempRoot | Out-Null
+        & $tar.Source -xf $portableZipPath -C $tempRoot
+        if ($LASTEXITCODE -ne 0) {
+            throw "tar failed to extract '$portableZipPath' to '$tempRoot' with exit code $LASTEXITCODE."
+        }
+    } else {
+        Expand-Archive -Path $portableZipPath -DestinationPath $tempRoot -Force
+    }
 
     $portableRoot = $tempRoot
     $topLevelEntries = @(Get-ChildItem -Path $tempRoot -Force)
@@ -791,7 +806,15 @@ try {
         }
 
         $webTempRoot = Join-Path $tempRoot 'web-package'
-        Expand-Archive -Path $webZipPath -DestinationPath $webTempRoot -Force
+        if ($null -ne $tar) {
+            New-Item -ItemType Directory -Force -Path $webTempRoot | Out-Null
+            & $tar.Source -xf $webZipPath -C $webTempRoot
+            if ($LASTEXITCODE -ne 0) {
+                throw "tar failed to extract '$webZipPath' to '$webTempRoot' with exit code $LASTEXITCODE."
+            }
+        } else {
+            Expand-Archive -Path $webZipPath -DestinationPath $webTempRoot -Force
+        }
 
         $webRoot = $webTempRoot
         $webTopLevelEntries = @(Get-ChildItem -Path $webTempRoot -Force)
@@ -1004,9 +1027,15 @@ try {
         if (-not (Test-Path $webviewAssetsDir -PathType Container)) {
             throw 'Web zip is missing the webview assets directory.'
         }
+        $webviewIndexPath = Join-Path $webRoot 'cache\official-bundle\webview\index.html'
         $webviewIndexBundles = @(Get-ChildItem -Path $webviewAssetsDir -Filter 'index-*.js' -File -ErrorAction SilentlyContinue)
+        if ($webviewIndexBundles.Count -lt 1 -and (Test-Path $webviewIndexPath)) {
+            $indexHtmlContent = Get-Content -Path $webviewIndexPath -Raw
+            $entryScripts = [regex]::Matches($indexHtmlContent, '<script\b[^>]*\bsrc=["''](?:(?:\./|/)?assets/)?([^"''?#]+\.js)["'']') | ForEach-Object { Split-Path -Leaf $_.Groups[1].Value }
+            $webviewIndexBundles = @(Get-ChildItem -Path $webviewAssetsDir -Filter '*.js' -File -ErrorAction SilentlyContinue | Where-Object { $entryScripts -contains $_.Name })
+        }
         if ($webviewIndexBundles.Count -lt 1) {
-            throw 'Web zip webview assets are incomplete: assets/index-*.js was not found.'
+            throw 'Web zip webview assets are incomplete: assets/index-*.js or entry scripts were not found.'
         }
 
         $webManifest = Get-Content -Path (Join-Path $webRoot 'cache\official-bundle\manifest.json') -Raw | ConvertFrom-Json
@@ -1468,8 +1497,8 @@ const LEGACY_PLUGIN_RENDERER_PATCH_MARKERS = [
 // in the module init.
 const sidebarActivityPatchedSurfaceRe = new RegExp(
   `([A-Za-z_$][\\w$]*)=!0${escapeRegExp(SIDEBAR_ACTIVITY_VIEW_PATCH_MARKER)},` +
-    `([A-Za-z_$][\\w$]*)=[A-Za-z_$][\\w$]*\\([A-Za-z_$][\\w$]*\\);return \\1&&` +
-    '\\2\\.status!==`denied`'
+    `([A-Za-z_$][\\w$]*)=(?:[$\\w.]+|\\(0,[$\\w.]+\\))\\([$\\w.]+\\);return \\1&&` +
+    `(?:\x60denied\x60!==\\2\\.status|\\2\\.status!==\x60denied\x60|"denied"!==\\2\\.status|\\2\\.status!=="denied")`
 );
 const sidebarActivityUnpatchedSurfaceRe = new RegExp(
   '([A-Za-z_$][\\w$]*)=([A-Za-z_$][\\w$]*)\\(([A-Za-z_$][\\w$]*)\\),' +
@@ -1477,7 +1506,7 @@ const sidebarActivityUnpatchedSurfaceRe = new RegExp(
     '\\4\\.status!==`denied`\\}[^]*?\\3=`4039078146`'
 );
 const offlineNetworkModePatchedSurfaceRe = new RegExp(
-  `([A-Za-z_$][\\w$]*)=\\{defaultOptions:\\{` +
+  `([A-Za-z_$][\\w$]*)[=:]\\{defaultOptions:\\{` +
     'mutations:\\{networkMode:`always`' +
     escapeRegExp(OFFLINE_MUTATION_NETWORK_MODE_PATCH_MARKER) + '\\},' +
     'queries:\\{networkMode:`offlineFirst`' +
@@ -1485,7 +1514,7 @@ const offlineNetworkModePatchedSurfaceRe = new RegExp(
     'refetchOnWindowFocus:!1,retry:'
 );
 const offlineNetworkModeUnpatchedSurfaceRe =
-  /([A-Za-z_$][\w$]*)=\{defaultOptions:\{queries:\{refetchOnWindowFocus:!1,retry:/;
+  /([A-Za-z_$][\w$]*)[=:]{defaultOptions:\{queries:\{refetchOnWindowFocus:!1,retry:/;
 const ULTRA_REASONING_EFFORT_PATCH_MARKER =
   patchMarker('/*codex-offline:ultra-reasoning-effort*/');
 const FAST_MODE_AUTH_METHOD_PATCH_MARKER =
@@ -1495,49 +1524,55 @@ const bundledPluginCacheLockFatalResultRe =
 const bundledPluginCacheLockFatalCatchRe =
   /catch\([A-Za-z_$][\w$]*\)\{if\([A-Za-z_$][\w$]*\.warning\(`bundled_plugins_marketplace_install_failed`,\{safe:\{errorCategory:[A-Za-z_$][\w$]*\(\{error:[A-Za-z_$][\w$]*,platformFamily:e\.platformFamily\}\),marketplaceName:t,platformFamily:e\.platformFamily\},sensitive:\{error:[A-Za-z_$][\w$]*,marketplaceRoot:e\.materializedMarketplace\.marketplaceRoot\}\}\),n\)throw [A-Za-z_$][\w$]*;return!1\}/;
 const bundledPluginCacheLockCurrentFatalCatchRe =
-  /catch\(([A-Za-z_$][\w$]*)\)\{if\([A-Za-z_$][\w$]*\.warning\(`bundled_plugins_marketplace_install_failed`,\{safe:\{errorCategory:[A-Za-z_$][\w$]*\(\{error:\1,platformFamily:([A-Za-z_$][\w$]*)\.platformFamily\}\),marketplaceName:[A-Za-z_$][\w$]*,platformFamily:\2\.platformFamily\},sensitive:\{error:\1,marketplaceRoot:\2\.materializedMarketplace\.marketplaceRoot\}\}\),\2\.throwOnReconcileFailure\)throw \1;return\{/;
+  /catch\(([A-Za-z_$][\w$]*)\)\{if\([A-Za-z_$][\w$]*\.warning\([`"]bundled_plugins_marketplace_install_failed[`"],\{safe:\{errorCategory:[A-Za-z_$][\w$]*\(\{error:\1,platformFamily:([A-Za-z_$][\w$]*)\.platformFamily\}\),marketplaceName:[A-Za-z_$][\w$]*,platformFamily:\2\.platformFamily\},sensitive:\{error:\1,marketplaceRoot:\2\.materializedMarketplace\.marketplaceRoot\}\}\),\2\.throwOnReconcileFailure\)throw \1;return\{/;
 const bundledPluginCacheLockCurrentFatalResultRe =
-  /let\{firstFailure:([A-Za-z_$][\w$]*)\}=[A-Za-z_$][\w$]*;if\(\1!=null\)\{if\([A-Za-z_$][\w$]*\.throwOnReconcileFailure\)throw \1\.error;return\{/;
+  /let\{firstFailure:([A-Za-z_$][\w$]*)\}=[A-Za-z_$][\w$]*;if\((?:\1!=null|null!=\1)\)\{if\([A-Za-z_$][\w$]*\.throwOnReconcileFailure\)throw \1\.error;return\{/;
 // Same anchor as patch-app-asar.mjs: the per-host app-server RPC resolver
 // that 26.1002 uses in place of the retired `AppServerManager RPC is not
 // connected` bus.
 function findAppServerRequestBusName(content) {
   const definitionMatch = content.match(
-    /function ([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*),([A-Za-z_$][\w$]*)\)\{try\{var [A-Za-z_$][\w$]*=[A-Za-z_$][\w$]*\(\);let ([A-Za-z_$][\w$]*)=\2\.get\([A-Za-z_$][\w$]*,\3\),([A-Za-z_$][\w$]*)=\2\.get\([A-Za-z_$][\w$]*\);if\(\5!=null&&[^{};]*\)try\{return \5\.forHost\(\3\)\}catch\{\}let\{client:([A-Za-z_$][\w$]*)\}=\4;if\(\6!=null\)return \6\.rpc;[\s\S]{0,1200}?Error\(`AppServerManager RPC is unavailable for hostId: \$\{\3\}`\)/,
+    /function ([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*),([A-Za-z_$][\w$]*)\)\{(?:let [A-Za-z_$][\w$]*=\{[^{}]*\};)?try\{var [A-Za-z_$][\w$]*=[A-Za-z_$][\w$]*\(\);let (?:[A-Za-z_$][\w$]*,)?([A-Za-z_$][\w$]*)=\2\.get\([A-Za-z_$][\w$]*,\3\),([A-Za-z_$][\w$]*)=\2\.get\([A-Za-z_$][\w$]*\);if\((?:\5!=null|null!=\5)&&[^{};]*\)try\{return \5\.forHost\(\3\)\}catch\{\}let\{client:([A-Za-z_$][\w$]*)\}=\4;if\((?:\6!=null|null!=\6)\)return \6\.rpc;[\s\S]{0,1200}?Error\(`AppServerManager RPC is unavailable for hostId: \$\{\3\}`\)/,
   );
   if (definitionMatch?.[1]) return definitionMatch[1];
 
   const handlerCallerMatch = content.match(
-    /`dynamic_app_tool_renderer_execution_started`[\s\S]{0,300}?`Missing threadId for dynamic tool call request`[\s\S]{0,200}?let [A-Za-z_$][\w$]*=[A-Za-z_$][\w$]*\([A-Za-z_$][\w$]*\),[A-Za-z_$][\w$]*=([A-Za-z_$][\w$]*)\(/,
+    /[`"]dynamic_app_tool_renderer_execution_started[`"][\s\S]{0,300}?[`"]Missing threadId for dynamic tool call request[`"][\s\S]{0,200}?let [A-Za-z_$][\w$]*=(?:\(0,)?([A-Za-z_$][\w$.]*)\)?\([A-Za-z_$][\w$]*\),[A-Za-z_$][\w$]*=(?:\(0,)?([A-Za-z_$][\w$.]*)\)?\(/,
   );
-  return handlerCallerMatch?.[1] ?? null;
+  if (handlerCallerMatch?.[2]) {
+    return handlerCallerMatch[0].includes(`(0,${handlerCallerMatch[2]})`)
+      ? `(0,${handlerCallerMatch[2]})`
+      : handlerCallerMatch[2];
+  }
+  return null;
 }
 function hasComputerUseNodeReplDynamicToolCallBridge(content) {
   const requestFn = findAppServerRequestBusName(content);
   if (!requestFn) return false;
+  const canonicalFn = fn => (fn ? fn.replace(/^\(0,\s*|\)$/g, '') : '');
   const bridgeCallRe =
     /([A-Za-z_$][\w$]*)\(`call-mcp-tool`,\{((?:params:\{)?hostId:[A-Za-z_$][\w$]*,threadId:[A-Za-z_$][\w$]*,server:`node_repl`,tool:`js`,arguments:[A-Za-z_$][\w$]*\.arguments\}\}?)\)/g;
   const matches = [...content.matchAll(bridgeCallRe)];
   if (matches.some(match => match[2].startsWith('params:'))) {
     throw new Error('Computer Use node_repl.js bridge still wraps call-mcp-tool arguments in params.');
   }
-  const wrongRequestFn = matches.find(match => match[1] !== requestFn)?.[1];
+  const wrongRequestFn = matches.find(match => canonicalFn(match[1]) !== canonicalFn(requestFn))?.[1];
   if (wrongRequestFn) {
     throw new Error(
       `Computer Use node_repl.js bridge uses ${wrongRequestFn} instead of app-server request bus ${requestFn}.`
     );
   }
   const currentBridgeCallRe =
-    /([A-Za-z_$][\w$]*)\([A-Za-z_$][\w$]*,[A-Za-z_$][\w$]*\)\.sendRequest\(`mcpServer\/tool\/call`,\{threadId:[A-Za-z_$][\w$]*,server:`node_repl`,tool:`js`,arguments:[A-Za-z_$][\w$]*\.arguments\}\)/g;
+    /(?:\(0,([A-Za-z_$][\w$.]*)\)|([A-Za-z_$][\w$.]*))\([A-Za-z_$][\w$]*,[A-Za-z_$][\w$]*\)\.sendRequest\([`"]mcpServer\/tool\/call[`"],\{threadId:[A-Za-z_$][\w$]*,server:[`"]node_repl[`"],tool:[`"]js[`"],arguments:[A-Za-z_$][\w$]*\.arguments\}\)/g;
   const currentMatches = [...content.matchAll(currentBridgeCallRe)];
-  const wrongCurrentRequestFn = currentMatches.find(match => match[1] !== requestFn)?.[1];
+  const wrongCurrentRequestFn = currentMatches.find(match => canonicalFn(match[1] || match[2]) !== canonicalFn(requestFn))?.[1];
   if (wrongCurrentRequestFn) {
     throw new Error(
       `Computer Use node_repl.js bridge uses ${wrongCurrentRequestFn} instead of app-server request bus ${requestFn}.`
     );
   }
-  return matches.some(match => match[1] === requestFn) ||
-    currentMatches.some(match => match[1] === requestFn);
+  return matches.some(match => canonicalFn(match[1]) === canonicalFn(requestFn)) ||
+    currentMatches.some(match => canonicalFn(match[1] || match[2]) === canonicalFn(requestFn));
 }
 const PLUGINS_API_KEY_NAV_PATCH_MARKER = patchMarker('/*codex-offline:plugins-api-key-nav*/');
 const PLUGINS_API_KEY_ROUTE_PATCH_MARKER = patchMarker('/*codex-offline:plugins-api-key-route*/');
@@ -1562,13 +1597,27 @@ const entries = Array.from(entryMap.keys());
 const importSettingsGateEntries = entries.filter(entry =>
   /(^|\/)webview\/assets\/import-settings-gate-[^/]+\.js$/.test(entry)
 );
-if (importSettingsGateEntries.length === 0) {
+const effectiveImportSettingsGateEntries = importSettingsGateEntries.length > 0
+  ? importSettingsGateEntries
+  : entries.filter(entry => {
+      if (!/(^|\/)webview\/assets\/(?:async\/)?[^/]+\.js$/.test(entry)) return false;
+      const stat = asar.statFile(asarPath, entryMap.get(entry));
+      if (stat.size < 100000) return false;
+      const content = asar.extractFile(asarPath, entryMap.get(entry)).toString('utf8');
+      return content.includes('3278809559');
+    });
+if (importSettingsGateEntries.length === 0 && effectiveImportSettingsGateEntries.length === 0) {
   throw new Error('Current import settings gate chunk was not found in app.asar.');
 }
 const currentImportSettingsGateIds = new Set();
-for (const entry of importSettingsGateEntries) {
+for (const entry of effectiveImportSettingsGateEntries) {
   const content = asar.extractFile(asarPath, entryMap.get(entry)).toString('utf8');
   for (const match of content.matchAll(/`(\d+)`/g)) {
+    if (entry.includes('import-settings-gate-')) {
+      currentImportSettingsGateIds.add(match[1]);
+    }
+  }
+  for (const match of content.matchAll(/[`"](3278809559)[`"]/g)) {
     currentImportSettingsGateIds.add(match[1]);
   }
 }
@@ -1655,7 +1704,7 @@ let ultraReasoningEffortPatched = false;
 let fastModeAuthPatched = false;
 const fastModeResiduals = [];
 const fastModeUnpatchedSurfaceRe =
-  /([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)&&!([A-Za-z_$][\w$]*)&&([A-Za-z_$][\w$]*)!=null\?([A-Za-z_$][\w$]*)\(\4\):null(?=,)/;
+  /([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)&&!([A-Za-z_$][\w$]*)&&(?:([A-Za-z_$][\w$]*)!=null|null!=([A-Za-z_$][\w$]*))\?(?:[A-Za-z_$][\w$]*|\(0,[A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*\))\((?:\4|\5)\):null(?=,)/;
 let codexMobileRemoteControlMfaEndpointSeen = false;
 let codexMobileAuthReloginPatched = false;
 let defaultOnGateAtomPatched = false;
@@ -1686,7 +1735,7 @@ for (const entry of javaScriptEntries) {
       legacyPluginRendererPatchResiduals.push(`${entry}:${marker}`);
     }
   }
-  const isWebviewAsset = /(^|\/)webview\/assets\/[^/]+\.js$/.test(entry);
+  const isWebviewAsset = /(^|\/)webview\/assets\/.*\.js$/.test(entry);
   if (isWebviewAsset && WEBVIEW_BROKEN_BOOLEAN_PATCH_RE.test(content)) {
     webviewBrokenBooleanPatchResiduals.push(entry);
   }
@@ -1826,7 +1875,7 @@ for (const entry of javaScriptEntries) {
   computerUseNodeReplDynamicToolCallPatched ||=
     content.includes(COMPUTER_USE_NODE_REPL_DYNAMIC_TOOL_CALL_PATCH_MARKER) &&
     hasComputerUseNodeReplDynamicToolCallBridge(content) &&
-    content.includes('namespace==null');
+    (content.includes('namespace==null') || /null==[A-Za-z_$][\w$]*\.namespace/.test(content));
   archivedThreadsPartialListPatched ||=
     content.includes(ARCHIVED_THREADS_PARTIAL_LIST_PATCH_MARKER) &&
     content.includes('_codexOfflineArchiveListError') &&
@@ -1988,7 +2037,12 @@ if (!fastModeAuthPatched) {
   throw new Error('Renderer Fast mode availability patch marker is missing from app.asar.');
 }
 
-const webviewEntry = entries.find(entry => /(^|\/)webview\/assets\/index-[^/]+\.js$/.test(entry));
+let webviewEntry = entries.find(entry => /(^|\/)webview\/assets\/index-[^/]+\.js$/.test(entry));
+if (!webviewEntry && entryMap.has('webview/index.html')) {
+  const indexHtml = asar.extractFile(asarPath, entryMap.get('webview/index.html')).toString('utf8');
+  const entryScriptNames = [...indexHtml.matchAll(/<script\b[^>]*\bsrc=["'](?:(?:\.\/|\/)?assets\/)?([^"'?#]+\.js)["']/gi)].map(m => m[1]);
+  webviewEntry = entries.find(entry => entryScriptNames.some(name => entry.endsWith('/' + name) || entry === name));
+}
 if (!webviewEntry) {
   throw new Error('Could not locate the webview index bundle inside app.asar.');
 }

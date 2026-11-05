@@ -1,5 +1,81 @@
 # Changelog
 
+## 2026-11-05
+
+### 中文
+
+- 修复 26.1029.7803.0 离线包构建与 CI 失败：
+  1. **根因**：上游在 26.1029.7803.0 中升级了打包与压缩混淆工具链（由 Vite/Rollup 切换至 Rspack，并升级 swc/terser 压缩器），引入了多项结构与代码形态漂移：
+     - **Webview 静态资源结构与命名调整**：Webview 入口脚本由原 `assets/index-*.js` 变为按 `assets/<id>.<hash>.js` 命名并在 `index.html` 动态引入；异步 chunk 全部迁移至 `webview/assets/async/<id>.<hash>.js`。解压验证脚本、Web Zip 校验以及探针脚本因严格按旧命名与非递归正则匹配而报错。
+     - **设置页代码拆分与模块解耦**：设置页与导航逻辑被拆入 `assets/async/` 下的数字 chunk（如 `968499...`），原 `import-settings-gate-*.js` 独立 chunk 被并入通用数字 chunk。当前由 `capabilityContractData.cjs` 启用的设置导入 gate `3278809559` 被移至 `572868...` chunk，导致旧版基于文件名寻找 gate chunk 的逻辑失效。
+     - **useServiceTierAccess Hook 独立切分**：`useServiceTierAccess` 被拆分到 7 个独立的 async chunk 中，且这些 chunk 中不再包含内联字面量 `'fast_mode'`，触发了 `patchFastModeAvailability` 前置守卫跳过，导致 Fast mode 补丁残留。
+     - **代码混淆模式漂移**：
+       - 操作数顺序颠倒：出现大量 `null==x` / `0===x.length` / `null!=f` 等 Yoda 条件句式；
+       - 函数调用间接化：大量导出函数调用变更为 `(0, r.fn)(...)`；
+       - 正则字符类与转义：`patchSidebarActivitySurface` 中变量名匹配字符类转义异常；`patchExternalAgentConfigDirectGateCalls` 与 `patchDirectStatsigGateCalls` 双引号/反引号混用；
+       - `bundled_plugins_marketplace_install_failed` 异常处理块移除 `install-wsl` 分支且变量名提取需适配 `null!=s`。
+  2. **修复落点**：
+     - `scripts/patch-app-asar.mjs`：
+       - `patchFastModeAvailability`：放宽守卫允许匹配包含 `serviceTierAccess` 的 async chunk，适配操作数反转与 `(0, i.W6)(f)` 间接调用；
+       - `patchSidebarActivitySurface`：修正正则字符类 `[\w$]`，适配操作数反转与单双引号；
+       - `patchUnauthenticatedCapabilityDefaultOn`：支持 `null==authMethod` 与双引号，规范化替换代码保证幂等；
+       - `patchDirectStatsigGateCalls`、`patchDefaultOnStatsigGateAtom`、`patchOfflineNetworkModeDefaults`、`patchArchivedThreadsListHostQuery`、`patchArchivedThreadsLocalArchiveVisibility`：适配 `(0, ...)` 间接调用与 Yoda 条件；
+       - `patchBundledPluginCacheLockNonfatal`：适配 `26.1029` 中 `null!=s` 结构。
+     - `scripts/extract-webview-from-asar.mjs`、`scripts/verify-offline-package.ps1`、`scripts/offline-feature-probe.mjs`、`scripts/build-cross-platform.sh`、`scripts/setup-linux.sh`：
+       - Webview 资源解析支持通过 `index.html` 查找 entry scripts，并将 webview asset 正则改为递归匹配 `webview/assets/**/*.js`；
+       - `verify-offline-package.ps1` 增加对数字 async chunk 中 gate `3278809559` 的解析提取；支持 `tar.exe` 提速解压与自定义 `$WorkRoot`。
+     - `web-gateway/gateway/src/official/assetPatches.ts`：
+       - 同步更新 `patchFastModeChunk` 正则，适配操作数反转与间接调用。
+     - `scripts/test/current-bundle-compatibility.test.cjs`、`scripts/test/offline-ui-gates.test.cjs`、`web-gateway/gateway/test/officialAssetPatches.test.cjs`：
+       - 增加针对 26.1029.7803.0 混淆形态的单元测试。
+  3. **功能探针与 Gate 基线更新**：
+     - 运行 `offline-feature-probe` 确认 20/51 设置分区可见，金标准全部满足，0 矛盾；
+     - 执行 `--promote` 刷新基线至 26.1029.7803.0，更新 `docs/baselines/offline-features.json` 与 `docs/offline-features.md`；
+     - 更新 `docs/baselines/gate-baseline.json`，完成全量 Statsig gate 审阅。
+  4. **验证**：
+     - `node --test ./scripts/test/*.test.cjs ./web-gateway/gateway/test/*.test.cjs` 270 项单元测试全量通过；
+     - `npm --prefix ./web-gateway run build:gateway` 成功；
+     - `build-offline-package.ps1 -RequireInstaller` 离线包与安装程序构建成功；
+     - `verify-offline-package.ps1` 完整性断言、30 秒启动冒烟测试与离线功能探针全量通过；
+     - 产物：`dist\offline\codex-offline-26.1029.7803.0\`，setup.exe SHA256=`48FAEFFB42F9DB676B5386D66BE56CEEEDE49119D1E780C3A4456925D4699779`。
+
+### English
+
+- Fixed 26.1029.7803.0 offline package build and CI failures:
+  1. **Root cause**: Upstream upgraded its bundling and minification toolchain in 26.1029.7803.0 (migrating from Vite/Rollup to Rspack and updating swc/terser minifiers), introducing structural and syntactic drift:
+     - **Webview static asset layout changes**: Webview entry script was renamed from `assets/index-*.js` to `assets/<id>.<hash>.js` dynamically referenced in `index.html`; asynchronous chunks moved into `webview/assets/async/<id>.<hash>.js`. Package extraction, web zip verification, and probe scripts failed due to rigid non-recursive asset path checks.
+     - **Settings code splitting**: Settings navigation logic was relocated to numeric chunks under `assets/async/` (e.g. `968499...`), and the standalone `import-settings-gate-*.js` chunk was merged into numeric modules. Active import gate `3278809559` enabled by `capabilityContractData.cjs` moved to `572868...`, breaking legacy gate file search.
+     - **useServiceTierAccess hook splitting**: Upstream split `useServiceTierAccess` into 7 separate async chunks without an inline `'fast_mode'` string literal, causing `patchFastModeAvailability`'s entry guard to skip patching and trigger residual checks in verification.
+     - **Minification pattern drift**:
+       - Inverted operands: widespread Yoda conditions such as `null==x`, `0===x.length`, `null!=f`;
+       - Indirect ES module function invocations: `(0, r.fn)(...)`;
+       - Character class escapes & quote variations: regex escape issue in `patchSidebarActivitySurface`; mixed double/backtick quotes in gate matchers;
+       - `bundled_plugins_marketplace_install_failed` error handling removed `install-wsl` case and required matching `null!=s`.
+  2. **Fixes**:
+     - `scripts/patch-app-asar.mjs`:
+       - `patchFastModeAvailability`: Broadened guard to allow chunks containing `serviceTierAccess`, adapting to inverted operands and `(0, i.W6)(f)` indirect calls;
+       - `patchSidebarActivitySurface`: Fixed regex character class `[\w$]`, handling inverted operands and quote styles;
+       - `patchUnauthenticatedCapabilityDefaultOn`: Supported `null==authMethod` and double quotes, ensuring canonical replacement;
+       - `patchDirectStatsigGateCalls`, `patchDefaultOnStatsigGateAtom`, `patchOfflineNetworkModeDefaults`, `patchArchivedThreadsListHostQuery`, `patchArchivedThreadsLocalArchiveVisibility`: Adapted to indirect calls `(0, ...)` and Yoda conditions;
+       - `patchBundledPluginCacheLockNonfatal`: Supported 26.1029's `null!=s` pattern.
+     - `scripts/extract-webview-from-asar.mjs`, `scripts/verify-offline-package.ps1`, `scripts/offline-feature-probe.mjs`, `scripts/build-cross-platform.sh`, `scripts/setup-linux.sh`:
+       - Added fallback to inspect `<script src="/assets/*.js">` in `index.html` and enabled recursive scanning (`webview/assets/**/*.js`);
+       - Updated `verify-offline-package.ps1` to resolve gate `3278809559` in numeric async chunks, and added `tar.exe` support with custom `$WorkRoot`.
+     - `web-gateway/gateway/src/official/assetPatches.ts`:
+       - Updated `patchFastModeChunk` regex to match inverted operands and indirect calls.
+     - `scripts/test/current-bundle-compatibility.test.cjs`, `scripts/test/offline-ui-gates.test.cjs`, `web-gateway/gateway/test/officialAssetPatches.test.cjs`:
+       - Added unit tests for 26.1029.7803.0 minification patterns.
+  3. **Feature Probe and Gate Baseline Updates**:
+     - Verified 20/51 settings sections visible via `offline-feature-probe`, meeting all gold standard assertions with 0 contradictions;
+     - Promoted baseline to 26.1029.7803.0, updating `docs/baselines/offline-features.json` and `docs/offline-features.md`;
+     - Reviewed Statsig gates and regenerated `docs/baselines/gate-baseline.json`.
+  4. **Verification**:
+     - All 270 unit tests pass (`node --test ./scripts/test/*.test.cjs ./web-gateway/gateway/test/*.test.cjs`);
+     - Web gateway builds cleanly (`npm --prefix ./web-gateway run build:gateway`);
+     - Offline package and installer built successfully (`build-offline-package.ps1 -RequireInstaller`);
+     - `verify-offline-package.ps1` passed all integrity, smoke launch, and probe assertions;
+     - Artifact: `dist\offline\codex-offline-26.1029.7803.0\`, setup.exe SHA256=`48FAEFFB42F9DB676B5386D66BE56CEEEDE49119D1E780C3A4456925D4699779`.
+
 ## 2026-11-03
 
 ### 中文

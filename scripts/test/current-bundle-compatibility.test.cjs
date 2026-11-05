@@ -104,6 +104,18 @@ test("26.1013 settings IPC keeps its native config handler while patching settin
   assert.match(renamedPatched, /_url\.searchParams\.set\("initialRoute","\/settings\/"\+t\.section\)/);
   assert.ok(renamedPatched.includes('throw Error(`"${t.type}" is not implemented in Electron.`)'));
 
+  // 26.1029: install-wsl removed from throw block, double quotes from minifier
+  const fixture261029 =
+    'case"navigate-in-new-editor-tab":case"open-vscode-command":' +
+    'case"open-extension-settings":case"open-keyboard-shortcuts":' +
+    'case"show-settings":' +
+    'throw Error(`"${t.type}" is not implemented in Electron.`);' +
+    'case"open-config-toml":{let e=1;break}';
+  const patched261029 = fixture261029.replace(needleRe, (...match) => buildReplacement(match[1]));
+  assert.notEqual(patched261029, fixture261029);
+  assert.match(patched261029, /case`show-settings`:\{let _win=c\.BrowserWindow\.fromWebContents\(e\)/);
+  assert.match(patched261029, /_url\.searchParams\.set\("initialRoute","\/settings\/"\+t\.section\)/);
+
   // 26.1027 bundle uses double quotes and minified electron identifier (eo).
   const fixture1027 =
     'case"navigate-in-new-editor-tab":case"open-vscode-command":' +
@@ -853,6 +865,19 @@ test("26.721 plugin cache lock failures remain nonfatal in both reconcile branch
   assert.ok(fixture.includes("if(e.throwOnReconcileFailure)throw a.error"));
   assert.equal(constants.category, "`plugin_cache_windows_file_lock`");
   assert.equal(constants.marker, "/*codex-offline:bundled-plugin-cache-lock-nonfatal*/");
+
+  // 26.1029: double quotes and inverted operands (null!=s)
+  const fixture261029 =
+    'catch(r){if(nZ.warning("bundled_plugins_marketplace_install_failed",' +
+    '{safe:{errorCategory:n9({error:r,platformFamily:e.platformFamily}),marketplaceName:t,platformFamily:e.platformFamily},' +
+    'sensitive:{error:r,marketplaceRoot:e.materializedMarketplace.marketplaceRoot}}),e.throwOnReconcileFailure)throw r;' +
+    'return{hadReconcileFailure:!0}}let{firstFailure:s}=r;if(null!=s){if(e.throwOnReconcileFailure)throw s.error;return{failed:!0}}';
+  const match261029 = fixture261029.match(constants.re);
+  assert.ok(match261029);
+  assert.deepEqual(
+    [match261029[1], match261029[2], match261029[3], match261029[4], match261029[5]],
+    ["r", "nZ", "n9", "e", "t"],
+  );
 });
 
 test("26.721 Chrome skill bootstrap accepts upstream single-line guidance", () => {

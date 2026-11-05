@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "version": "26.1027.3384.0",
+  "version": "26.1029.7803.0",
   "mode": "api-key",
   "groups": [
     {
@@ -9,7 +9,7 @@
         {
           "slug": "general-settings",
           "visible": true,
-          "label": "常规",
+          "label": "General",
           "reason": null
         },
         {
@@ -21,7 +21,7 @@
         {
           "slug": "import",
           "visible": true,
-          "label": "导入",
+          "label": "Import",
           "reason": null
         },
         {
@@ -33,7 +33,7 @@
         {
           "slug": "appearance",
           "visible": true,
-          "label": "外观",
+          "label": "Appearance",
           "reason": null
         },
         {
@@ -57,7 +57,7 @@
         {
           "slug": "archived-chats",
           "visible": true,
-          "label": "已归档的聊天",
+          "label": "Archived chats",
           "reason": null
         },
         {
@@ -87,37 +87,37 @@
         {
           "slug": "voice",
           "visible": true,
-          "label": "语音",
+          "label": "Voice",
           "reason": null
         },
         {
           "slug": "storage",
           "visible": true,
-          "label": "存储",
+          "label": "Storage",
           "reason": null
         },
         {
           "slug": "agent",
           "visible": true,
-          "label": "配置",
+          "label": "Configuration",
           "reason": null
         },
         {
           "slug": "personalization",
           "visible": true,
-          "label": "个性化",
+          "label": "Personalization",
           "reason": null
         },
         {
           "slug": "pets",
           "visible": true,
-          "label": "Mini 与虚拟宠物",
+          "label": "Mini & Pets",
           "reason": null
         },
         {
           "slug": "keyboard-shortcuts",
           "visible": true,
-          "label": "键盘快捷键",
+          "label": "Keyboard shortcuts",
           "reason": null
         },
         {
@@ -181,7 +181,7 @@
         {
           "slug": "plugins-settings",
           "visible": true,
-          "label": "插件",
+          "label": "Plugins",
           "reason": null
         },
         {
@@ -205,7 +205,7 @@
         {
           "slug": "computer-use",
           "visible": true,
-          "label": "电脑操控",
+          "label": "Computer use",
           "reason": null
         },
         {
@@ -217,7 +217,7 @@
         {
           "slug": "appshots",
           "visible": true,
-          "label": "应用快照",
+          "label": "Appshots",
           "reason": null
         },
         {
@@ -241,7 +241,7 @@
         {
           "slug": "browser-use",
           "visible": true,
-          "label": "浏览器",
+          "label": "Browser",
           "reason": null
         },
         {
@@ -264,19 +264,19 @@
         {
           "slug": "hooks-settings",
           "visible": true,
-          "label": "钩子",
+          "label": "Hooks",
           "reason": null
         },
         {
           "slug": "gateways",
           "visible": true,
-          "label": "模型提供商",
+          "label": "Model Providers",
           "reason": null
         },
         {
           "slug": "connections",
           "visible": true,
-          "label": "连接",
+          "label": "Connections",
           "reason": null
         },
         {
@@ -312,7 +312,7 @@
         {
           "slug": "local-environments",
           "visible": true,
-          "label": "环境",
+          "label": "Environments",
           "reason": null
         },
         {

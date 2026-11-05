@@ -423,7 +423,8 @@ function Export-AppSource {
         [Parameter(Mandatory = $true)]$Config,
         [Parameter(Mandatory = $true)][string]$ScriptRoot,
         [Parameter(Mandatory = $true)][string]$SourceExportRoot,
-        [Parameter(Mandatory = $false)]$ResolvedSource = $null
+        [Parameter(Mandatory = $false)]$ResolvedSource = $null,
+        [Parameter(Mandatory = $false)][string]$WorkRoot = ''
     )
 
     $mode = [string]$Config.appSource.mode
@@ -447,7 +448,8 @@ function Export-AppSource {
                 -DownloadedFileName $resolved.selected.fileName `
                 -ExpectedSha1 $resolved.selected.sha1 `
                 -Destination $SourceExportRoot `
-                -PackageFamilyName $Config.appSource.packageFamilyName | Out-Null
+                -PackageFamilyName $Config.appSource.packageFamilyName `
+                -WorkRoot $WorkRoot | Out-Null
 
             return [ordered]@{
                 mode = $mode
@@ -470,7 +472,8 @@ function Export-AppSource {
                 -ExpectedSize ([long]$resolved.selected.size) `
                 -SourceMode 'official_cdn' `
                 -Destination $SourceExportRoot `
-                -PackageFamilyName $Config.appSource.packageFamilyName | Out-Null
+                -PackageFamilyName $Config.appSource.packageFamilyName `
+                -WorkRoot $WorkRoot | Out-Null
 
             return [ordered]@{
                 mode = $mode
@@ -1108,7 +1111,7 @@ if ($cacheCandidate) {
 
 if ($null -eq $sourceMetadata) {
   Write-BuildTrace 'Exporting app source.'
-  $appSourceInfo = Export-AppSource -Config $config -ScriptRoot $scriptRoot -SourceExportRoot $sourceExportRoot -ResolvedSource $resolvedAppSource
+  $appSourceInfo = Export-AppSource -Config $config -ScriptRoot $scriptRoot -SourceExportRoot $sourceExportRoot -ResolvedSource $resolvedAppSource -WorkRoot $workRoot
   $sourceMetadata = Get-Content -Path $sourceMetadataPath -Raw | ConvertFrom-Json
   $version = [string](Get-OptionalProperty -Object $sourceMetadata -Name 'version')
 }

@@ -90,11 +90,13 @@ function ensureWebviewComplete(webviewDir) {
   if (!fs.existsSync(assetsDir)) {
     throw new Error(`Extracted webview is missing assets directory: ${assetsDir}`);
   }
+  const indexHtml = fs.readFileSync(indexPath, "utf8");
+  const scriptSrcs = [...indexHtml.matchAll(/<script\b[^>]*\bsrc=["'](?:(?:\.\/|\/)?assets\/)?([^"'?#]+\.js)["']/gi)].map(m => path.basename(m[1]));
   const indexBundles = fs
     .readdirSync(assetsDir)
-    .filter((entry) => /^index-[^\\/]+\.js$/.test(entry));
+    .filter((entry) => /^index-[^\\/]+\.js$/.test(entry) || scriptSrcs.includes(entry));
   if (indexBundles.length === 0) {
-    throw new Error(`Extracted webview is missing assets/index-*.js in ${assetsDir}`);
+    throw new Error(`Extracted webview is missing assets/index-*.js or entry script bundles in ${assetsDir}`);
   }
 }
 

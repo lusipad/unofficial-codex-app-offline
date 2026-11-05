@@ -633,6 +633,21 @@ test("current Fast mode availability falls back after legacy patterns do not mat
     serviceTierAccessSecondPass.content,
     serviceTierAccessResult.content,
   );
+
+  // 26.1029: inverted operands (null!=f) and indirect calls ((0,i.W6)(f))
+  const serviceTierAccess261029Bundle =
+    "function VAo(e){u[3]!==f||u[4]!==_||u[5]!==p?(n=p&&!_&&null!=f?(0,i.W6)(f):null,u[3]=f,u[4]=_,u[5]=p,u[6]=n):n=u[6];let v=n;" +
+    "return u[7]!==_||u[8]!==v?(c={serviceTierAccess:v,isLoading:_},u[7]=_,u[8]=v,u[9]=c):c=u[9],c}const feature=`fast_mode`;";
+  const result261029 = patchFastModeAvailability(
+    serviceTierAccess261029Bundle,
+    marker,
+  );
+  assert.equal(result261029.patched, true);
+  assert.match(
+    result261029.content,
+    new RegExp(`n={fast:!0,ultrafast:!0}${escapeRegExp(marker)}`),
+  );
+  assert.doesNotThrow(() => Function(result261029.content));
 });
 
 test("ultra reasoning effort stays available for models that already support max", () => {

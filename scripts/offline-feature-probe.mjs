@@ -228,7 +228,7 @@ export function renderReleaseSnippet(diff, docsUrl) {
 function readAsarJs(asarPath) {
   const asar = require('@electron/asar');
   return asar.listPackage(asarPath)
-    .filter((entry) => /^[\\/]?webview[\\/]assets[\\/][^\\/]+\.js$/.test(entry))
+    .filter((entry) => /^[\\/]?webview[\\/]assets[\\/].*\.js$/.test(entry))
     .map((entry) => ({
       name: path.basename(entry),
       content: asar.extractFile(asarPath, entry.replace(/^[\\/]/, '')).toString('utf8'),

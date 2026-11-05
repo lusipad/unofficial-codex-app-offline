@@ -7,11 +7,13 @@ param(
     [string]$ExpectedSha1 = '',
     [ValidateSet('rg_adguard', 'official_cdn')][string]$SourceMode = 'rg_adguard',
     [string]$ExpectedEtag = '',
-    [long]$ExpectedSize = 0
+    [long]$ExpectedSize = 0,
+    [string]$WorkRoot = ''
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
 
 function Resolve-AbsolutePath {
     param([Parameter(Mandatory = $true)][string]$PathValue)
@@ -34,6 +36,12 @@ function Expand-ZipLikeArchive {
     }
 
     New-Item -ItemType Directory -Force -Path $DestinationPath | Out-Null
+
+    $tar = Get-Command 'tar.exe' -ErrorAction SilentlyContinue
+    if ($null -ne $tar) {
+        & $tar.Source -xf $ArchivePath -C $DestinationPath
+        return
+    }
 
     $zipPath = Join-Path ([System.IO.Path]::GetDirectoryName($ArchivePath)) ([System.IO.Path]::GetFileNameWithoutExtension($ArchivePath) + '.zip')
     Copy-Item -Path $ArchivePath -Destination $zipPath -Force
@@ -75,7 +83,11 @@ function Get-PackageScore {
 }
 
 $destinationRoot = Resolve-AbsolutePath -PathValue $Destination
-$tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('codex-offline-' + [guid]::NewGuid().ToString('N'))
+$tempRoot = if (-not [string]::IsNullOrWhiteSpace($WorkRoot)) {
+    Join-Path (Resolve-AbsolutePath -PathValue $WorkRoot) ('tmp\codex-offline-' + [guid]::NewGuid().ToString('N'))
+} else {
+    Join-Path ([System.IO.Path]::GetTempPath()) ('codex-offline-' + [guid]::NewGuid().ToString('N'))
+}
 $downloadRoot = Join-Path $tempRoot 'download'
 $outerExpandRoot = Join-Path $tempRoot 'outer'
 $innerExpandRoot = Join-Path $tempRoot 'inner'
