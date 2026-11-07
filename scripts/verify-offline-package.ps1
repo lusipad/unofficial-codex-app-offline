@@ -1430,7 +1430,7 @@ const CODEX_MOBILE_REMOTE_CONTROL_MFA_ENDPOINT = '/wham/remote/control/mfa_requi
 const CODEX_MOBILE_AUTH_RELOGIN_MARKER = patchMarker('/*codex-offline:codex-mobile-auth-relogin*/');
 const BUNDLED_BROWSER_PLUGINS_PATCH_MARKER = patchMarker('/*codex-offline:bundled-browser-plugins-no-force-reload*/');
 const BROWSER_USE_DESCRIPTOR_CURRENT_PATCHED_RE =
-  /\{\.\.\.[A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*\.browser,autoInstallOptOutKey:(?:\(0,[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\)|[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\),installWhenMissing:!0,isAvailable:\(\{features:[A-Za-z_$][\w$]*\}\)=>\/\*codex-offline:bundled-browser-plugins-no-force-reload\*\/!0,migrate:[A-Za-z_$][\w$]*\}/;
+  /\{\.\.\.[A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*\.browser,autoInstallOptOutKey:(?:\(0,[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\)|[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\),installWhenMissing:!0,isAvailable:\(\{features:[A-Za-z_$][\w$]*\}\)=>\/\*codex-offline:bundled-browser-plugins-no-force-reload\*\/!0,migrate:/;
 const BUNDLED_RUNTIME_PLUGINS_PATCH_MARKER = patchMarker('/*codex-offline:bundled-runtime-plugins*/');
 const WINDOWS_BROWSER_USE_CAPABILITY_PATCH_MARKER = patchMarker('/*codex-offline:windows-browser-use-capability*/');
 const APP_SERVER_SANDBOX_OVERRIDE = '`-c`,`windows.sandbox=\'unelevated\'`,`app-server`,`--analytics-default-enabled`';
@@ -1492,18 +1492,15 @@ const LEGACY_PLUGIN_RENDERER_PATCH_MARKERS = [
   '/*codex-offline:plugin-query-network-mode*/',
   '/*codex-offline:plugin-cloud-fallback*/',
 ];
-// 26.1016 simplified the second read check to !== `denied`; the surface is
-// a two-read function whose gate variable is assigned the 4039078146 id later
-// in the module init.
+// 26.1103 inlined the priority activity surface into an atom selector getter:
+// ({get:e})=>e(i.JW,"4039078146")&&"denied"!==e(a.EB).status
 const sidebarActivityPatchedSurfaceRe = new RegExp(
-  `([A-Za-z_$][\\w$]*)=!0${escapeRegExp(SIDEBAR_ACTIVITY_VIEW_PATCH_MARKER)},` +
-    `([A-Za-z_$][\\w$]*)=(?:[$\\w.]+|\\(0,[$\\w.]+\\))\\([$\\w.]+\\);return \\1&&` +
-    `(?:\x60denied\x60!==\\2\\.status|\\2\\.status!==\x60denied\x60|"denied"!==\\2\\.status|\\2\\.status!=="denied")`
+  `\\(\\{get:[A-Za-z_$][\\w$]*\\}\\)=>!0${escapeRegExp(SIDEBAR_ACTIVITY_VIEW_PATCH_MARKER)}&&` +
+    `(?:\x60denied\x60!==[A-Za-z_$][\\w$]*\\([^()]+\\)\\.status|[A-Za-z_$][\\w$]*\\([^()]+\\)\\.status!==\x60denied\x60|"denied"!==[A-Za-z_$][\\w$]*\\([^()]+\\)\\.status|[A-Za-z_$][\\w$]*\\([^()]+\\)\\.status!=="denied")`
 );
 const sidebarActivityUnpatchedSurfaceRe = new RegExp(
-  '([A-Za-z_$][\\w$]*)=([A-Za-z_$][\\w$]*)\\(([A-Za-z_$][\\w$]*)\\),' +
-    '([A-Za-z_$][\\w$]*)=[A-Za-z_$][\\w$]*\\([A-Za-z_$][\\w$]*\\);return \\1&&' +
-    '\\4\\.status!==`denied`\\}[^]*?\\3=`4039078146`'
+  `\\(\\{get:(?<getParam>[A-Za-z_$][\\w$]*)\\}\\)=>(?<target>\\k<getParam>\\((?:[$\\w.]+|\\(0,[$\\w.]+\\)),[\x60"]4039078146[\x60"]\\))&&` +
+    `(?<statusCheck>(?:\x60denied\x60!==\\k<getParam>\\([^()]+\\)\\.status|\\k<getParam>\\([^()]+\\)\\.status!==\x60denied\x60|"denied"!==\\k<getParam>\\([^()]+\\)\\.status|\\k<getParam>\\([^()]+\\)\\.status!=="denied"))`
 );
 const offlineNetworkModePatchedSurfaceRe = new RegExp(
   `([A-Za-z_$][\\w$]*)[=:]\\{defaultOptions:\\{` +
@@ -1763,7 +1760,7 @@ for (const entry of javaScriptEntries) {
       sidebarActivityViewPatched = true;
     }
     if (
-      content.includes('`4039078146`') &&
+      content.includes('4039078146') &&
       sidebarActivityUnpatchedSurfaceRe.test(content)
     ) {
       sidebarActivityViewSurfaceSeen = true;

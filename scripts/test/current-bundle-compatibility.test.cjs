@@ -497,6 +497,44 @@ test("26.814 browser descriptors patch shared plugin descriptor spreads", () => 
       "installWhenMissing:!0,isAvailable:({features:e})=>" +
       "/*codex-offline:bundled-browser-plugins-no-force-reload*/!0,migrate:ln",
     ));
+
+    // 26.1103 bundle with inlined async function migrate handler
+    const fixture1103 =
+      "{...es.iRL.chrome,syncInstallStateWithChromeExtension:!0," +
+      "isAvailable:({buildFlavor:e,features:t})=>t.externalBrowserUseAllowed&&(0,rO.mq)(e)}\n" +
+      "{...es.iRL.browser,autoInstallOptOutKey:(0,es.kTr)(es.iRL.browser.name)," +
+      "isAvailable:({features:e})=>e.inAppBrowserUseAllowed||e.externalBrowserUseAllowed,migrate:async function(e){/*noop*/}}";
+    fs.writeFileSync(filePath, fixture1103, "utf8");
+    const result1103 = patchBundledBrowserPlugins([filePath], {
+      browserUseDescriptorPatchedRe: /never/,
+      browserUseDescriptorRe: /never/,
+      browserUseDescriptorCurrentPatchedRe: /never/,
+      browserUseDescriptorCurrentRe: Function(
+        `"use strict";\n${browserUseRegexSource}\nreturn BROWSER_USE_DESCRIPTOR_CURRENT_RE;`,
+      )(),
+      chromeDescriptorCurrentPatchedRe: /never/,
+      chromeDescriptorCurrentRe: Function(
+        `"use strict";\n${regexSource}\nreturn CHROME_DESCRIPTOR_CURRENT_RE;`,
+      )(),
+      chromeDescriptorPatchedRe: /never/,
+      chromeDescriptorRe: /never/,
+      inAppBrowserDescriptorPatchedRe: /never/,
+      inAppBrowserDescriptorRe: /never/,
+      patchMarker: "/*codex-offline:bundled-browser-plugins-no-force-reload*/",
+      syncExternalBrowserDescriptorPatchedRe: /never/,
+      syncExternalBrowserDescriptorRe: /never/g,
+    });
+    assert.deepEqual(result1103.patchedFiles, [filePath]);
+    const patched1103 = fs.readFileSync(filePath, "utf8");
+    assert.ok(patched1103.includes(
+      "...es.iRL.chrome,installWhenMissing:!0,syncInstallStateWithChromeExtension:!0," +
+      "isAvailable:({buildFlavor:e,features:t})=>/*codex-offline:bundled-browser-plugins-no-force-reload*/!0",
+    ));
+    assert.ok(patched1103.includes(
+      "...es.iRL.browser,autoInstallOptOutKey:(0,es.kTr)(es.iRL.browser.name)," +
+      "installWhenMissing:!0,isAvailable:({features:e})=>" +
+      "/*codex-offline:bundled-browser-plugins-no-force-reload*/!0,migrate:async function(e){/*noop*/}",
+    ));
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true });
   }
@@ -1163,6 +1201,19 @@ test("26.1007 archived thread generator keeps streamed pages and replays the las
   const controller = new AbortController();
   controller.abort();
   await assert.rejects(collectArchivedThreadPages(result.content, [], controller.signal));
+});
+
+test("26.1103 archived thread generator accepts anonymous generator expression", async () => {
+  const patchArchivedThreadsPartialList = loadArchivedThreadsPartialListPatch();
+  const anonFixture =
+    "return async function*(e,t,a){let r=Xe(e,t),i=new Set,s=null;do{a.throwIfAborted();" +
+    "let e=await r.sendRequest(`thread/list`,{archived:!0,cursor:s,limit:100,modelProviders:null," +
+    "sortKey:`updated_at`,sourceKinds:xe,useStateDbOnly:!0},{priority:`background`,source:`thread_list`});" +
+    "if(a.throwIfAborted(),yield e.data,null!=(s=e.nextCursor)&&i.has(s))throw Error(" +
+    "`App Server repeated an archived thread list cursor`);null!=s&&i.add(s)}while(null!=s)}";
+  const result = patchArchivedThreadsPartialList(anonFixture);
+  assert.equal(result.patched, true);
+  assert.match(result.content, /\/\*codex-offline:archived-threads-partial-list\*\/\/\*codex-offline:archived-threads-cache-fallback\*\/$/);
 });
 
 test("26.1007 archived thread generator patch fails closed on the 26.1002 queryFn shape", () => {

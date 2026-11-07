@@ -482,18 +482,16 @@ test("priority surface carries its dedicated static gate marker", () => {
     "escapeRegExp",
     `"use strict";\n${helperSource}\nreturn patchSidebarActivitySurface;`,
   )(sidebarMarker, escapeRegExp);
-  // 26.1016 simplified the return statement check to !== `denied`; the
-  // surface is a two-read function with the gate id assigned to the captured
-  // variable later in the module init.
+  // 26.1103 inlined the priority activity surface into an atom selector getter:
+  // ({get:e})=>e(i.JW,"4039078146")&&"denied"!==e(a.EB).status
   const fixture =
-    "function PWa(){let e=Qv(IWa),t=Z(l_);return e&&t.status!==`denied`}" +
-    "IWa=`4039078146`";
+    'g=(0,r.un)(l.u,({get:e})=>e(i.JW,"4039078146")&&"denied"!==e(a.EB).status);function p(){return(0,r.Ul)(g)}';
   const result = patchSidebarActivitySurface(fixture);
 
   assert.equal(result.patched, true);
   assert.equal(result.sidebarSurfaceSeen, true);
   assert.equal(result.sidebarCorrect, true);
-  assert.ok(result.content.includes(`e=!0${sidebarMarker},t=Z(l_);return e&&`));
+  assert.ok(result.content.includes(`({get:e})=>!0${sidebarMarker}&&"denied"!==e(a.EB).status`));
 
   const secondPass = patchSidebarActivitySurface(result.content);
   assert.equal(secondPass.patched, false);

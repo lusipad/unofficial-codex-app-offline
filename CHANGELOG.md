@@ -1,5 +1,53 @@
 # Changelog
 
+## 2026-11-07
+
+### 中文
+
+- 修复 26.1103.4239.0（及 26.1103.3517.0）离线包构建与 CI 失败（Issue #142）：
+  1. **根因**：上游推送新版本 `26.1103.4239.0`，引入了三处代码形态漂移：
+     - **归档会话生成器匿名化**：`scripts/patch-app-asar.mjs` 中 `ARCHIVED_THREADS_DATA_CONTROLS_CURRENT_RE` 原本强制要求命名生成器函数 `async function*(?<fn>[A-Za-z_$][\w$]*)`，但在 26.1103 中被打包混淆为匿名生成器表达式 `return async function*(e,t,a){...}`，导致无法匹配并报错 `Could not locate renderer archived thread list pagination to patch.`。
+     - **侧边栏 Activity 优先级门禁重构**：`patchSidebarActivitySurface` 原本匹配 26.1016 的函数形态 `function PWa(){let e=Qv(IWa),t=Z(l_);return e&&t.status!==\`denied\`}`，在 26.1103 中被内联为原子选择器 getter：`({get:e})=>e(i.JW,"4039078146")&&"denied"!==e(a.EB).status`，导致静态补丁失配并报错 `Could not locate the sidebar Activity priority surface.`。
+     - **浏览器插件（browser-use）描述符迁移函数内联**：`scripts/patch-app-asar.mjs` 中的 `BROWSER_USE_DESCRIPTOR_CURRENT_RE` 预期 `migrate:[A-Za-z_$][\w$]*\}` 变量引用形态，而在 26.1103 中被直接内联为异步函数字面量 `migrate:async function(e){...}`，导致 browser-use 描述符未被命中，触发离线包验证器报错 `Bundled browser-use descriptor was not patched for offline marketplace materialization.`。
+  2. **修复落点**：
+     - `scripts/patch-app-asar.mjs`：
+       - `ARCHIVED_THREADS_DATA_CONTROLS_CURRENT_RE`：放宽生成器函数名为可选 `(?<fn>[A-Za-z_$][\w$]*)?`，并在替换中使用 `${fn ?? ''}`，兼容匿名生成器表达式。
+       - `patchSidebarActivitySurface`：更新为单一形态（Single-shape）原子选择器正则，匹配 `({get:e})=>e(i.JW,"4039078146")&&"denied"!==e(a.EB).status` 并替换为 `({get:e})=>!0/*codex-offline:sidebar-activity-view*/&&...`。
+       - `BROWSER_USE_DESCRIPTOR_CURRENT_RE` 与 `BROWSER_USE_DESCRIPTOR_CURRENT_PATCHED_RE`：将尾部锚点改为 `,migrate:`，支持内联 `migrate:async function` 描述符。
+     - `scripts/verify-offline-package.ps1`：
+       - 同步更新 `sidebarActivityPatchedSurfaceRe`、`sidebarActivityUnpatchedSurfaceRe` 和 `BROWSER_USE_DESCRIPTOR_CURRENT_PATCHED_RE`，保持离线包验证器与补丁器断言精确一致。
+     - `scripts/test/offline-ui-gates.test.cjs`、`scripts/test/current-bundle-compatibility.test.cjs`：
+       - 更新测试桩代码为 26.1103 选择器形态；增加对匿名生成器表达式和内联 `migrate:async function` 的单元测试。
+  3. **验证结果**：
+     - `node --test .\scripts\test\*.test.cjs .\web-gateway\gateway\test\*.test.cjs`：全量 271 项测试通过；
+     - `npm --prefix .\web-gateway run build:gateway`：构建成功；
+     - `build-offline-package.ps1 -RequireInstaller`：离线包与安装程序构建成功；
+     - `verify-offline-package.ps1`：完整性断言、30 秒启动冒烟测试与离线功能探针全量通过（20/51 设置分区可见）；
+     - 产物：`dist\offline\codex-offline-26.1103.4239.0\`，`codex-offline-26.1103.4239.0-setup.exe` SHA256=`A1595A659354D771920AA20BEDFC7894312168059BF508309174D36E364732D8`。
+
+### English
+
+- Fixed 26.1103.4239.0 (and 26.1103.3517.0) offline package build and CI failures (Issue #142):
+  1. **Root cause**: Upstream pushed new release `26.1103.4239.0`, introducing three syntactic/structural bundle drifts:
+     - **Anonymous archived threads generator**: `ARCHIVED_THREADS_DATA_CONTROLS_CURRENT_RE` in `scripts/patch-app-asar.mjs` strictly required a named generator function `async function*(?<fn>...)`, but 26.1103 minified it as an anonymous generator expression `return async function*(e,t,a){...}`.
+     - **Sidebar Activity priority gate atom refactoring**: `patchSidebarActivitySurface` expected the function-style gate check `function PWa(){let e=Qv(IWa),t=Z(l_);return e&&t.status!==\`denied\`}`, which was refactored in 26.1103 into an atom selector getter: `({get:e})=>e(i.JW,"4039078146")&&"denied"!==e(a.EB).status`.
+     - **Inlined browser-use migration function**: `BROWSER_USE_DESCRIPTOR_CURRENT_RE` expected a variable reference `migrate:[A-Za-z_$][\w$]*\}`, but 26.1103 inlined the async migration handler `migrate:async function(e){...}` directly, causing the descriptor patch to be missed and failing offline package verification.
+  2. **Fixes applied**:
+     - `scripts/patch-app-asar.mjs`:
+       - `ARCHIVED_THREADS_DATA_CONTROLS_CURRENT_RE`: made function name group optional `(?<fn>[A-Za-z_$][\w$]*)?` and replaced with `${fn ?? ''}`.
+       - `patchSidebarActivitySurface`: updated single-shape matcher for the atom selector pattern `({get:e})=>e(i.JW,"4039078146")&&...` replacing with `({get:e})=>!0/*codex-offline:sidebar-activity-view*/&&...`.
+       - `BROWSER_USE_DESCRIPTOR_CURRENT_RE` / `BROWSER_USE_DESCRIPTOR_CURRENT_PATCHED_RE`: anchored on `,migrate:` to support inlined async migration handlers.
+     - `scripts/verify-offline-package.ps1`:
+       - Synchronized `sidebarActivityPatchedSurfaceRe`, `sidebarActivityUnpatchedSurfaceRe`, and `BROWSER_USE_DESCRIPTOR_CURRENT_PATCHED_RE`.
+     - `scripts/test/offline-ui-gates.test.cjs`, `scripts/test/current-bundle-compatibility.test.cjs`:
+       - Updated fixtures and added tests for anonymous generator expressions and inlined `migrate:async function`.
+  3. **Verification**:
+     - `node --test .\scripts\test\*.test.cjs .\web-gateway\gateway\test\*.test.cjs`: all 271 unit tests passed;
+     - `npm --prefix .\web-gateway run build:gateway`: succeeded;
+     - `build-offline-package.ps1 -RequireInstaller`: package and installer compiled successfully;
+     - `verify-offline-package.ps1`: all package integrity checks, 30s launch smoke test, and offline feature probes passed (20/51 settings sections visible);
+     - Output: `dist\offline\codex-offline-26.1103.4239.0\`, `codex-offline-26.1103.4239.0-setup.exe` SHA256=`A1595A659354D771920AA20BEDFC7894312168059BF508309174D36E364732D8`.
+
 ## 2026-11-05
 
 ### 中文

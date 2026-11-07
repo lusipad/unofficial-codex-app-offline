@@ -942,45 +942,28 @@ function removeLegacyOfflinePluginQueryPatches(content) {
 function patchSidebarActivitySurface(content) {
   let next = content;
   let patched = false;
-  // 26.1016 simplified the second read check:
-  //   function PWa(){let e=Qv(IWa),t=Z(l_);return e&&t.status!==`denied`}
-  // with the gate id assigned to the captured variable later in the module
-  // init (IWa=`4039078146`).
+  // 26.1103 inlined the priority activity surface into an atom selector getter:
+  //   g=(0,r.un)(l.u,({get:e})=>e(i.JW,"4039078146")&&"denied"!==e(a.EB).status)
+  // while earlier versions used a function:
+  //   function PWa(){let e=Qv("4039078146"),t=Z(l_);return e&&t.status!==`denied`}
   const sidebarPatchedSurfaceRe = new RegExp(
-    `([A-Za-z_$][\\w$]*)=!0${escapeRegExp(SIDEBAR_ACTIVITY_VIEW_PATCH_MARKER)},` +
-      `([A-Za-z_$][\\w$]*)=(?:[$\\w.]+|\\(0,[$\\w.]+\\))\\([$\\w.]+\\);return \\1&&` +
-      `(?:\x60denied\x60!==\\2\\.status|\\2\\.status!==\x60denied\x60|"denied"!==\\2\\.status|\\2\\.status!=="denied")`,
-  );
-  const sidebarDirectUnpatchedSurfaceRe = new RegExp(
-    `(?<target>[A-Za-z_$][\\w$]*)=(?:[$\\w.]+|\\(0,[$\\w.]+\\))\\([\x60"]4039078146[\x60"]\\),` +
-      `(?<statusRead>[A-Za-z_$][\\w$]*=(?:[$\\w.]+|\\(0,[$\\w.]+\\))\\([$\\w.]+\\);return \\k<target>&&` +
-      `(?:\x60denied\x60!==[A-Za-z_$][\\w$]*\\.status|[A-Za-z_$][\\w$]*\\.status!==\x60denied\x60|"denied"!==[A-Za-z_$][\\w$]*\\.status|[A-Za-z_$][\\w$]*\\.status!=="denied"))`,
+    `\\(\\{get:[A-Za-z_$][\\w$]*\\}\\)=>!0${escapeRegExp(SIDEBAR_ACTIVITY_VIEW_PATCH_MARKER)}&&` +
+      `(?:\x60denied\x60!==[A-Za-z_$][\\w$]*\\([^()]+\\)\\.status|[A-Za-z_$][\\w$]*\\([^()]+\\)\\.status!==\x60denied\x60|"denied"!==[A-Za-z_$][\\w$]*\\([^()]+\\)\\.status|[A-Za-z_$][\\w$]*\\([^()]+\\)\\.status!=="denied")`,
   );
   const sidebarUnpatchedSurfaceRe = new RegExp(
-    '([A-Za-z_$][\\w$]*)=([A-Za-z_$][\\w$]*)\\(([A-Za-z_$][\\w$]*)\\),' +
-      '([A-Za-z_$][\\w$]*)=[A-Za-z_$][\\w$]*\\([A-Za-z_$][\\w$]*\\);return \\1&&' +
-      '\\4\\.status!==`denied`\\}[^]*?\\3=`4039078146`',
+    `\\(\\{get:(?<getParam>[A-Za-z_$][\\w$]*)\\}\\)=>(?<target>\\k<getParam>\\((?:[$\\w.]+|\\(0,[$\\w.]+\\)),[\x60"]4039078146[\x60"]\\))&&` +
+      `(?<statusCheck>(?:\x60denied\x60!==\\k<getParam>\\([^()]+\\)\\.status|\\k<getParam>\\([^()]+\\)\\.status!==\x60denied\x60|"denied"!==\\k<getParam>\\([^()]+\\)\\.status|\\k<getParam>\\([^()]+\\)\\.status!=="denied"))`,
   );
   const sidebarAlreadyCorrect = sidebarPatchedSurfaceRe.test(next);
   const sidebarSurfaceSeen =
     sidebarAlreadyCorrect ||
-    (next.includes('4039078146') && (sidebarDirectUnpatchedSurfaceRe.test(next) || sidebarUnpatchedSurfaceRe.test(next)));
+    (next.includes("4039078146") && sidebarUnpatchedSurfaceRe.test(next));
   if (!sidebarAlreadyCorrect && sidebarSurfaceSeen) {
-    if (sidebarDirectUnpatchedSurfaceRe.test(next)) {
-      next = next.replace(
-        sidebarDirectUnpatchedSurfaceRe,
-        `$<target>=!0${SIDEBAR_ACTIVITY_VIEW_PATCH_MARKER},$<statusRead>`,
-      );
-      patched = true;
-    } else {
-      next = next.replace(sidebarUnpatchedSurfaceRe, match =>
-        match.replace(
-          /([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*)\),/,
-          `$1=!0${SIDEBAR_ACTIVITY_VIEW_PATCH_MARKER},`,
-        ),
-      );
-      patched = true;
-    }
+    next = next.replace(
+      sidebarUnpatchedSurfaceRe,
+      `({get:$<getParam>})=>!0${SIDEBAR_ACTIVITY_VIEW_PATCH_MARKER}&&$<statusCheck>`,
+    );
+    patched = true;
   }
 
   return {
@@ -2534,8 +2517,10 @@ try {
   // `thread/list` page to a React Query streamed query (one per host), so the
   // anchor is the generator itself with its exact `throwIfAborted`/`yield`
   // sequencing; an upstream rewrite still fails closed.
+  // 26.1103 bundles this as an anonymous async generator expression without
+  // an identifier before the parameter list.
   const ARCHIVED_THREADS_DATA_CONTROLS_CURRENT_RE =
-    /async function\*(?<fn>[A-Za-z_$][\w$]*)\((?<client>[A-Za-z_$][\w$]*),(?<host>[A-Za-z_$][\w$]*),(?<signal>[A-Za-z_$][\w$]*)\)\{let (?<send>[A-Za-z_$][\w$]*)=(?:(?:\(0,)?(?<sendFn>[A-Za-z_$][\w$.]*)\)?)\(\k<client>,\k<host>\),(?<seen>[A-Za-z_$][\w$]*)=new Set,(?<cursor>[A-Za-z_$][\w$]*)=null;do\{\k<signal>\.throwIfAborted\(\);let (?<page>[A-Za-z_$][\w$]*)=await \k<send>\.sendRequest\([`"]thread\/list[`"],\{archived:!0,cursor:\k<cursor>,limit:100,modelProviders:null,sortKey:[`"]updated_at[`"],sourceKinds:(?<sourceKinds>[A-Za-z_$][\w$.]*),useStateDbOnly:!0\},\{priority:[`"]background[`"],source:[`"]thread_list[`"]\}\);if\(\k<signal>\.throwIfAborted\(\),yield \k<page>\.data,(?:(?:\k<cursor>=\k<page>\.nextCursor,\k<cursor>!=null|\k<cursor>=\k<page>\.nextCursor,null!=\k<cursor>|null!=\(\k<cursor>=\k<page>\.nextCursor\))&&\k<seen>\.has\(\k<cursor>\)\))throw Error\([`"]App Server repeated an archived thread list cursor[`"]\);(?:\k<cursor>!=null|null!=\k<cursor>)&&\k<seen>\.add\(\k<cursor>\)\}while\((?:\k<cursor>!=null|null!=\k<cursor>)\)\}/;
+    /async function\*(?<fn>[A-Za-z_$][\w$]*)?\((?<client>[A-Za-z_$][\w$]*),(?<host>[A-Za-z_$][\w$]*),(?<signal>[A-Za-z_$][\w$]*)\)\{let (?<send>[A-Za-z_$][\w$]*)=(?:(?:\(0,)?(?<sendFn>[A-Za-z_$][\w$.]*)\)?)\(\k<client>,\k<host>\),(?<seen>[A-Za-z_$][\w$]*)=new Set,(?<cursor>[A-Za-z_$][\w$]*)=null;do\{\k<signal>\.throwIfAborted\(\);let (?<page>[A-Za-z_$][\w$]*)=await \k<send>\.sendRequest\([`"]thread\/list[`"],\{archived:!0,cursor:\k<cursor>,limit:100,modelProviders:null,sortKey:[`"]updated_at[`"],sourceKinds:(?<sourceKinds>[A-Za-z_$][\w$.]*),useStateDbOnly:!0\},\{priority:[`"]background[`"],source:[`"]thread_list[`"]\}\);if\(\k<signal>\.throwIfAborted\(\),yield \k<page>\.data,(?:(?:\k<cursor>=\k<page>\.nextCursor,\k<cursor>!=null|\k<cursor>=\k<page>\.nextCursor,null!=\k<cursor>|null!=\(\k<cursor>=\k<page>\.nextCursor\))&&\k<seen>\.has\(\k<cursor>\)\))throw Error\([`"]App Server repeated an archived thread list cursor[`"]\);(?:\k<cursor>!=null|null!=\k<cursor>)&&\k<seen>\.add\(\k<cursor>\)\}while\((?:\k<cursor>!=null|null!=\k<cursor>)\)\}/;
   function archivedThreadsReturnExpression(archived, failed, threads) {
     return `${archived}?(${failed}&&${threads}.length===0?` +
       `(globalThis.__codexOfflineArchivedThreadsCache??${threads}):` +
@@ -2555,7 +2540,7 @@ try {
           // recorded instead of rethrown (aborts still propagate), and the last
           // complete list for this host is replayed only when nothing arrived.
           return (
-            `async function*${fn}(${client},${host},${signal}){` +
+            `async function*${fn ?? ''}(${client},${host},${signal}){` +
             `let ${send}=${invokeSend}(${client},${host}),${seen}=new Set,${cursor}=null,` +
             `${failed}=!1,${threads}=[];` +
             `try{do{${signal}.throwIfAborted();let ${page}=await ${send}.sendRequest(` +
@@ -2685,9 +2670,9 @@ try {
   const BROWSER_USE_DESCRIPTOR_PATCHED_RE =
     /\{autoInstallOptOutKey:[A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*\([A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*\),installWhenMissing:!0,name:[A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*,isAvailable:\(\{features:[A-Za-z_$][\w$]*\}\)=>\/\*codex-offline:bundled-browser-plugins-no-force-reload\*\/!0,migrate:[A-Za-z_$][\w$]*\}/;
   const BROWSER_USE_DESCRIPTOR_CURRENT_RE =
-    /(\{\.\.\.[A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*\.browser,)(autoInstallOptOutKey:(?:\(0,[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\)|[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\),)(isAvailable:\(\{features:([A-Za-z_$][\w$]*)\}\)=>)(?:\4\.inAppBrowserUseAllowed(?:\|\|\4\.externalBrowserUseAllowed)?)(,migrate:[A-Za-z_$][\w$]*\})/;
+    /(\{\.\.\.[A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*\.browser,)(autoInstallOptOutKey:(?:\(0,[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\)|[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\),)(isAvailable:\(\{features:([A-Za-z_$][\w$]*)\}\)=>)(?:\4\.inAppBrowserUseAllowed(?:\|\|\4\.externalBrowserUseAllowed)?)(,migrate:)/;
   const BROWSER_USE_DESCRIPTOR_CURRENT_PATCHED_RE =
-    /\{\.\.\.[A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*\.browser,autoInstallOptOutKey:(?:\(0,[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\)|[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\),installWhenMissing:!0,isAvailable:\(\{features:[A-Za-z_$][\w$]*\}\)=>\/\*codex-offline:bundled-browser-plugins-no-force-reload\*\/!0,migrate:[A-Za-z_$][\w$]*\}/;
+    /\{\.\.\.[A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*\.browser,autoInstallOptOutKey:(?:\(0,[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\)|[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\),installWhenMissing:!0,isAvailable:\(\{features:[A-Za-z_$][\w$]*\}\)=>\/\*codex-offline:bundled-browser-plugins-no-force-reload\*\/!0,migrate:/;
   const SYNC_EXTERNAL_BROWSER_DESCRIPTOR_RE =
     /\{(?:forceReload:!0,)?name:([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)?),syncInstallStateWithChromeExtension:!0,isAvailable:\(\{(buildFlavor:[A-Za-z_$][\w$]*(?:,env:[A-Za-z_$][\w$]*)?,features:([A-Za-z_$][\w$]*))\}\)=>(?:(?:[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\([A-Za-z_$][\w$]*(?:,[A-Za-z_$][\w$]*)?\)&&\3\.externalBrowserUseAllowed)|(?:\3\.externalBrowserUseAllowed&&[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\([A-Za-z_$][\w$]*\)))(\})/g;
   const SYNC_EXTERNAL_BROWSER_DESCRIPTOR_PATCHED_RE =
