@@ -23,6 +23,7 @@
      - `scripts/patch-app-asar.mjs`：更新 webview 资源补丁逻辑，同时支持反引号与双引号两种匹配形态（`I18N_NEEDLES` / `LOCALE_SOURCE_NEEDLES`）。
      - `web-gateway/gateway/src/official/assetPatches.ts`：更新 `patchI18nDefaultsChunk` 兼容反引号与双引号形态。
      - `scripts/verify-offline-package.ps1`：将未补丁标记检查正则更新为同时断言反引号与双引号形态 `/\.get\([`"](enable_i18n|locale_source)[`"]/`。
+     - `scripts/build-api-model-catalog.mjs`：同步 DeepSeek 官方脚本最新更新（`minimal_client_version` 升至 `0.164.0`），更新固化的 `DEEPSEEK_CATALOG_SHA256` 为 `b97bf97e8226dee76bcfc9dcc503e11ef96cd2ca56371acd30f1f54c2f0396bb`，消除 CI 离线模型目录生成校验失败。
      - 单元测试：在 `capabilityContract.test.cjs`、`webCompat26908.test.cjs`、`model-availability-patches.test.cjs` 中补充了针对国际化配置种子、分支创建配置清洗、网关分发与桌面 IPC 拦截的测试用例。
   3. **验证结果**：
      - `node --test .\scripts\test\*.test.cjs .\web-gateway\gateway\test\*.test.cjs`：全量 274 项测试通过；
@@ -51,6 +52,7 @@
      - `scripts/desktop-patches/init.cjs`: Wrapped `ipcMain.handle` and `ipcMain.on` on `message-from-view` channels to sanitize `mcp-request` and `thread-prewarm-start` payloads.
      - `scripts/patch-app-asar.mjs` & `web-gateway/gateway/src/official/assetPatches.ts`: Supported both backtick and double-quote variations for `enable_i18n` and `locale_source`.
      - `scripts/verify-offline-package.ps1`: Updated verification regexes to assert both backtick and double-quote needle variations.
+     - `scripts/build-api-model-catalog.mjs`: Updated pinned `DEEPSEEK_CATALOG_SHA256` to `b97bf97e8226dee76bcfc9dcc503e11ef96cd2ca56371acd30f1f54c2f0396bb` following upstream DeepSeek setup script update (`minimal_client_version` bump to `0.164.0`).
      - Unit tests: Added test coverage in `capabilityContract.test.cjs`, `webCompat26908.test.cjs`, and `model-availability-patches.test.cjs`.
   3. **Verification**:
      - `node --test .\scripts\test\*.test.cjs .\web-gateway\gateway\test\*.test.cjs`: all 274 unit tests passed;

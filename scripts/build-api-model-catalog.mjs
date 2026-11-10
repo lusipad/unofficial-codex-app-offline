@@ -23,7 +23,7 @@ const DEEPSEEK_SETUP_URL =
 const ASTRA_CATALOG_SHA256 =
   "d1d24c2cbcf0c5d489b27eb622d6487a4731dc6909cd9af30e9321f7b8a51f54";
 const DEEPSEEK_CATALOG_SHA256 =
-  "738ac1b92a557273ab0c128b286967e54cd993c9e901f93869f7e73581d591fa";
+  "b97bf97e8226dee76bcfc9dcc503e11ef96cd2ca56371acd30f1f54c2f0396bb";
 
 const GPT_56_SLUGS = ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"];
 const GPT_56_UPSTREAM_MULTI_AGENT_VERSIONS = Object.freeze({
