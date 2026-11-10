@@ -1416,8 +1416,8 @@ function secondArgumentStatsigGateCallRe(gateId) {
 const STDIO_WRITE_ERROR_GUARD_MARKER = patchMarker('/*codex-offline:stdio-write-error-guard-v2*/');
 const SETTINGS_ROUTE_BAD_PATTERN_RE =
   /searchParams\.set\("initialRoute","\/settings\/"\+\([A-Za-z_$][\w$]*\.section\|\|"agent"\)\);/;
-const LOCALE_SOURCE_BAD_PATTERN = '.get(`locale_source`,`IDE`)';
-const I18N_BAD_PATTERN = '.get(`enable_i18n`,!1)';
+const LOCALE_SOURCE_BAD_PATTERN_RE = /\.get\([`"]locale_source[`"],[`"]IDE[`"]\)/;
+const I18N_BAD_PATTERN_RE = /\.get\([`"]enable_i18n[`"],!1\)/;
 const WEBVIEW_BROKEN_BOOLEAN_PATCH_RE =
   /(?:^|[^\w$])(?!(?:return|throw|case)\b)[A-Za-z_$][\w$]*!0(?=[?),;])/;
 
@@ -1931,10 +1931,10 @@ for (const entry of javaScriptEntries) {
   if (SETTINGS_ROUTE_BAD_PATTERN_RE.test(content)) {
     settingsRouteResiduals.push(entry);
   }
-  if (content.includes(LOCALE_SOURCE_BAD_PATTERN)) {
+  if (LOCALE_SOURCE_BAD_PATTERN_RE.test(content)) {
     localeSourceResiduals.push(entry);
   }
-  if (content.includes(I18N_BAD_PATTERN)) {
+  if (I18N_BAD_PATTERN_RE.test(content)) {
     i18nDefaultResiduals.push(entry);
   }
 

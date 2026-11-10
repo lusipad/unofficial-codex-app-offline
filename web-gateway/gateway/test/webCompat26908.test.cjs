@@ -192,6 +192,55 @@ test("thread/resume keeps codex_app overrides that carry a real transport", asyn
   assert.deepEqual(forwarded.params.config["mcp_servers.codex_app.enabled_tools"], ["js"]);
 });
 
+test("thread/fork strips incomplete flat codex_app MCP overrides before forwarding", async () => {
+  const seen = [];
+  const { handlers, broadcasts } = makeTestHandlers({
+    appServer: {
+      isConnected: () => true,
+      request: async (method, params) => {
+        seen.push({ method, params });
+        if (method === "thread/fork") {
+          return { thread: { id: "fork-thread-1", turns: [] } };
+        }
+        throw new Error("unexpected method " + method);
+      },
+    },
+  });
+
+  const config = {
+    model: "gpt-6-astra",
+    "mcp_servers.codex_app": {
+      enabled_tools: ["create_thread", "send_message_to_thread", "handoff_thread", "fork_thread"],
+    },
+    mcp_servers: {
+      codex_app: { enabled_tools: ["fork_thread"] },
+      node_repl: { command: "node_repl.exe" },
+    },
+  };
+
+  const ack = await handlers.handle("codex_desktop:message-from-view", {
+    type: "mcp-request",
+    request: {
+      id: "fork-req-1",
+      method: "thread/fork",
+      params: { threadId: "orig-thread-1", config, cwd: "D:\\test\\repo" },
+    },
+  });
+  assert.equal(ack, true);
+  await new Promise((resolve) => setTimeout(resolve, 50));
+
+  const forwarded = seen.find((entry) => entry.method === "thread/fork");
+  assert.ok(forwarded, "thread/fork must be forwarded to appServer");
+  assert.ok(!("mcp_servers.codex_app" in forwarded.params.config), "flat key must be stripped");
+  assert.ok(!("codex_app" in forwarded.params.config.mcp_servers), "nested codex_app without transport must be stripped");
+  assert.deepEqual(forwarded.params.config.mcp_servers.node_repl, { command: "node_repl.exe" });
+  assert.equal(forwarded.params.config.model, "gpt-6-astra");
+
+  const response = broadcasts.find((b) => b.channel === "mcp-response");
+  assert.ok(response, "mcp-response must be broadcast back to view");
+  assert.equal(response.payload.message.result.thread.id, "fork-thread-1");
+});
+
 test("ensure-directory creates the local directory and returns null", async () => {
   const os = require("node:os");
   const path = require("node:path");

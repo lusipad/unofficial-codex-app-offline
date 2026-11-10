@@ -597,7 +597,39 @@
     return patcher(result);
   }
 
+  var CONFIG_OVERRIDE_METHODS = {
+    'thread/start': true,
+    'thread/resume': true,
+    'thread/fork': true,
+    'turn/start': true,
+  };
+
+  function sanitizeMcpRequest(request, payloadType) {
+    if (!request || typeof request !== 'object') return;
+    var isTarget = payloadType === 'thread-prewarm-start' || CONFIG_OVERRIDE_METHODS[request.method];
+    if (isTarget && request.params && typeof request.params === 'object' && request.params.config) {
+      if (_capabilityContract && typeof _capabilityContract.sanitizeCodexAppMcpConfig === 'function') {
+        request.params.config = _capabilityContract.sanitizeCodexAppMcpConfig(request.params.config);
+      }
+    }
+  }
+
+  function sanitizeViewMessagePayload(payload) {
+    if (!payload || typeof payload !== 'object') return;
+    if ((payload.type === 'mcp-request' || payload.type === 'thread-prewarm-start') && payload.request) {
+      sanitizeMcpRequest(payload.request, payload.type);
+    }
+  }
+
   ipcMain.handle = function (channel, listener) {
+    // ── Renderer message-from-view channels: sanitize codex_app config overrides ──
+    if (channel === 'codex_desktop:message-from-view' || channel === 'message-from-view') {
+      _diag('ipc: wrapping message-from-view channel: ' + channel);
+      return _origHandle(channel, function (_event, payload) {
+        sanitizeViewMessagePayload(payload);
+        return listener.apply(this, arguments);
+      });
+    }
     // ── Remote WSL connections: force autoConnect to false in offline mode ──
     if (channel === 'set-remote-wsl-connections-enabled') {
       _diag('ipc: wrapping WSL channel (handle): ' + channel);
@@ -748,6 +780,15 @@
       _diag('ipc: wrapping config channel (on): ' + channel);
       return _origOn(channel, function (_event, payload) {
         listener(_event, payload);
+      });
+    }
+
+    // ── Renderer message-from-view channels ──
+    if (channel === 'codex_desktop:message-from-view' || channel === 'message-from-view') {
+      _diag('ipc: wrapping message-from-view channel (on): ' + channel);
+      return _origOn(channel, function (_event, payload) {
+        sanitizeViewMessagePayload(payload);
+        return listener.apply(this, arguments);
       });
     }
 

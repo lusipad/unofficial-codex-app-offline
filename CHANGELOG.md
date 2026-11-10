@@ -1,5 +1,64 @@
 # Changelog
 
+## 2026-11-11
+
+### 中文
+
+- 修复 26.1103.4239.0 / 26.1103.7773.0 语言切换为中文无法显示（锁死为英文）与创建聊天分支（Fork chat）失败问题：
+  1. **根因**：
+     - **语言显示问题**：
+       - 上游 Rspack/SWC 压缩器在近期构建产物中将模板字符串反引号更改为普通字符串双引号字面量：`.get("enable_i18n",!1)` 与 `.get("locale_source","IDE")`。原有 `scripts/patch-app-asar.mjs`、`web-gateway/gateway/src/official/assetPatches.ts` 以及 `scripts/verify-offline-package.ps1` 仅匹配反引号语法 `.get(\`enable_i18n\`,!1)`，未能命中双引号形态，导致渲染进程静态补丁遗漏，`enable_i18n` 依然为 `false`。当 `enable_i18n` 为 `false` 时，前端语言包（`zh-CN.json`）动态引入被完全跳过，传给 `IntlProvider` 的 `messages` 为 `undefined`，界面被固定锁死在英文回退。
+       - 运行期 Statsig 动态配置 `72216192`（`enable_i18n: true`, `locale_source: "SYSTEM"`）未在 `capabilityContractData.cjs` 共享契约中预置种子，导致离线桌面端和 Web Gateway 运行期 Statsig 初始化未携带默认国际化开关。
+     - **创建聊天分支失败**：
+       - 桌面端 renderer 在用户点击“创建分支”（Fork chat / `thread/fork`）时，通过 `readCodexConfig` 读取的配置中携带了扁平键 `"mcp_servers.codex_app": { enabled_tools: ["create_thread", "send_message_to_thread", "handoff_thread", "fork_thread"] }`。
+       - 该对象仅声明了工具启用列表，缺少 `command` 或 `url` 传输（transport）参数。当该 payload 传递给底层 Rust `codex app-server` 时，Rust 反序列化解析器校验失败，抛出错误：`-32600 failed to load configuration: invalid transport in mcp_servers.codex_app`，导致创建分支立即弹出错误 Toast。
+       - 此前 Gateway `appServerBridge.ts` 仅检测带尾随点的 `"mcp_servers.codex_app."` 前缀，未剔除无尾随点的扁平键 `"mcp_servers.codex_app"`，且 `viewMessages.ts` 未对 `thread/fork` 记录工作区映射元数据；桌面端 `scripts/desktop-patches/init.cjs` 亦未在 `mcp-request` 通道上清洗缺少 transport 的 `codex_app` 配置。
+  2. **修复落点**：
+     - `web-gateway/gateway/src/ipc/codex/capabilityContractData.cjs`：
+       - 在 `STATSIG_DEFAULT_DYNAMIC_CONFIGS` 中加入 `"72216192": { enable_i18n: true, locale_source: "SYSTEM" }`，确保桌面端和 Web Gateway 默认生效。
+       - 实现并导出统一共享契约函数 `sanitizeCodexAppMcpConfig`，严格检查并清理缺少有效 `command` 或 `url` 传输定义的扁平键 `"mcp_servers.codex_app"`、点号前缀 `"mcp_servers.codex_app.*"` 以及嵌套对象 `mcp_servers.codex_app`。
+     - `web-gateway/gateway/src/ipc/codex/appServerBridge.ts`：引入共享契约 `sanitizeCodexAppMcpConfig`，在会话启动与恢复时清洗请求配置。
+     - `web-gateway/gateway/src/ipc/codex/viewMessages.ts`：支持 `thread/fork` 调用后通过 `workspaceRuntime.recordThreadStartMetadata` 记录分支会话与工作区映射。
+     - `scripts/desktop-patches/init.cjs`：在 `ipcMain.handle` 与 `ipcMain.on` 的 `codex_desktop:message-from-view` 及 `message-from-view` 通道中，拦截 `mcp-request`（`thread/start`、`thread/resume`、`thread/fork`、`turn/start`）与 `thread-prewarm-start`，调用 `sanitizeCodexAppMcpConfig` 过滤缺失 transport 的配置。
+     - `scripts/patch-app-asar.mjs`：更新 webview 资源补丁逻辑，同时支持反引号与双引号两种匹配形态（`I18N_NEEDLES` / `LOCALE_SOURCE_NEEDLES`）。
+     - `web-gateway/gateway/src/official/assetPatches.ts`：更新 `patchI18nDefaultsChunk` 兼容反引号与双引号形态。
+     - `scripts/verify-offline-package.ps1`：将未补丁标记检查正则更新为同时断言反引号与双引号形态 `/\.get\([`"](enable_i18n|locale_source)[`"]/`。
+     - 单元测试：在 `capabilityContract.test.cjs`、`webCompat26908.test.cjs`、`model-availability-patches.test.cjs` 中补充了针对国际化配置种子、分支创建配置清洗、网关分发与桌面 IPC 拦截的测试用例。
+  3. **验证结果**：
+     - `node --test .\scripts\test\*.test.cjs .\web-gateway\gateway\test\*.test.cjs`：全量 274 项测试通过；
+     - `npm --prefix .\web-gateway run build:gateway`：构建成功；
+     - `build-offline-package.ps1 -RequireInstaller`：离线包与安装程序构建成功；
+     - `verify-offline-package.ps1`：完整性断言、30 秒启动冒烟测试与离线功能探针全量通过（20/51 设置分区可见）；
+     - 产物：`dist\offline\codex-offline-26.1103.7773.0\`，`codex-offline-26.1103.7773.0-setup.exe` SHA256=`D17871A52CA311D3094DF32B1CE6D07F44F7E62B94FCDD6B20DB1D4297FDD0EC`。
+
+### English
+
+- Fixed Chinese language display failure (stuck on English fallback) and chat branch forking failure (`thread/fork` toast error) in 26.1103.4239.0 / 26.1103.7773.0:
+  1. **Root cause**:
+     - **Language display issue**:
+       - Upstream Rspack/SWC minifier changed template backticks to double-quoted string literals: `.get("enable_i18n",!1)` and `.get("locale_source","IDE")`. Existing matchers in `scripts/patch-app-asar.mjs`, `web-gateway/gateway/src/official/assetPatches.ts`, and `scripts/verify-offline-package.ps1` only checked for template backticks `.get(\`enable_i18n\`,!1)`, leaving `enable_i18n` as `false` in the webview bundle. When `enable_i18n` is `false`, dynamic import of the locale messages (`zh-CN.json`) is skipped entirely and `messages` passed to `IntlProvider` is `undefined`, locking the UI in the English fallback.
+       - Statsig dynamic config `72216192` (`enable_i18n: true`, `locale_source: "SYSTEM"`) was not seeded in `capabilityContractData.cjs`, leaving offline desktop and Web Gateway runtimes without the default i18n dynamic config.
+     - **Chat branch forking failure**:
+       - When clicking "Fork chat", the desktop renderer invokes `thread/fork` with a configuration containing flat `"mcp_servers.codex_app": { enabled_tools: ["create_thread", "send_message_to_thread", "handoff_thread", "fork_thread"] }`.
+       - Because this object specifies tools without a valid transport (`command` or `url`), Rust `codex app-server` fails deserialization with `-32600 failed to load configuration: invalid transport in mcp_servers.codex_app`, immediately surfacing the error toast.
+       - Previously, Gateway's `appServerBridge.ts` only checked for `"mcp_servers.codex_app."` (with trailing dot), ignoring the exact flat key, and did not record thread-workspace metadata for `thread/fork`. Desktop's `init.cjs` also lacked `mcp-request` interception to strip transportless `codex_app` configs.
+  2. **Fixes applied**:
+     - `web-gateway/gateway/src/ipc/codex/capabilityContractData.cjs`:
+       - Seeded dynamic config `"72216192": { enable_i18n: true, locale_source: "SYSTEM" }` into `STATSIG_DEFAULT_DYNAMIC_CONFIGS`.
+       - Implemented and exported `sanitizeCodexAppMcpConfig` in the shared capability contract to strip flat `"mcp_servers.codex_app"`, dotted keys, and nested servers without transport.
+     - `web-gateway/gateway/src/ipc/codex/appServerBridge.ts`: Sanitized conversation configs via `sanitizeCodexAppMcpConfig`.
+     - `web-gateway/gateway/src/ipc/codex/viewMessages.ts`: Recorded thread workspace metadata on `thread/fork` via `workspaceRuntime.recordThreadStartMetadata`.
+     - `scripts/desktop-patches/init.cjs`: Wrapped `ipcMain.handle` and `ipcMain.on` on `message-from-view` channels to sanitize `mcp-request` and `thread-prewarm-start` payloads.
+     - `scripts/patch-app-asar.mjs` & `web-gateway/gateway/src/official/assetPatches.ts`: Supported both backtick and double-quote variations for `enable_i18n` and `locale_source`.
+     - `scripts/verify-offline-package.ps1`: Updated verification regexes to assert both backtick and double-quote needle variations.
+     - Unit tests: Added test coverage in `capabilityContract.test.cjs`, `webCompat26908.test.cjs`, and `model-availability-patches.test.cjs`.
+  3. **Verification**:
+     - `node --test .\scripts\test\*.test.cjs .\web-gateway\gateway\test\*.test.cjs`: all 274 unit tests passed;
+     - `npm --prefix .\web-gateway run build:gateway`: succeeded;
+     - `build-offline-package.ps1 -RequireInstaller`: package and installer compiled successfully;
+     - `verify-offline-package.ps1`: all package integrity checks, 30s launch smoke test, and offline feature probes passed (20/51 settings sections visible);
+     - Output: `dist\offline\codex-offline-26.1103.7773.0\`, `codex-offline-26.1103.7773.0-setup.exe` SHA256=`D17871A52CA311D3094DF32B1CE6D07F44F7E62B94FCDD6B20DB1D4297FDD0EC`.
+
 ## 2026-11-07
 
 ### 中文

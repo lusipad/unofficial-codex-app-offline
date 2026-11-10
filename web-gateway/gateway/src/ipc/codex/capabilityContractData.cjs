@@ -7,9 +7,17 @@ const STATSIG_DEFAULT_FEATURES_CONFIG = "statsig_default_enable_features";
 // 26.1007 起该 id 变为 realtimeConversationPrompt（实时语音）配置，appshots_enabled 只控制
 // 语音会话里的应用快照动态工具；设置分区与编辑器入口改由 gate 1304276663 +（Windows）
 // 2124127696 + 原生捕获助手 supported 决定，均由 gate-atom/wrapper 默认开启补丁覆盖。
+//
+// 26.1103 起动态配置 "72216192" 驱动界面的国际化多语言加载（enable_i18n / locale_source）。
+// 离线环境下 Statsig 远端不可达，必须在默认 dynamic configs 中常驻下发，确保非英语语言包
+// （如 zh-CN）能正常请求加载。
 const STATSIG_DEFAULT_DYNAMIC_CONFIGS = Object.freeze({
   "1193530394": Object.freeze({
     appshots_enabled: true,
+  }),
+  "72216192": Object.freeze({
+    enable_i18n: true,
+    locale_source: "SYSTEM",
   }),
 });
 
@@ -732,6 +740,100 @@ const REQUIRED_CAPABILITY_MARKERS = Object.freeze(
   )
 );
 
+function hasValidCodexAppTransport(obj) {
+  if (!obj || typeof obj !== "object" || Array.isArray(obj)) return false;
+  const hasCommand = typeof obj.command === "string" && obj.command.trim().length > 0;
+  const hasUrl = typeof obj.url === "string" && obj.url.trim().length > 0;
+  return hasCommand || hasUrl;
+}
+
+/**
+ * 清洗 config 中不完整的 codex_app MCP 服务器配置。
+ * 官方 desktop 和 renderer 会生成类似 "mcp_servers.codex_app": { enabled_tools: [...] } 的碎片，
+ * 或没有 command / url 的残余配置。若直接传递给 app-server，会导致 Rust 配置反序列化时报错：
+ * "failed to load configuration: invalid transport in mcp_servers.codex_app"。
+ * 只有具备非空 command 或 url 的完整有效传输定义才予保留。
+ */
+function sanitizeCodexAppMcpConfig(config) {
+  if (!config || typeof config !== "object" || Array.isArray(config)) return config;
+  let sanitized = config;
+  let changed = false;
+  const ensureMutable = () => {
+    if (!changed) {
+      sanitized = { ...config };
+      changed = true;
+    }
+  };
+
+  const BASE_PREFIXES = [
+    "mcp_servers.codex_app",
+    "plugins.codex-app-tools@openai-bundled.mcp_servers.codex_app",
+  ];
+
+  for (const base of BASE_PREFIXES) {
+    if (Object.prototype.hasOwnProperty.call(sanitized, base)) {
+      const val = sanitized[base];
+      if (!hasValidCodexAppTransport(val)) {
+        ensureMutable();
+        delete sanitized[base];
+      }
+    }
+    const dottedPrefix = `${base}.`;
+    const keys = Object.keys(sanitized).filter((key) => key.startsWith(dottedPrefix));
+    if (keys.length > 0) {
+      const cmdKey = `${dottedPrefix}command`;
+      const urlKey = `${dottedPrefix}url`;
+      const hasTransport =
+        (typeof sanitized[cmdKey] === "string" && sanitized[cmdKey].trim().length > 0) ||
+        (typeof sanitized[urlKey] === "string" && sanitized[urlKey].trim().length > 0);
+      if (!hasTransport) {
+        ensureMutable();
+        for (const key of keys) delete sanitized[key];
+      }
+    }
+  }
+
+  const nested = sanitized.mcp_servers;
+  if (nested && typeof nested === "object" && !Array.isArray(nested)) {
+    const codexApp = nested.codex_app;
+    if (codexApp && typeof codexApp === "object" && !Array.isArray(codexApp)) {
+      if (!hasValidCodexAppTransport(codexApp)) {
+        ensureMutable();
+        const nextServers = { ...nested };
+        delete nextServers.codex_app;
+        sanitized = { ...sanitized, mcp_servers: nextServers };
+      }
+    }
+  }
+
+  if (sanitized.plugins && typeof sanitized.plugins === "object" && !Array.isArray(sanitized.plugins)) {
+    const bundledPlugin = sanitized.plugins["codex-app-tools@openai-bundled"];
+    if (bundledPlugin && typeof bundledPlugin === "object" && !Array.isArray(bundledPlugin)) {
+      const pluginServers = bundledPlugin.mcp_servers;
+      if (pluginServers && typeof pluginServers === "object" && !Array.isArray(pluginServers)) {
+        const codexApp = pluginServers.codex_app;
+        if (codexApp && typeof codexApp === "object" && !Array.isArray(codexApp) && !hasValidCodexAppTransport(codexApp)) {
+          ensureMutable();
+          const nextPluginServers = { ...pluginServers };
+          delete nextPluginServers.codex_app;
+          sanitized = {
+            ...sanitized,
+            plugins: {
+              ...sanitized.plugins,
+              "codex-app-tools@openai-bundled": {
+                ...bundledPlugin,
+                mcp_servers: nextPluginServers,
+              },
+            },
+          };
+        }
+      }
+    }
+  }
+
+  return sanitized;
+}
+
 module.exports = {
   DEFAULT_DESKTOP_FEATURE_STATE,
   DESKTOP_ASAR_KNOWN_GATE_IDS,
@@ -753,4 +855,5 @@ module.exports = {
   STATSIG_DEFAULT_DYNAMIC_CONFIGS,
   DESKTOP_GATE_DENYLIST,
   normalizeDesktopFeatureValues,
+  sanitizeCodexAppMcpConfig,
 };

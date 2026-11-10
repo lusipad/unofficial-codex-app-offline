@@ -329,6 +329,10 @@ test("desktop init.cjs seeds the appshots dynamic config into the fake Statsig i
   const appshotsConfig = fakeResponse.dynamic_configs["1193530394"];
   assert.ok(appshotsConfig, "1193530394 dynamic config must be seeded");
   assert.equal(appshotsConfig.value.appshots_enabled, true);
+  const i18nConfig = fakeResponse.dynamic_configs["72216192"];
+  assert.ok(i18nConfig, "72216192 dynamic config must be seeded");
+  assert.equal(i18nConfig.value.enable_i18n, true);
+  assert.equal(i18nConfig.value.locale_source, "SYSTEM");
   // 既有 model availability 清空与默认 gate 注入不受影响。
   assert.deepEqual(fakeResponse.dynamic_configs["107580212"].value, clearedModelConfig);
   const defaults = fakeResponse.dynamic_configs["statsig_default_enable_features"];
@@ -489,6 +493,90 @@ test("desktop init.cjs unhides gpt-6.1-sol on wire model/list responses only", (
   fakeWc.send("codex_desktop:worker:git:for-view", arrayPayload);
   assert.equal(arrayPayload[0].hidden, true);
   assert.equal(sent.length, 3);
+});
+
+test("desktop init.cjs intercepts message-from-view to sanitize codex_app mcp configurations on thread/fork and prewarm", async () => {
+  const registeredHandlers = new Map();
+  const registeredListeners = new Map();
+  const mockIpcMain = {
+    handle(channel, fn) {
+      registeredHandlers.set(channel, fn);
+    },
+    on(channel, fn) {
+      registeredListeners.set(channel, fn);
+    },
+  };
+
+  loadInitWithMockElectron({ ipcMain: mockIpcMain });
+
+  // init.cjs wrapped mockIpcMain.handle and mockIpcMain.on.
+  // Simulate official desktop registering its handler:
+  let receivedPayloadInHandler;
+  mockIpcMain.handle("codex_desktop:message-from-view", async (event, payload) => {
+    receivedPayloadInHandler = payload;
+    return { ok: true };
+  });
+
+  const wrappedHandle = registeredHandlers.get("codex_desktop:message-from-view");
+  assert.equal(typeof wrappedHandle, "function");
+
+  // 1. thread/fork with flat mcp_servers.codex_app without transport
+  const forkPayload = {
+    type: "mcp-request",
+    hostId: "local",
+    request: {
+      id: 42,
+      method: "thread/fork",
+      params: {
+        threadId: "parent-123",
+        cwd: "C:\\Workspace",
+        config: {
+          model: "gpt-6-astra",
+          "mcp_servers.codex_app": {
+            enabled_tools: ["create_thread", "send_message_to_thread", "handoff_thread", "fork_thread"],
+          },
+          mcp_servers: {
+            codex_app: { enabled_tools: ["fork_thread"] },
+            other: { command: "tool.exe" },
+          },
+        },
+      },
+    },
+  };
+
+  await wrappedHandle({}, forkPayload);
+  assert.ok(receivedPayloadInHandler);
+  const cfg = receivedPayloadInHandler.request.params.config;
+  assert.equal("mcp_servers.codex_app" in cfg, false, "flat mcp_servers.codex_app must be stripped");
+  assert.equal("codex_app" in cfg.mcp_servers, false, "nested codex_app without transport must be stripped");
+  assert.deepEqual(cfg.mcp_servers.other, { command: "tool.exe" });
+  assert.equal(cfg.model, "gpt-6-astra");
+
+  // 2. thread-prewarm-start on ipcMain.on
+  let receivedPayloadInListener;
+  mockIpcMain.on("codex_desktop:message-from-view", (event, payload) => {
+    receivedPayloadInListener = payload;
+  });
+
+  const wrappedOn = registeredListeners.get("codex_desktop:message-from-view");
+  assert.equal(typeof wrappedOn, "function");
+
+  const prewarmPayload = {
+    type: "thread-prewarm-start",
+    hostId: "local",
+    request: {
+      id: 43,
+      params: {
+        config: {
+          "mcp_servers.codex_app": { enabled_tools: ["fork_thread"] },
+        },
+      },
+    },
+  };
+
+  await wrappedOn({}, prewarmPayload);
+  assert.ok(receivedPayloadInListener);
+  assert.equal("mcp_servers.codex_app" in receivedPayloadInListener.request.params.config, false);
 });
 
 test("models-api.json is generated as a single release artifact with Astra, GPT-5.6 and DeepSeek compatibility fields", () => {

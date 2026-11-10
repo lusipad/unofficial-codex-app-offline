@@ -266,8 +266,8 @@ function createViewMessageHandlers(deps) {
               result = await appServerBridge.listModelsForHost(requestPayload);
             } else {
               result = await appServerBridge.callAppServer(method, requestPayload);
-              if (method === "thread/start") {
-                // renderer 自己走 AppServerManager.startConversation/prewarm 时会从这里创建真实 thread。
+              if (method === "thread/start" || method === "thread/fork") {
+                // renderer 自己走 AppServerManager.startConversation/prewarm/fork 时会从这里创建真实 thread。
                 workspaceRuntime.recordThreadStartMetadata(result, requestPayload);
               }
             }

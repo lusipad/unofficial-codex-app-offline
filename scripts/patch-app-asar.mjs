@@ -3482,17 +3482,20 @@ try {
   // ≥ 26.422.8496.0: the upstream code was fixed and now defaults to !0,
   // so the old !1 pattern no longer exists and no patch is needed.
 
-  const I18N_NEEDLE = '.get(`enable_i18n`,!1)';
+  const I18N_NEEDLES = ['.get(`enable_i18n`,!1)', '.get("enable_i18n",!1)'];
   const I18N_PATCH_MARKER =
     contractPatchMarker('/*codex-offline:i18n-default-enabled*/');
-  const I18N_REPLACEMENT = '.get(`enable_i18n`,!0)' + I18N_PATCH_MARKER;
+  const I18N_REPLACEMENT = '.get("enable_i18n",!0)' + I18N_PATCH_MARKER;
   // Marker present when the upstream code already has the correct default.
   const I18N_ALREADY_CORRECT_MARKER = '.get(`enable_i18n`,!0)';
-  const LOCALE_SOURCE_NEEDLE = '.get(`locale_source`,`IDE`)';
+  const LOCALE_SOURCE_NEEDLES = [
+    '.get(`locale_source`,`IDE`)',
+    '.get("locale_source","IDE")',
+  ];
   const LOCALE_SOURCE_PATCH_MARKER =
     '/*codex-offline:locale-source-default*/';
   const LOCALE_SOURCE_REPLACEMENT =
-    '.get(`locale_source`,`SYSTEM`)' + LOCALE_SOURCE_PATCH_MARKER;
+    '.get("locale_source","SYSTEM")' + LOCALE_SOURCE_PATCH_MARKER;
   const LOCALE_SOURCE_ALREADY_CORRECT_MARKER =
     '.get(`locale_source`,`SYSTEM`)';
 
@@ -3755,14 +3758,18 @@ try {
         legacyPluginRendererPatchesRemoved += legacyPluginPatchCleanup.removed;
         changed = true;
       }
-      if (content.includes(I18N_NEEDLE)) {
-        content = content.replaceAll(I18N_NEEDLE, I18N_REPLACEMENT);
-        changed = true;
+      for (const needle of I18N_NEEDLES) {
+        if (content.includes(needle)) {
+          content = content.replaceAll(needle, I18N_REPLACEMENT);
+          changed = true;
+        }
       }
-      if (content.includes(LOCALE_SOURCE_NEEDLE)) {
-        content = content.replaceAll(LOCALE_SOURCE_NEEDLE, LOCALE_SOURCE_REPLACEMENT);
-        localeSourcePatched = true;
-        changed = true;
+      for (const needle of LOCALE_SOURCE_NEEDLES) {
+        if (content.includes(needle)) {
+          content = content.replaceAll(needle, LOCALE_SOURCE_REPLACEMENT);
+          localeSourcePatched = true;
+          changed = true;
+        }
       }
       const fastModeAvailabilityPatch = patchFastModeAvailability(
         content,

@@ -630,3 +630,80 @@ test("web gateway hydrates only unarchived pinned threads", async () => {
     ]
   );
 });
+
+test("sanitizeCodexAppMcpConfig strips invalid codex_app configurations across flat, dotted, and nested shapes", () => {
+  const { sanitizeCodexAppMcpConfig } = contractData;
+
+  // 1. Flat key without transport (the exact shape sent by desktop thread/fork)
+  const flatInvalid = {
+    model: "gpt-6-astra",
+    "mcp_servers.codex_app": {
+      enabled_tools: ["create_thread", "send_message_to_thread", "handoff_thread", "fork_thread"],
+    },
+  };
+  const flatClean = sanitizeCodexAppMcpConfig(flatInvalid);
+  assert.equal(flatClean.model, "gpt-6-astra");
+  assert.equal("mcp_servers.codex_app" in flatClean, false);
+
+  // 2. Flat key with command transport is preserved
+  const flatValid = {
+    "mcp_servers.codex_app": {
+      command: "codex-app-tools.exe",
+      enabled_tools: ["fork_thread"],
+    },
+  };
+  assert.deepEqual(sanitizeCodexAppMcpConfig(flatValid), flatValid);
+
+  // 3. Dotted keys without command/url transport are stripped
+  const dottedInvalid = {
+    "mcp_servers.codex_app.enabled_tools": ["fork_thread"],
+    "other_setting": 123,
+  };
+  const dottedClean = sanitizeCodexAppMcpConfig(dottedInvalid);
+  assert.equal("mcp_servers.codex_app.enabled_tools" in dottedClean, false);
+  assert.equal(dottedClean.other_setting, 123);
+
+  // 4. Dotted keys with command transport are preserved
+  const dottedValid = {
+    "mcp_servers.codex_app.command": "codex-app-tools.exe",
+    "mcp_servers.codex_app.enabled_tools": ["fork_thread"],
+  };
+  assert.deepEqual(sanitizeCodexAppMcpConfig(dottedValid), dottedValid);
+
+  // 5. Nested mcp_servers.codex_app without transport stripped while keeping other servers
+  const nestedInvalid = {
+    mcp_servers: {
+      codex_app: { enabled_tools: ["fork_thread"] },
+      node_repl: { command: "node_repl.exe" },
+    },
+  };
+  const nestedClean = sanitizeCodexAppMcpConfig(nestedInvalid);
+  assert.equal("codex_app" in nestedClean.mcp_servers, false);
+  assert.deepEqual(nestedClean.mcp_servers.node_repl, { command: "node_repl.exe" });
+
+  // 6. Nested bundled plugin without transport stripped
+  const pluginInvalid = {
+    plugins: {
+      "codex-app-tools@openai-bundled": {
+        mcp_servers: {
+          codex_app: { enabled_tools: ["fork_thread"] },
+          valid_server: { url: "http://localhost:3000/sse" },
+        },
+      },
+    },
+  };
+  const pluginClean = sanitizeCodexAppMcpConfig(pluginInvalid);
+  assert.equal(
+    "codex_app" in pluginClean.plugins["codex-app-tools@openai-bundled"].mcp_servers,
+    false
+  );
+  assert.deepEqual(
+    pluginClean.plugins["codex-app-tools@openai-bundled"].mcp_servers.valid_server,
+    { url: "http://localhost:3000/sse" }
+  );
+
+  // 7. Primitives & non-objects are safe
+  assert.equal(sanitizeCodexAppMcpConfig(null), null);
+  assert.equal(sanitizeCodexAppMcpConfig(undefined), undefined);
+  assert.equal(sanitizeCodexAppMcpConfig("string"), "string");
+});

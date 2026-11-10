@@ -128,7 +128,9 @@ function patchSettingsGateChunk(source) {
 function patchI18nDefaultsChunk(source) {
   return source
     .replaceAll(".get(`enable_i18n`,!1)", ".get(`enable_i18n`,!0)")
-    .replaceAll(".get(`locale_source`,`IDE`)", ".get(`locale_source`,`SYSTEM`)");
+    .replaceAll('.get("enable_i18n",!1)', '.get("enable_i18n",!0)')
+    .replaceAll(".get(`locale_source`,`IDE`)", ".get(`locale_source`,`SYSTEM`)")
+    .replaceAll('.get("locale_source","IDE")', '.get("locale_source","SYSTEM")');
 }
 
 let hasWarnedRpcInitPatchMiss = false;
