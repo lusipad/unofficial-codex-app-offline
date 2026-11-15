@@ -157,12 +157,26 @@ test("26.727 archive verifier accepts the current isError prop layout", () => {
     true,
   );
   assert.equal(
+    isVerified(
+      `archivedChats:eq,backSlot:y,projects:eT,hostId:I,localChatsAvailable:ee,archiveSources:v.filter(e=>e.source===\`device\`)${marker},hasNextPage:eK`,
+      marker,
+    ),
+    true,
+  );
+  assert.equal(
     isVerified("archivedChats:foo,isError:t&&l,onLoadNextPage:d", marker),
     false,
   );
   assert.equal(
     isVerified(
       "archivedChats:se,isError:se.length===0&&(d&&v.some(nn)||y==null&&D),onLoadNextPage:ue",
+      marker,
+    ),
+    false,
+  );
+  assert.equal(
+    isVerified(
+      "archivedChats:eq,backSlot:y,projects:eT,hostId:I,localChatsAvailable:ee,archiveSources:v,hasNextPage:eK",
       marker,
     ),
     false,
@@ -369,6 +383,13 @@ test("26.814 Computer Use path resolver accepts the canonical bundled runtime", 
     'if(r?.source.type==="local")return rz({codexHome:e,env:t,pathExists:i})}' +
     'return rz({env:t,pathExists:i})}';
   assert.match(fixture1027, currentResolverRe);
+
+  const fixture1111 =
+    'async function n2({codexHome:e,env:t=process.env,marketplaceName:r=(0,nO.rx)(tC.x.resolve()),' +
+    'marketplaces:n,pathExists:i=rt.existsSync}){let s=nF({marketplaceName:r,marketplaces:n})' +
+    '.some(e=>e.plugins.some(e=>e.name===nO.t_&&e.installed&&e.enabled&&"local"===e.source.type));' +
+    'return s&&!t[nY]?.trim()&&await nQ(e),n0({codexHome:s?e:null,env:t,pathExists:i})}';
+  assert.match(fixture1111, currentResolverRe);
 });
 
 test("26.814 package verification accepts the canonical Computer Use runtime marker", () => {
@@ -395,6 +416,18 @@ test("26.814 package verification accepts the canonical Computer Use runtime mar
     'if(r?.source.type==="local")return rz({codexHome:e,env:t,pathExists:i})}' +
     'return rz({env:t,pathExists:i})}/*codex-offline:computer-use-resource-runtime-paths*/';
   assert.match(fixture1027Patched, currentResolverRe);
+
+  const fixture1111Patched =
+    'async function n2({codexHome:e,env:t=process.env,marketplaceName:r=(0,nO.rx)(tC.x.resolve()),' +
+    'marketplaces:n,pathExists:i=rt.existsSync}){let s=nF({marketplaceName:r,marketplaces:n})' +
+    '.some(e=>e.plugins.some(e=>e.name===nO.t_&&e.installed&&e.enabled&&"local"===e.source.type));' +
+    'return s&&!t[nY]?.trim()&&await nQ(e),n0({codexHome:s?e:null,env:t,pathExists:i})}' +
+    '/*codex-offline:computer-use-resource-runtime-paths*/';
+  assert.match(fixture1111Patched, currentResolverRe);
+  assert.doesNotMatch(
+    fixture1111Patched.replace('/*codex-offline:computer-use-resource-runtime-paths*/', ''),
+    currentResolverRe,
+  );
 });
 
 test("26.814 browser descriptors patch shared plugin descriptor spreads", () => {
@@ -1082,6 +1115,24 @@ test("26.825 worktree resolver keeps the upstream HEAD fast-path explicit", () =
     /async function _o\(e,t,r\)\{if\(t===`HEAD`\)return\{ref:`HEAD`\}\/\*codex-offline:worktree-head-ref\*\/;var n;if\("HEAD"===t\|\|"@"===t\)/,
   );
 
+  // 26.1111 bundle adds a non-string branch guard before HEAD/@
+  const fixture1111 =
+    'async function Sz(e,t,r){var n;if("string"!=typeof t){let n=await SF(e);return null!=n?{ref:await SK(e,n.remote,n.branch,r)}:(await Sj(e)).length>0?null:Sz(e,t.fetchRemoteDefault,r)}' +
+    'if("HEAD"===t||"@"===t)return await SV(e,`${t}^{commit}`,r)==null?null:{ref:t};' +
+    'let i=(n=t).startsWith("refs/heads/")?n:n.startsWith("refs/")?null:SW(n),a=await SH(e,t,r);if(null!=a){let n=`refs/remotes/${a}`,' +
+    'o=await SV(e,`${n}^{commit}`,r)!=null?n:SW(a),s=await Sq(e,i??t,o,r);return s?.state==="right-ahead"?{ref:o}:{ref:i??t}}';
+  const patched1111 = patchWorktreeHeadRefResolver(fixture1111, marker);
+  assert.equal(patched1111.patched, true);
+  assert.equal(patched1111.count, 1);
+  assert.match(
+    patched1111.content,
+    /async function Sz\(e,t,r\)\{if\(t===`HEAD`\)return\{ref:`HEAD`\}\/\*codex-offline:worktree-head-ref\*\/;var n;if\("string"!=typeof t\)/,
+  );
+  const secondPass1111 = patchWorktreeHeadRefResolver(patched1111.content, marker);
+  assert.equal(secondPass1111.alreadyCorrect, true);
+  assert.equal(secondPass1111.patched, false);
+  assert.equal(secondPass1111.content, patched1111.content);
+
   const unknown = patchWorktreeHeadRefResolver(unknownFixture, marker);
   assert.equal(unknown.patched, false);
   assert.equal(unknown.alreadyCorrect, false);
@@ -1438,6 +1489,41 @@ test("26.1007 archived settings keeps only the local archive error in isError", 
   assert.ok(result.content.includes("isLoading:G.length===0&&(E||M&&re||i===`local`&&fe)"));
   assert.ok(result.content.includes("isError:C,chatGptArchiveError:w"));
   assert.equal(patchArchivedSettingsOfflineVisibility(result.content).alreadyCorrect, true);
+});
+
+test("26.1111 archived settings filters archiveSources to device offline", () => {
+  const patchSource = sourceSlice(
+    "  function patchArchivedSettingsOfflineVisibility(content) {",
+    "\n  const BUNDLED_BROWSER_PLUGINS_PATCH_MARKER =",
+  );
+  const patchArchivedSettingsOfflineVisibility = Function(
+    "ARCHIVED_SETTINGS_OFFLINE_LOCAL_VISIBILITY_PATCH_MARKER",
+    `"use strict";\n${patchSource}\nreturn patchArchivedSettingsOfflineVisibility;`,
+  )("/*codex-offline:archived-settings-offline-local-visibility*/");
+  const fixture1111 =
+    'return x[75]!==eK||x[76]!==en?(j=()=>eK?en():Promise.resolve(),x[75]=eK,x[76]=en,x[77]=j):j=x[77],' +
+    '(0,r.jsx)(eB,{archivedChats:eq,backSlot:y,projects:eT,hostId:I,localChatsAvailable:ee,archiveSources:v,' +
+    'hasNextPage:eK,isAutomationHistoryLoading:I===eg.fI&&ey,isFetchingNextPage:es&&eu,onLoadNextPage:j},`${I}:${B}:${E??""}`)}';
+
+  const result = patchArchivedSettingsOfflineVisibility(fixture1111);
+  assert.equal(result.patched, true);
+  assert.equal(result.alreadyCorrect, false);
+  assert.ok(
+    result.content.includes(
+      "archiveSources:v.filter(e=>e.source===`device`)/*codex-offline:archived-settings-offline-local-visibility*/,hasNextPage:eK",
+    ),
+  );
+  // 幂等性
+  const secondPass = patchArchivedSettingsOfflineVisibility(result.content);
+  assert.equal(secondPass.alreadyCorrect, true);
+  assert.equal(secondPass.patched, false);
+  assert.equal(secondPass.content, result.content);
+  // 缺失或重复时失败关闭
+  assert.equal(patchArchivedSettingsOfflineVisibility("archivedChats:eq,archiveSources:v").patched, false);
+  assert.throws(
+    () => patchArchivedSettingsOfflineVisibility(`${fixture1111}${fixture1111}`),
+    /Expected exactly one archived settings panel archiveSources prop/,
+  );
 });
 
 test("26.810 archived settings ignores both cloud archive errors offline", () => {

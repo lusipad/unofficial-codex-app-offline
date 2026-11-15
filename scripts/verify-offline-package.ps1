@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [string]$BuildMetadataPath = 'build-metadata.json',
     [string]$ConfigPath = 'config/offline-package.json',
@@ -1445,7 +1445,7 @@ const NODE_REPL_TOOL_SEARCH_FEATURE_PATCH_MARKER =
 const COMPUTER_USE_RESOURCE_RUNTIME_PATHS_PATCH_MARKER =
   patchMarker('/*codex-offline:computer-use-resource-runtime-paths*/');
 const COMPUTER_USE_CANONICAL_RUNTIME_PATHS_PATCHED_RE =
-  /function [A-Za-z_$][\w$]*\(\{codexHome:[^}]+,env:[^}]+\}\)\{[\s\S]*?(?:source\.type===`local`|source\.type==="local")[\s\S]*?return [A-Za-z_$][\w$]*\(\{codexHome:[^}]+pathExists:[A-Za-z_$][\w$]*\}\);?\}?return [A-Za-z_$][\w$]*\(\{env:[^}]+pathExists:[A-Za-z_$][\w$]*\}\)\}\/\*codex-offline:computer-use-resource-runtime-paths\*\//;
+  /(?:async )?function [A-Za-z_$][\w$]*\(\{codexHome:[^}]+,env:[^}]+\}\)\{[\s\S]*?(?:source\.type===`local`|source\.type==="local"|`local`===[^)]+\.source\.type|"local"===[^)]+\.source\.type)[\s\S]*?(?:return [A-Za-z_$][\w$]*\(\{codexHome:[^}]+pathExists:[A-Za-z_$][\w$]*\}\);?\}?return [A-Za-z_$][\w$]*\(\{env:[^}]+pathExists:[A-Za-z_$][\w$]*\}\)|return [A-Za-z_$][\w$]*&&![A-Za-z_$][\w$]*\[[A-Za-z_$][\w$]*\]\?\.trim\(\)&&await [A-Za-z_$][\w$]*\([A-Za-z_$][\w$]*\),[A-Za-z_$][\w$]*\(\{codexHome:[A-Za-z_$][\w$]*\?[A-Za-z_$][\w$]*:null,env:[A-Za-z_$][\w$]*,pathExists:[A-Za-z_$][\w$]*\}\))\}\/\*codex-offline:computer-use-resource-runtime-paths\*\//;
 const COMPUTER_USE_INPUT_SKILL_PATCH_MARKER =
   patchMarker('/*codex-offline:computer-use-input-skill*/');
 const COMPUTER_USE_THREAD_START_TOOL_SEARCH_PATCH_MARKER =
@@ -1890,7 +1890,7 @@ for (const entry of javaScriptEntries) {
   archivedSettingsOfflineLocalVisibilityPatched ||=
     content.includes(ARCHIVED_SETTINGS_OFFLINE_LOCAL_VISIBILITY_PATCH_MARKER) &&
     content.includes('archivedChats:') &&
-    /(?:isError:|=)[A-Za-z_$][\w$]*(?:\.length===0)?(?:&&[A-Za-z_$][\w$]*){0,2}(?:\.some\([A-Za-z_$][\w$]*\))?\/\*codex-offline:archived-settings-offline-local-visibility\*\//.test(content);
+    /(?:(?:isError:|=)[A-Za-z_$][\w$]*(?:\.length===0)?(?:&&[A-Za-z_$][\w$]*){0,2}(?:\.some\([A-Za-z_$][\w$]*\))?|archiveSources:[A-Za-z_$][\w$]*\.filter\([A-Za-z_$][\w$]*=>[A-Za-z_$][\w$]*\.source===[`"]device[`"]\))\/\*codex-offline:archived-settings-offline-local-visibility\*\//.test(content);
   featureOverridesPreserveMcpConfigPatched ||=
     content.includes(FEATURE_OVERRIDES_PRESERVE_MCP_CONFIG_PATCH_MARKER) &&
     content.includes('`features.unified_exec`]=!0') &&

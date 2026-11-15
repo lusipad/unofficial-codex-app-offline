@@ -223,21 +223,32 @@ async function main() {
   const crxInfo = readCrx(crxPath, extensionId);
   const crx = fs.readFileSync(crxPath);
   fs.writeFileSync(zipPath, crx.subarray(crxInfo.zipOffset));
+  fs.mkdirSync(unpackedPath, { recursive: true });
 
-  const expand = spawnSync(
-    'powershell',
-    [
-      '-NoProfile',
-      '-ExecutionPolicy',
-      'Bypass',
-      '-Command',
-      `Expand-Archive -LiteralPath ${powershellQuote(zipPath)} -DestinationPath ${powershellQuote(unpackedPath)} -Force`,
-    ],
-    { stdio: 'inherit' },
-  );
+  let extracted = false;
+  try {
+    const tar = spawnSync('tar.exe', ['-xf', zipPath, '-C', unpackedPath], { stdio: 'inherit' });
+    if (tar.status === 0) {
+      extracted = true;
+    }
+  } catch (_e) {}
 
-  if (expand.status !== 0) {
-    throw new Error('Failed to extract Chrome extension archive.');
+  if (!extracted) {
+    const expand = spawnSync(
+      'powershell',
+      [
+        '-NoProfile',
+        '-ExecutionPolicy',
+        'Bypass',
+        '-Command',
+        `Expand-Archive -LiteralPath ${powershellQuote(zipPath)} -DestinationPath ${powershellQuote(unpackedPath)} -Force`,
+      ],
+      { stdio: 'inherit' },
+    );
+
+    if (expand.status !== 0) {
+      throw new Error('Failed to extract Chrome extension archive.');
+    }
   }
 
   fs.rmSync(zipPath, { force: true });

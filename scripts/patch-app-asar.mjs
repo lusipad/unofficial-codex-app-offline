@@ -401,10 +401,11 @@ function patchWorktreeHeadRefResolver(content, patchMarker) {
   }
 
   // 26.825 added an upstream HEAD/@ fast path before the existing local and
-  // remote branch resolution. Match the complete stable prefix and the
-  // beginning of that resolver, while leaving minified helper names variable.
+  // remote branch resolution; 26.1111 added a non-string branch guard before HEAD/@.
+  // Match the complete stable prefix and the beginning of that resolver, while
+  // leaving minified helper names variable.
   const resolverRe =
-    /async function (?<resolver>[A-Za-z_$][\w$]*)\((?<repository>[A-Za-z_$][\w$]*),(?<branch>[A-Za-z_$][\w$]*),(?<signal>[A-Za-z_$][\w$]*)\)\{(?=(?:var [A-Za-z_$][\w$]*;)?if\((?:\k<branch>===(?:`HEAD`|"HEAD")\|\|\k<branch>===(?:`@`|"@")|(?:"HEAD"|`HEAD`)===\k<branch>\|\|(?:"@"|`@`)===\k<branch>)\)return await [A-Za-z_$][\w$]*\(\k<repository>,`\$\{\k<branch>\}\^\{commit\}`,(?:\k<signal>|arguments\[2\])\)==null\?null:\{ref:\k<branch>\};let [\s\S]{0,120}?=await [A-Za-z_$][\w$]*\(\k<repository>,\k<branch>,\k<signal>\);if\((?:null!=[A-Za-z_$][\w$]*|[A-Za-z_$][\w$]*!=null)\)\{let [A-Za-z_$][\w$]*=`refs\/remotes\/\$\{[A-Za-z_$][\w$]*\}`)/g;
+    /async function (?<resolver>[A-Za-z_$][\w$]*)\((?<repository>[A-Za-z_$][\w$]*),(?<branch>[A-Za-z_$][\w$]*),(?<signal>[A-Za-z_$][\w$]*)\)\{(?=(?:var [A-Za-z_$][\w$]*;)?(?:if\((?:typeof \k<branch>!==?[`"]string[`"]|[`"]string[`"]!==?typeof \k<branch>)\)\{let [A-Za-z_$][\w$]*=await [A-Za-z_$][\w$]*\(\k<repository>\);return (?:null!=[A-Za-z_$][\w$]*|[A-Za-z_$][\w$]*!=null)\?\{ref:await [A-Za-z_$][\w$]*\([^)]*\)\}:\(await [A-Za-z_$][\w$]*\(\k<repository>\)\)\.length>0\?null:\k<resolver>\(\k<repository>,\k<branch>\.fetchRemoteDefault,\k<signal>\)\})?if\((?:\k<branch>===(?:`HEAD`|"HEAD")\|\|\k<branch>===(?:`@`|"@")|(?:"HEAD"|`HEAD`)===\k<branch>\|\|(?:"@"|`@`)===\k<branch>)\)return await [A-Za-z_$][\w$]*\(\k<repository>,`\$\{\k<branch>\}\^\{commit\}`,(?:\k<signal>|arguments\[2\])\)==null\?null:\{ref:\k<branch>\};let [\s\S]{0,120}?=await [A-Za-z_$][\w$]*\(\k<repository>,\k<branch>,\k<signal>\);if\((?:null!=[A-Za-z_$][\w$]*|[A-Za-z_$][\w$]*!=null)\)\{let [A-Za-z_$][\w$]*=`refs\/remotes\/\$\{[A-Za-z_$][\w$]*\}`)/g;
   let count = 0;
   const next = content.replace(resolverRe, (...args) => {
     const match = args[0];
@@ -2185,7 +2186,7 @@ try {
     '}' +
     NODE_REPL_DISABLE_SANDBOX_PATCH_MARKER;
   const COMPUTER_USE_RUNTIME_PATHS_CANONICAL_RE =
-    /function (?<functionName>[A-Za-z_$][\w$]*)\(\{codexHome:(?<codexHome>[A-Za-z_$][\w$]*),env:(?<env>[A-Za-z_$][\w$]*)=process\.env,marketplaceName:(?<marketplaceName>[A-Za-z_$][\w$]*)=(?<marketplaceNameDefault>[^]+?),marketplaces:(?<marketplaces>[A-Za-z_$][\w$]*),pathExists:(?<pathExists>[A-Za-z_$][\w$]*)=(?<fsNamespace>[A-Za-z_$][\w$]*)\.existsSync\}\)\{for\(let (?<marketplace>[A-Za-z_$][\w$]*) of (?<listMarketplaces>[A-Za-z_$][\w$]*)\(\{marketplaceName:\k<marketplaceName>,marketplaces:\k<marketplaces>\}\)\)\{?(?:if\(\k<marketplace>\.plugins\.find\((?<pluginEntry1>[A-Za-z_$][\w$]*)=>\k<pluginEntry1>\.name===(?:`computer-use`|"computer-use"|[A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*)&&\k<pluginEntry1>\.installed&&\k<pluginEntry1>\.enabled&&(?:`local`===\k<pluginEntry1>\.source\.type|\k<pluginEntry1>\.source\.type===`local`|"local"===\k<pluginEntry1>\.source\.type|\k<pluginEntry1>\.source\.type==="local")\)\?\.source\.type===[`"]local[`"]\)|let (?<foundVar>[A-Za-z_$][\w$]*)=\k<marketplace>\.plugins\.find\((?<pluginEntry2>[A-Za-z_$][\w$]*)=>\k<pluginEntry2>\.name===(?:`computer-use`|"computer-use"|[A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*)&&\k<pluginEntry2>\.installed&&\k<pluginEntry2>\.enabled&&(?:`local`===\k<pluginEntry2>\.source\.type|\k<pluginEntry2>\.source\.type===`local`|"local"===\k<pluginEntry2>\.source\.type|\k<pluginEntry2>\.source\.type==="local")\);if\(\k<foundVar>\?\.source\.type===[`"]local[`"]\))return (?<computerUsePaths>[A-Za-z_$][\w$]*)\(\{codexHome:\k<codexHome>,env:\k<env>,pathExists:\k<pathExists>\}\);?\}?return \k<computerUsePaths>\(\{env:\k<env>,pathExists:\k<pathExists>\}\)\}/;
+    /(?:async )?function (?<functionName>[A-Za-z_$][\w$]*)\(\{codexHome:(?<codexHome>[A-Za-z_$][\w$]*),env:(?<env>[A-Za-z_$][\w$]*)=process\.env,marketplaceName:(?<marketplaceName>[A-Za-z_$][\w$]*)=(?<marketplaceNameDefault>[^]+?),marketplaces:(?<marketplaces>[A-Za-z_$][\w$]*),pathExists:(?<pathExists>[A-Za-z_$][\w$]*)=(?<fsNamespace>[A-Za-z_$][\w$]*)\.existsSync\}\)\{(?:for\(let (?<marketplace>[A-Za-z_$][\w$]*) of (?<listMarketplaces>[A-Za-z_$][\w$]*)\(\{marketplaceName:\k<marketplaceName>,marketplaces:\k<marketplaces>\}\)\)\{?(?:if\(\k<marketplace>\.plugins\.find\((?<pluginEntry1>[A-Za-z_$][\w$]*)=>\k<pluginEntry1>\.name===(?:`computer-use`|"computer-use"|[A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*)&&\k<pluginEntry1>\.installed&&\k<pluginEntry1>\.enabled&&(?:`local`===\k<pluginEntry1>\.source\.type|\k<pluginEntry1>\.source\.type===`local`|"local"===\k<pluginEntry1>\.source\.type|\k<pluginEntry1>\.source\.type==="local")\)\?\.source\.type===[`"]local[`"]\)|let (?<foundVar>[A-Za-z_$][\w$]*)=\k<marketplace>\.plugins\.find\((?<pluginEntry2>[A-Za-z_$][\w$]*)=>\k<pluginEntry2>\.name===(?:`computer-use`|"computer-use"|[A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*)&&\k<pluginEntry2>\.installed&&\k<pluginEntry2>\.enabled&&(?:`local`===\k<pluginEntry2>\.source\.type|\k<pluginEntry2>\.source\.type===`local`|"local"===\k<pluginEntry2>\.source\.type|\k<pluginEntry2>\.source\.type==="local")\);if\(\k<foundVar>\?\.source\.type===[`"]local[`"]\))return (?<computerUsePaths>[A-Za-z_$][\w$]*)\(\{codexHome:\k<codexHome>,env:\k<env>,pathExists:\k<pathExists>\}\);?\}?return \k<computerUsePaths>\(\{env:\k<env>,pathExists:\k<pathExists>\}\)|let (?<installedVar>[A-Za-z_$][\w$]*)=[A-Za-z_$][\w$]*\(\{marketplaceName:\k<marketplaceName>,marketplaces:\k<marketplaces>\}\)\.some\((?<marketplaceSome>[A-Za-z_$][\w$]*)=>\k<marketplaceSome>\.plugins\.some\((?<pluginEntry3>[A-Za-z_$][\w$]*)=>\k<pluginEntry3>\.name===(?:`computer-use`|"computer-use"|[A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*)&&\k<pluginEntry3>\.installed&&\k<pluginEntry3>\.enabled&&(?:`local`===\k<pluginEntry3>\.source\.type|\k<pluginEntry3>\.source\.type===`local`|"local"===\k<pluginEntry3>\.source\.type|\k<pluginEntry3>\.source\.type==="local")\)\);return \k<installedVar>&&!\k<env>\[[A-Za-z_$][\w$]*\]\?\.trim\(\)&&await [A-Za-z_$][\w$]*\(\k<codexHome>\),[A-Za-z_$][\w$]*\(\{codexHome:\k<installedVar>\?\k<codexHome>:null,env:\k<env>,pathExists:\k<pathExists>\}\))\}/;
   const COMPUTER_USE_RESOURCE_RUNTIME_PATHS_CURRENT_RE =
     /function ([A-Za-z_$][\w$]*)\(\{codexHome:([A-Za-z_$][\w$]*),env:([A-Za-z_$][\w$]*)=process\.env,marketplaceName:([A-Za-z_$][\w$]*)=([^,{}]+),marketplaces:([A-Za-z_$][\w$]*),pathExists:([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\.existsSync\}\)\{for\(let ([A-Za-z_$][\w$]*) of ([A-Za-z_$][\w$]*)\(\{marketplaceName:\4,marketplaces:\6\}\)\)if\(\9\.plugins\.find\(([A-Za-z_$][\w$]*)=>\11\.name===`computer-use`&&\11\.installed&&\11\.enabled&&\11\.source\.type===`local`\)\?\.source\.type===`local`\)return ([A-Za-z_$][\w$]*)\(\{codexHome:\2,env:\3,pathExists:\7\}\);return \12\(\{env:\3,pathExists:\7\}\)\}/;
   const COMPUTER_USE_FORWARD_THREAD_START_DIAGNOSTICS_NEEDLE =
@@ -2637,23 +2638,51 @@ try {
     const currentErrorPropMatch = currentErrorPropRe.exec(
       content.slice(archivedPanelAnchor, archivedPanelAnchor + 1200),
     );
-    if (!currentErrorPropMatch) {
-      return { content, alreadyCorrect: false, patched: false };
+    if (currentErrorPropMatch) {
+      const { localError, between, items, itemsInverted } = currentErrorPropMatch.groups;
+      const itemsVar = items || itemsInverted;
+      const absoluteStart = archivedPanelAnchor + currentErrorPropMatch.index;
+      const absoluteEnd = absoluteStart + currentErrorPropMatch[0].length;
+      return {
+        content:
+          content.slice(0, absoluteStart) +
+          `isLocalArchiveError:${localError},${between}` +
+          `isError:${itemsVar}.length===0&&${localError}` +
+          ARCHIVED_SETTINGS_OFFLINE_LOCAL_VISIBILITY_PATCH_MARKER +
+          content.slice(absoluteEnd),
+        alreadyCorrect: false,
+        patched: true,
+      };
     }
-    const { localError, between, items, itemsInverted } = currentErrorPropMatch.groups;
-    const itemsVar = items || itemsInverted;
-    const absoluteStart = archivedPanelAnchor + currentErrorPropMatch.index;
-    const absoluteEnd = absoluteStart + currentErrorPropMatch[0].length;
-    return {
-      content:
-        content.slice(0, absoluteStart) +
-        `isLocalArchiveError:${localError},${between}` +
-        `isError:${itemsVar}.length===0&&${localError}` +
-        ARCHIVED_SETTINGS_OFFLINE_LOCAL_VISIBILITY_PATCH_MARKER +
-        content.slice(absoluteEnd),
-      alreadyCorrect: false,
-      patched: true,
-    };
+
+    // 26.1111 replaced the individual archive error/fetching props with a
+    // unified `archiveSources` array (`device`, `cloudChats`, `chatgpt`). Filter
+    // it to `device` so local archive state still renders while offline cloud
+    // errors neither suppress the empty state nor show cloud retry rows.
+    const archiveSourcesPropsRe =
+      /(?<prefix>\{archivedChats:[A-Za-z_$][\w$]*,backSlot:[A-Za-z_$][\w$]*,projects:[A-Za-z_$][\w$]*,hostId:[A-Za-z_$][\w$]*,localChatsAvailable:[A-Za-z_$][\w$]*,archiveSources:)(?<sources>[A-Za-z_$][\w$]*)(?<suffix>,hasNextPage:[^,}]{1,120},isAutomationHistoryLoading:[^,}]{1,120},isFetchingNextPage:[^,}]{1,120},onLoadNextPage:[A-Za-z_$][\w$]*\})/g;
+    let archiveSourcesMatches = 0;
+    const nextByArchiveSources = content.replace(
+      archiveSourcesPropsRe,
+      (...args) => {
+        archiveSourcesMatches += 1;
+        const { prefix, sources, suffix } = args.at(-1);
+        return (
+          `${prefix}${sources}.filter(e=>e.source===\`device\`)${ARCHIVED_SETTINGS_OFFLINE_LOCAL_VISIBILITY_PATCH_MARKER}` +
+          suffix
+        );
+      },
+    );
+    if (archiveSourcesMatches === 1) {
+      return { content: nextByArchiveSources, alreadyCorrect: false, patched: true };
+    }
+    if (archiveSourcesMatches > 1) {
+      throw new Error(
+        `Expected exactly one archived settings panel archiveSources prop, matched ${archiveSourcesMatches}.`,
+      );
+    }
+
+    return { content, alreadyCorrect: false, patched: false };
   }
   const BUNDLED_BROWSER_PLUGINS_PATCH_MARKER =
     contractPatchMarker('/*codex-offline:bundled-browser-plugins-no-force-reload*/');

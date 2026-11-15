@@ -1,5 +1,68 @@
 # Changelog
 
+## 2026-11-15
+
+### 中文
+
+- 修复 `26.1111.2228.0`（内部 `26.1111.21308`）Store 包离线构建失败问题（CI Run `43629786150` / Issue #145）：
+  1. **根因**：
+     - **永久 worktree 起始引用解析器漂移（`/*codex-offline:worktree-head-ref*/`）**：`.vite/build/worker.js` 中的 `async function Sz(e,t,r)` 在 `if("HEAD"===t||"@"===t)` 前新增了非字符串分支（`if("string"!=typeof t){...fetchRemoteDefault...}`），导致原有 `patchWorktreeHeadRefResolver` 正则无法匹配。
+     - **Computer Use 插件运行时路径解析器漂移（`/*codex-offline:computer-use-resource-runtime-paths*/`）**：`.vite/build/early-bootstrap-*.js` 将原同步 `for(...)` 遍历改为 `async function` + `.some(... .plugins.some(...))` 与条件 `await` 形态，导致 `COMPUTER_USE_RUNTIME_PATHS_CANONICAL_RE` 与 `verify-offline-package.ps1` 的 `COMPUTER_USE_CANONICAL_RUNTIME_PATHS_PATCHED_RE` 失配。
+     - **已归档对话设置面板离线可见性形态漂移（`/*codex-offline:archived-settings-offline-local-visibility*/`）**：`webview/assets/async/678916.*.js` 将 `isError` / `isLocalArchiveError` / `isDurableArchiveError` / `chatGptArchiveError` 统一重构为 `archiveSources` 数组 prop（包含 `"device"`、`"cloudChats"`、`"chatgpt"`），原有 `isError` / `chatGptArchiveError` 锚点失效。
+  2. **修复落点**：
+     - `scripts/patch-app-asar.mjs`：
+       - 更新 `patchWorktreeHeadRefResolver` 正则前瞻，支持 `if("HEAD"===t||"@"===t)` 前的可选非字符串分支前缀；
+       - 更新 `COMPUTER_USE_RUNTIME_PATHS_CANONICAL_RE`，兼容同步 `for(...)` 与 `26.1111` 的 `async function` + `.some(... .plugins.some(...))` 形态；
+       - 扩展 `patchArchivedSettingsOfflineVisibility`，匹配 `archiveSources` prop 并仅保留 `e.source === \`device\``，在离线时屏蔽云端归档失败行并保持本地空状态/列表可见。
+     - `scripts/verify-offline-package.ps1`：同步更新 `COMPUTER_USE_CANONICAL_RUNTIME_PATHS_PATCHED_RE` 与 `archivedSettingsOfflineLocalVisibilityPatched` 校验正则。
+     - `scripts/test/current-bundle-compatibility.test.cjs`：补充 `26.1111` 三处补丁与校验器的回归单元测试（含幂等性与失败关闭用例）。
+  3. **验证结果**：
+     - `node --test .\scripts\test\*.test.cjs .\web-gateway\gateway\test\*.test.cjs`：全部测试通过；
+     - `npm --prefix .\web-gateway run build:gateway`：构建通过；
+     - `pwsh -NoProfile -File .\scripts\build-offline-package.ps1 -RequireInstaller`：`codex-offline-26.1111.2228.0` 离线包与安装器构建通过（所有 `patch-app-asar` 补丁均应用且无漂移告警）；
+     - `pwsh -NoProfile -File .\scripts\verify-offline-package.ps1 -BuildMetadataPath .\dist\offline\codex-offline-26.1111.2228.0\build-metadata.json`：ASAR 补丁校验、30 秒直连离线启动冒烟与离线功能探针（20/51 设置分区可见）全量通过；
+     - 产物路径：`dist\offline\codex-offline-26.1111.2228.0\codex-offline-26.1111.2228.0-setup.exe`（`SHA256`: `AA333B9ADB4FE4A98090C6492CE6682C55B8B8DB576E327710DF904C1625B943`）。
+
+### English
+
+- Fixed offline package build failure on Microsoft Store build `26.1111.2228.0` (internal `26.1111.21308`, CI Run `43629786150` / Issue #145):
+  1. **Root causes**:
+     - **Worktree starting-ref resolver drift (`/*codex-offline:worktree-head-ref*/`)**: `.vite/build/worker.js` added a non-string guard (`if("string"!=typeof t){...fetchRemoteDefault...}`) before `if("HEAD"===t||"@"===t)`, causing `patchWorktreeHeadRefResolver` to miss.
+     - **Computer Use runtime path resolver drift (`/*codex-offline:computer-use-resource-runtime-paths*/`)**: `.vite/build/early-bootstrap-*.js` switched from a synchronous `for(...)` loop to an `async function` using `.some(... .plugins.some(...))` and a conditional `await`, causing `COMPUTER_USE_RUNTIME_PATHS_CANONICAL_RE` and verifier `COMPUTER_USE_CANONICAL_RUNTIME_PATHS_PATCHED_RE` to miss.
+     - **Archived settings offline local visibility drift (`/*codex-offline:archived-settings-offline-local-visibility*/`)**: `webview/assets/async/678916.*.js` replaced individual `isError` / `isLocalArchiveError` / `isDurableArchiveError` / `chatGptArchiveError` props with a unified `archiveSources` array (`device`, `cloudChats`, `chatgpt`), breaking the previous prop anchor.
+  2. **Fixes applied**:
+     - `scripts/patch-app-asar.mjs`: Updated `patchWorktreeHeadRefResolver` to allow the optional non-string guard before `HEAD`/`@`; updated `COMPUTER_USE_RUNTIME_PATHS_CANONICAL_RE` for the `async function` `.some(...)` layout; added `archiveSources` handling in `patchArchivedSettingsOfflineVisibility` filtering to `device` so offline cloud archive failures stay suppressed while local archive state stays intact.
+     - `scripts/verify-offline-package.ps1`: Updated `COMPUTER_USE_CANONICAL_RUNTIME_PATHS_PATCHED_RE` and `archivedSettingsOfflineLocalVisibilityPatched` regexes to verify the `26.1111` patched shapes.
+     - `scripts/test/current-bundle-compatibility.test.cjs`: Added regression, idempotency, and fail-closed unit tests covering all three `26.1111` patches and verifier assertions.
+  3. **Verification**:
+     - `node --test .\scripts\test\*.test.cjs .\web-gateway\gateway\test\*.test.cjs`: All tests passed;
+     - `npm --prefix .\web-gateway run build:gateway`: Build succeeded;
+     - `pwsh -NoProfile -File .\scripts\build-offline-package.ps1 -RequireInstaller`: Built `codex-offline-26.1111.2228.0` cleanly with no patch drift warnings;
+     - `pwsh -NoProfile -File .\scripts\verify-offline-package.ps1 -BuildMetadataPath .\dist\offline\codex-offline-26.1111.2228.0\build-metadata.json`: Passed ASAR checks, 30s direct-launch offline smoke, and offline feature probe (`20/51` settings sections visible);
+     - Installer path: `dist\offline\codex-offline-26.1111.2228.0\codex-offline-26.1111.2228.0-setup.exe` (`SHA256`: `AA333B9ADB4FE4A98090C6492CE6682C55B8B8DB576E327710DF904C1625B943`).
+
+## 2026-11-12
+
+### 中文
+
+- 修复桌面端聊天分支（Fork chat）依然报错 `Failed to fork chat` 的问题（Issue #143 追修）：
+  1. **根因**：
+     - Electron 桌面端的会话分支与 Capnweb RPC 调用（如 `AppServerManager.forkConversationFromLatest`）是通过 MessagePort 直接调用主进程服务，主进程随后直接向通过 `child_process.spawn` 启动的 `codex.exe app-server` 子进程写入 stdio JSON-RPC 行。
+     - 该调用链路完全不经过 Electron 的 `message-from-view` IPC 通道，因此前序仅在 `ipcMain` 拦截清洗的方案在桌面端完全未生效。带有残缺 `mcp_servers.codex_app` 的 `thread/fork` 请求仍旧直接进入 Rust 解析器并抛出 `-32600 failed to load configuration: invalid transport in mcp_servers.codex_app`，导致界面弹出 `Failed to fork chat` 错误 Toast。
+  2. **修复**：
+     - `scripts/desktop-patches/init.cjs`：在主进程中拦截 `child_process.spawn`，识别参数包含 `app-server` 的子进程并包装其 `stdin.write` 与 `stdin.end` 管道。对所有写入底层 Rust 服务的 JSON-RPC 请求流执行行缓冲与实时解析，对含有 `"config"` 的请求调用共享契约 `sanitizeCodexAppMcpConfig` 彻底剥离缺失 transport 的 `codex_app` 配置。在主进程与底层服务的唯一物理通信边界完成统一清洗，免疫前端及主进程内部实现与函数名漂移。
+     - `scripts/test/model-availability-patches.test.cjs`：补充针对 `init.cjs` 中 `child_process.spawn` stdio 拦截、跨 chunk 分包缓冲和配置清洗的单元测试。
+
+### English
+
+- Fixed desktop chat branching (Fork chat) still failing with `Failed to fork chat` (Issue #143 follow-up):
+  1. **Root cause**:
+     - Desktop conversation branching via Capnweb RPC (`AppServerManager.forkConversationFromLatest`) communicates directly from the renderer over MessagePort to the main process, which writes JSON-RPC lines directly to the stdio of the `codex.exe app-server` child process spawned via `child_process.spawn`.
+     - This execution path never routes through Electron's `message-from-view` IPC channel. Consequently, the previous `ipcMain` interception hook was never triggered on desktop, and `thread/fork` requests containing invalid `mcp_servers.codex_app` reached the Rust deserializer directly, failing with `-32600 failed to load configuration: invalid transport in mcp_servers.codex_app`.
+  2. **Fixes applied**:
+     - `scripts/desktop-patches/init.cjs`: Hooked `child_process.spawn` to detect `app-server` child processes and wrapped their `stdin.write` / `stdin.end` streams. Sanitizes buffered JSON-RPC lines containing `"config"` using the shared `sanitizeCodexAppMcpConfig` contract before writing to the Rust process, cleanly stripping invalid `codex_app` configurations regardless of upstream RPC shifts.
+     - `scripts/test/model-availability-patches.test.cjs`: Added unit tests verifying `init.cjs` child process stdio interception, line buffering across chunks, and config sanitization.
+
 ## 2026-11-11
 
 ### 中文

@@ -579,6 +579,100 @@ test("desktop init.cjs intercepts message-from-view to sanitize codex_app mcp co
   assert.equal("mcp_servers.codex_app" in receivedPayloadInListener.request.params.config, false);
 });
 
+test("desktop init.cjs intercepts child_process.spawn to sanitize codex app-server stdin on thread/fork and config overrides", async () => {
+  const cp = require("child_process");
+  const origSpawn = cp.spawn;
+
+  try {
+    // Mock child_process.spawn to return a fake child with a capture stdin
+    let capturedWrites = [];
+    let fakeChild = {
+      pid: 12345,
+      stdin: {
+        write(chunk, encoding, callback) {
+          capturedWrites.push(chunk);
+          if (typeof encoding === "function") encoding();
+          else if (typeof callback === "function") callback();
+          return true;
+        },
+        end(chunk, encoding, callback) {
+          if (chunk) capturedWrites.push(chunk);
+          if (typeof encoding === "function") encoding();
+          else if (typeof callback === "function") callback();
+        },
+      },
+      stdout: { on() {} },
+      stderr: { on() {} },
+      on() {},
+    };
+
+    cp.spawn = function (cmd, args, opts) {
+      return fakeChild;
+    };
+
+    // Load init.cjs which wraps cp.spawn
+    loadInitWithMockElectron({});
+
+    // Spawn app-server process
+    const child = cp.spawn("codex.exe", ["-c", "features.code_mode_host=true", "app-server", "--analytics-default-enabled"]);
+    assert.equal(child.pid, 12345);
+
+    // 1. Send thread/fork request containing flat and nested invalid codex_app config
+    const forkReq = {
+      id: "thread/fork:01a1c2b3-59fc",
+      method: "thread/fork",
+      params: {
+        threadId: "parent-thread-1",
+        config: {
+          model: "gpt-6.1-sol",
+          "mcp_servers.codex_app": {
+            enabled_tools: ["create_thread", "send_message_to_thread", "handoff_thread", "fork_thread"],
+          },
+          mcp_servers: {
+            codex_app: { enabled_tools: ["fork_thread"] },
+            other_tool: { command: "tool.exe" },
+          },
+        },
+      },
+    };
+
+    child.stdin.write(JSON.stringify(forkReq) + "\n");
+    assert.equal(capturedWrites.length, 1);
+    const parsedFork = JSON.parse(capturedWrites[0].trim());
+    assert.equal("mcp_servers.codex_app" in parsedFork.params.config, false, "flat codex_app must be stripped");
+    assert.equal("codex_app" in parsedFork.params.config.mcp_servers, false, "nested codex_app without transport must be stripped");
+    assert.deepEqual(parsedFork.params.config.mcp_servers.other_tool, { command: "tool.exe" });
+    assert.equal(parsedFork.params.config.model, "gpt-6.1-sol");
+
+    // 2. Pass-through non-config requests untouched
+    capturedWrites.length = 0;
+    const listReq = JSON.stringify({ id: 1, method: "model/list", params: {} }) + "\n";
+    child.stdin.write(listReq);
+    assert.equal(capturedWrites[0], listReq);
+
+    // 3. Partial chunk writes across multiple calls
+    capturedWrites.length = 0;
+    const startReq = JSON.stringify({
+      id: "thread/start:2",
+      method: "thread/start",
+      params: {
+        config: {
+          "mcp_servers.codex_app": { enabled_tools: ["create_thread"] },
+        },
+      },
+    }) + "\n";
+    const half = Math.floor(startReq.length / 2);
+    child.stdin.write(startReq.slice(0, half));
+    assert.equal(capturedWrites.length, 0, "incomplete line must be buffered");
+    child.stdin.write(startReq.slice(half));
+    assert.equal(capturedWrites.length, 1, "completed line must be flushed");
+    const parsedStart = JSON.parse(capturedWrites[0].trim());
+    assert.equal("mcp_servers.codex_app" in parsedStart.params.config, false);
+  } finally {
+    cp.spawn = origSpawn;
+  }
+});
+
 test("models-api.json is generated as a single release artifact with Astra, GPT-5.6 and DeepSeek compatibility fields", () => {
   const buildSource = fs.readFileSync(buildScriptPath, "utf8");
   const builderSource = fs.readFileSync(modelCatalogBuilderPath, "utf8");

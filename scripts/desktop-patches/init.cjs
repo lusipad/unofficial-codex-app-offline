@@ -621,6 +621,137 @@
     }
   }
 
+  // ── Child Process stdio hook: sanitize codex app-server JSON-RPC stdin ──
+  // The official desktop communicates with `codex app-server` directly over stdio
+  // spawned in the main process via child_process.spawn. Requests from Capnweb RPC
+  // (like thread/fork via AppServerManager.forkConversationFromLatest) bypass
+  // Electron IPC and flow straight to the spawned child process stdin.
+  // We hook cp.spawn for app-server and wrap child.stdin.write to clean any
+  // invalid codex_app MCP configuration before Rust deserializes it.
+  try {
+    var _cp = require('child_process');
+    if (_cp && typeof _cp.spawn === 'function') {
+      var _origSpawn = _cp.spawn;
+
+      function sanitizeJsonRpcLine(line) {
+        if (!line || line.charCodeAt(0) !== 123 /* '{' */) return line;
+        if (line.indexOf('"config"') === -1) return line;
+        try {
+          var msg = JSON.parse(line);
+          if (msg && msg.params && typeof msg.params === 'object' && msg.params.config) {
+            if (_capabilityContract && typeof _capabilityContract.sanitizeCodexAppMcpConfig === 'function') {
+              var sanitized = _capabilityContract.sanitizeCodexAppMcpConfig(msg.params.config);
+              if (sanitized !== msg.params.config) {
+                _diag('app-server stdin: sanitized codex_app config for method=' + msg.method);
+                msg.params.config = sanitized;
+                return JSON.stringify(msg);
+              }
+            }
+          }
+        } catch (_e) { /* ignore parse error */ }
+        return line;
+      }
+
+      function wrapAppServerStdin(stdin) {
+        var _origWrite = stdin.write;
+        var lineBuffer = '';
+
+        stdin.write = function (chunk, encoding, callback) {
+          if (typeof encoding === 'function') {
+            callback = encoding;
+            encoding = undefined;
+          }
+          var isBuffer = Buffer.isBuffer(chunk);
+          var text;
+          if (typeof chunk === 'string') {
+            text = chunk;
+          } else if (isBuffer) {
+            text = chunk.toString(encoding || 'utf8');
+          } else {
+            return _origWrite.apply(this, arguments);
+          }
+
+          lineBuffer += text;
+          var lastNewlineIndex = lineBuffer.lastIndexOf('\n');
+          if (lastNewlineIndex === -1) {
+            if (typeof callback === 'function') callback();
+            return true;
+          }
+
+          var completeChunk = lineBuffer.slice(0, lastNewlineIndex);
+          lineBuffer = lineBuffer.slice(lastNewlineIndex + 1);
+
+          var lines = completeChunk.split('\n');
+          for (var i = 0; i < lines.length; i++) {
+            var rawLine = lines[i];
+            var isCr = rawLine.endsWith('\r');
+            var cleanLine = isCr ? rawLine.slice(0, -1) : rawLine;
+            var sanitizedLine = sanitizeJsonRpcLine(cleanLine);
+            lines[i] = isCr ? sanitizedLine + '\r' : sanitizedLine;
+          }
+
+          var sanitizedText = lines.join('\n') + '\n';
+          var payloadToWrite = isBuffer ? Buffer.from(sanitizedText, 'utf8') : sanitizedText;
+          return _origWrite.call(this, payloadToWrite, isBuffer ? undefined : (encoding || 'utf8'), callback);
+        };
+
+        var _origEnd = stdin.end;
+        stdin.end = function (chunk, encoding, callback) {
+          if (typeof encoding === 'function') {
+            callback = encoding;
+            encoding = undefined;
+          }
+          if (chunk) {
+            stdin.write(chunk, encoding);
+          }
+          if (lineBuffer.length > 0) {
+            var flushed = sanitizeJsonRpcLine(lineBuffer);
+            lineBuffer = '';
+            _origWrite.call(this, flushed, 'utf8');
+          }
+          return _origEnd.call(this, callback);
+        };
+      }
+
+      function isAppServerProcess(command, args) {
+        if (Array.isArray(args)) {
+          for (var i = 0; i < args.length; i++) {
+            if (typeof args[i] === 'string' && (args[i] === 'app-server' || args[i].indexOf('app-server') !== -1)) {
+              return true;
+            }
+          }
+        }
+        if (typeof command === 'string' && command.indexOf('app-server') !== -1) {
+          return true;
+        }
+        return false;
+      }
+
+      _cp.spawn = function (command, args, options) {
+        var child = _origSpawn.apply(this, arguments);
+        try {
+          var actualArgs = Array.isArray(args) ? args : (options && Array.isArray(options.args) ? options.args : []);
+          if (isAppServerProcess(command, actualArgs) && child && child.stdin && typeof child.stdin.write === 'function') {
+            _diag('app-server child process detected (pid=' + child.pid + '), wrapping stdin');
+            wrapAppServerStdin(child.stdin);
+          }
+        } catch (_err) {
+          _diag('error wrapping child process stdin: ' + (_err && _err.message));
+        }
+        return child;
+      };
+
+      try {
+        var _nodeCp = require('node:child_process');
+        if (_nodeCp && _nodeCp.spawn !== _cp.spawn) {
+          _nodeCp.spawn = _cp.spawn;
+        }
+      } catch (_e) {}
+    }
+  } catch (_e) {
+    _diag('child_process spawn hook unavailable: ' + (_e && _e.message));
+  }
+
   ipcMain.handle = function (channel, listener) {
     // ── Renderer message-from-view channels: sanitize codex_app config overrides ──
     if (channel === 'codex_desktop:message-from-view' || channel === 'message-from-view') {

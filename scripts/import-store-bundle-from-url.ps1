@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)][string]$BundleUrl,
     [string]$Destination = 'build/source-app',
@@ -112,7 +112,31 @@ try {
     }
 
     $downloadPath = Join-Path $downloadRoot $downloadName
-    Invoke-WebRequest -Uri $BundleUrl -OutFile $downloadPath
+
+    $foundExisting = $false
+    if ($ExpectedSize -gt 0 -and -not [string]::IsNullOrWhiteSpace($WorkRoot)) {
+        $candidateDownloads = Get-ChildItem -Path (Join-Path (Resolve-AbsolutePath -PathValue $WorkRoot) 'tmp\*\download') -Filter $downloadName -File -ErrorAction SilentlyContinue
+        foreach ($candidate in $candidateDownloads) {
+            if ($candidate.FullName -ne $downloadPath -and $candidate.Length -eq $ExpectedSize) {
+                Move-Item -LiteralPath $candidate.FullName -Destination $downloadPath -Force
+                $foundExisting = $true
+                break
+            }
+        }
+    }
+
+    if (-not $foundExisting) {
+        $curl = Get-Command 'curl.exe' -ErrorAction SilentlyContinue
+        if ($null -ne $curl) {
+            & $curl.Source -fL -C - --retry 5 --retry-delay 2 -o $downloadPath $BundleUrl
+            if ($LASTEXITCODE -ne 0) {
+                throw "curl download failed with exit code $LASTEXITCODE"
+            }
+        }
+        else {
+            Invoke-WebRequest -Uri $BundleUrl -OutFile $downloadPath
+        }
+    }
 
     if (-not [string]::IsNullOrWhiteSpace($ExpectedSha1)) {
         $actualSha1 = (Get-FileHash -Path $downloadPath -Algorithm SHA1).Hash.ToLowerInvariant()
