@@ -22,6 +22,11 @@ const DEEPSEEK_SETUP_URL =
   "https://cdn.deepseek.com/api-docs/codex-deepseek-setup-en.ps1";
 const ASTRA_CATALOG_SHA256 =
   "d1d24c2cbcf0c5d489b27eb622d6487a4731dc6909cd9af30e9321f7b8a51f54";
+const GPT_62_CATALOG_SHA256 = Object.freeze({
+  "gpt-6.2-sol": "0e852b322bbc3cf893cfda6b685558697459aa7c5fd0be6956c5a5725378ab13",
+  "gpt-6.2-astra": "998d0038c1160ba02062d7636f812d5b78439b5b50a6ce5e9657cefbfe3990b9",
+});
+const GPT_62_SLUGS = Object.keys(GPT_62_CATALOG_SHA256);
 const DEEPSEEK_CATALOG_SHA256 =
   "b97bf97e8226dee76bcfc9dcc503e11ef96cd2ca56371acd30f1f54c2f0396bb";
 
@@ -40,6 +45,8 @@ const GPT_6_UPSTREAM_MULTI_AGENT_VERSIONS = Object.freeze({
 });
 const CUSTOM_PROVIDER_MODEL_VERSIONS = Object.freeze({
   [ASTRA_MODEL_SLUG]: "v2",
+  "gpt-6.2-sol": "v2",
+  "gpt-6.2-astra": "v2",
   ...GPT_56_UPSTREAM_MULTI_AGENT_VERSIONS,
   ...GPT_6_UPSTREAM_MULTI_AGENT_VERSIONS,
 });
@@ -196,7 +203,7 @@ function clone(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
-export function mergeModelCatalogs(openAiCatalog, deepSeekCatalog, astraModel = null) {
+export function mergeModelCatalogs(openAiCatalog, deepSeekCatalog, astraModel = null, reviewed62Models = []) {
   validateCatalog(openAiCatalog, "OpenAI model catalog");
   validateCatalog(deepSeekCatalog, "DeepSeek model catalog");
 
@@ -225,7 +232,25 @@ export function mergeModelCatalogs(openAiCatalog, deepSeekCatalog, astraModel = 
     }
   }
 
-  for (const slug of [ASTRA_MODEL_SLUG, ...GPT_56_SLUGS, ...GPT_6_SLUGS]) {
+  const added62Models = [];
+  for (const slug of GPT_62_SLUGS) {
+    let model = modelsBySlug.get(slug);
+    if (!model) {
+      model = reviewed62Models.find((entry) => entry.slug === slug);
+      if (!model) {
+        throw new Error(`OpenAI model catalog is missing required model: ${slug}`);
+      }
+      model = clone(model);
+      added62Models.push(model);
+      modelsBySlug.set(slug, model);
+    }
+    if (model.visibility !== "list" || model.supported_in_api !== true) {
+      throw new Error(`${slug} must be visible and supported in the API`);
+    }
+  }
+  merged.models.unshift(...added62Models);
+
+  for (const slug of [ASTRA_MODEL_SLUG, ...GPT_62_SLUGS, ...GPT_56_SLUGS, ...GPT_6_SLUGS]) {
     const model = modelsBySlug.get(slug);
     if (!model) {
       throw new Error(`OpenAI model catalog is missing required model: ${slug}`);
@@ -301,24 +326,41 @@ export async function buildApiModelCatalog({ codexVersion, outputPath }) {
     (model) => model.slug === ASTRA_MODEL_SLUG,
   );
   let astraHash = null;
-  if (!astraModel) {
+  const missing62Slugs = GPT_62_SLUGS.filter(
+    (slug) => !openAiCatalog.models.some((model) => model.slug === slug),
+  );
+  const reviewed62Models = [];
+  if (!astraModel || missing62Slugs.length > 0) {
     const latestOpenAiCatalog = parseCatalog(
       await fetchText(OPENAI_LATEST_CATALOG_URL, "Latest OpenAI model catalog"),
       "Latest OpenAI model catalog",
     );
-    astraModel = latestOpenAiCatalog.models.find(
-      (model) => model.slug === ASTRA_MODEL_SLUG,
-    );
     if (!astraModel) {
-      throw new Error(
-        `Latest OpenAI model catalog is missing required model: ${ASTRA_MODEL_SLUG}`,
+      astraModel = latestOpenAiCatalog.models.find(
+        (model) => model.slug === ASTRA_MODEL_SLUG,
       );
+      if (!astraModel) {
+        throw new Error(
+          `Latest OpenAI model catalog is missing required model: ${ASTRA_MODEL_SLUG}`,
+        );
+      }
+      astraHash = catalogSha256({ models: [astraModel] });
+      if (astraHash !== ASTRA_CATALOG_SHA256) {
+        throw new Error(
+          `OpenAI Astra model changed (${astraHash}); review it and update the pinned hash`,
+        );
+      }
     }
-    astraHash = catalogSha256({ models: [astraModel] });
-    if (astraHash !== ASTRA_CATALOG_SHA256) {
-      throw new Error(
-        `OpenAI Astra model changed (${astraHash}); review it and update the pinned hash`,
-      );
+    for (const slug of missing62Slugs) {
+      const model = latestOpenAiCatalog.models.find((entry) => entry.slug === slug);
+      if (!model) {
+        throw new Error(`Latest OpenAI model catalog is missing required model: ${slug}`);
+      }
+      const hash = catalogSha256({ models: [model] });
+      if (hash !== GPT_62_CATALOG_SHA256[slug]) {
+        throw new Error(`OpenAI ${slug} model changed (${hash}); review it and update the pinned hash`);
+      }
+      reviewed62Models.push(model);
     }
   }
   const deepSeekHash = catalogSha256(deepSeekCatalog);
@@ -328,7 +370,7 @@ export async function buildApiModelCatalog({ codexVersion, outputPath }) {
     );
   }
 
-  const merged = mergeModelCatalogs(openAiCatalog, deepSeekCatalog, astraModel);
+  const merged = mergeModelCatalogs(openAiCatalog, deepSeekCatalog, astraModel, reviewed62Models);
   const resolvedOutput = path.resolve(outputPath);
   await mkdir(path.dirname(resolvedOutput), { recursive: true });
   await writeFile(resolvedOutput, `${JSON.stringify(merged, null, 2)}\n`, "utf8");

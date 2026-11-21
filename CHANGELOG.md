@@ -53,6 +53,16 @@
   5. **Residual risk**: the full offline package build (`build-offline-package.ps1 -RequireInstaller`) was not run locally; CI attempt 2 on `b0e9d4d` passed the patch stage and reached verification, and this push re-runs the complete matrix with the dual-signal smoke. On first offline launch `26.1117` still attempts the background curated plugin sync and fails after ~30s; initialization and usage are unaffected.
 
 
+## 2026-11-18
+
+### 中文
+
+- 修复可选自定义模型目录缺少 `gpt-6.2-sol` 和 `gpt-6.2-astra`：当包内 CLI 对应的官方目录尚未包含这两个模型时，从最新官方目录补入并逐项校验内容指纹，同时应用自定义 Provider 请求兼容设置；离线包验证器会检查两个模型的可见性、API 支持和包内 CLI 的加载结果。
+
+### English
+
+- Added `gpt-6.2-sol` and `gpt-6.2-astra` to the optional custom-model catalog when missing from the bundled CLI's versioned catalog. The fallback entries are individually hash-pinned, receive the custom-provider compatibility settings, and are checked by the offline package verifier.
+
 ## 2026-11-15
 
 ### 中文

@@ -1,4 +1,4 @@
-﻿[CmdletBinding()]
+[CmdletBinding()]
 param(
     [string]$BuildMetadataPath = 'build-metadata.json',
     [string]$ConfigPath = 'config/offline-package.json',
@@ -304,7 +304,7 @@ if (@($modelCatalogSlugs | Sort-Object -Unique).Count -ne $modelCatalogSlugs.Cou
     throw 'API model catalog contains duplicate model slugs.'
 }
 
-foreach ($slug in @('gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-6-sol', 'gpt-6-luna')) {
+foreach ($slug in @('gpt-6.2-sol', 'gpt-6.2-astra', 'gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-6-sol', 'gpt-6-luna')) {
     $model = @($modelCatalogModels | Where-Object { $_.slug -eq $slug })
     if ($model.Count -ne 1) {
         throw "API model catalog must contain exactly one $slug entry."
@@ -316,8 +316,11 @@ foreach ($slug in @('gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna
         [string]::IsNullOrWhiteSpace([string]$model[0].web_search_tool_type)) {
         throw "API model catalog has unexpected custom-provider fields for $slug."
     }
-    if ($slug -eq 'gpt-6-astra' -and $model[0].visibility -ne 'list') {
-        throw 'API model catalog must expose gpt-6-astra in the model picker.'
+    if ($slug -in @('gpt-6.2-sol', 'gpt-6.2-astra', 'gpt-6-astra') -and $model[0].visibility -ne 'list') {
+        throw "API model catalog must expose $slug in the model picker."
+    }
+    if ($slug -in @('gpt-6.2-sol', 'gpt-6.2-astra') -and $model[0].supported_in_api -ne $true) {
+        throw "API model catalog must support $slug in the API."
     }
 }
 
@@ -474,7 +477,7 @@ try {
         }
         $loadedCatalog = $catalogDebugOutput -join [Environment]::NewLine | ConvertFrom-Json
         $loadedSlugs = @($loadedCatalog.models | ForEach-Object { [string]$_.slug })
-        foreach ($slug in @('gpt-6-astra', 'gpt-5.6-sol', 'gpt-6-sol', 'gpt-6-luna', 'deepseek-flash', 'deepseek-v4-pro')) {
+        foreach ($slug in @('gpt-6.2-sol', 'gpt-6.2-astra', 'gpt-6-astra', 'gpt-5.6-sol', 'gpt-6-sol', 'gpt-6-luna', 'deepseek-flash', 'deepseek-v4-pro')) {
             if ($loadedSlugs -notcontains $slug) {
                 throw "Bundled Codex did not load expected model from models-api.json: $slug"
             }

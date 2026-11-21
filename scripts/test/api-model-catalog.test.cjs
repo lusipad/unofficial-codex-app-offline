@@ -13,6 +13,8 @@ function openAiModel(slug, multiAgentVersion = "v2") {
   return {
     slug,
     display_name: slug,
+    visibility: "list",
+    supported_in_api: true,
     supports_search_tool: true,
     web_search_tool_type: "text_and_image",
     tool_mode: "code_mode_only",
@@ -54,6 +56,8 @@ function fixtures() {
     openAi: {
       models: [
         { slug: "gpt-5.5", display_name: "GPT-5.5" },
+        openAiModel("gpt-6.2-sol"),
+        openAiModel("gpt-6.2-astra"),
         openAiModel("gpt-5.6-sol"),
         openAiModel("gpt-5.6-terra"),
         openAiModel("gpt-5.6-luna", "v1"),
@@ -79,6 +83,8 @@ test("merges Astra and DeepSeek entries and applies the OpenAI provider workarou
   expected.models.unshift(structuredClone(astra));
   for (const slug of [
     "gpt-6-astra",
+    "gpt-6.2-sol",
+    "gpt-6.2-astra",
     "gpt-5.6-sol",
     "gpt-5.6-terra",
     "gpt-5.6-luna",
@@ -104,6 +110,8 @@ test("merges Astra and DeepSeek entries and applies the OpenAI provider workarou
     [
       "gpt-6-astra",
       "gpt-5.5",
+      "gpt-6.2-sol",
+      "gpt-6.2-astra",
       "gpt-5.6-sol",
       "gpt-5.6-terra",
       "gpt-5.6-luna",
@@ -119,6 +127,8 @@ test("merges Astra and DeepSeek entries and applies the OpenAI provider workarou
 
   for (const slug of [
     "gpt-6-astra",
+    "gpt-6.2-sol",
+    "gpt-6.2-astra",
     "gpt-5.6-sol",
     "gpt-5.6-terra",
     "gpt-5.6-luna",
@@ -139,6 +149,93 @@ test("merges Astra and DeepSeek entries and applies the OpenAI provider workarou
   assert.equal(openAi.models[1].use_responses_lite, true);
 });
 
+test("adds the missing 6.2 models from the reviewed fallback without duplicating versioned entries", async () => {
+  const { mergeModelCatalogs } = await modulePromise;
+  for (const missingSlug of ["gpt-6.2-sol", "gpt-6.2-astra"]) {
+    const { openAi, astra, deepSeek } = fixtures();
+    const models = openAi.models.filter((model) => model.slug.startsWith("gpt-6.2-"));
+    openAi.models = openAi.models.filter((model) => model.slug !== missingSlug);
+    const fallback = models.map((model) => model.slug === missingSlug
+      ? model
+      : { ...model, display_name: "Must not replace versioned model" });
+
+    const merged = mergeModelCatalogs(openAi, deepSeek, astra, fallback);
+    for (const model of models) {
+      const matches = merged.models.filter((entry) => entry.slug === model.slug);
+      assert.equal(matches.length, 1);
+      assert.equal(matches[0].display_name, model.display_name);
+      assert.equal(matches[0].visibility, "list");
+      assert.equal(matches[0].tool_mode, null);
+      assert.equal(matches[0].multi_agent_version, null);
+      assert.equal(matches[0].use_responses_lite, false);
+      assert.equal(model.tool_mode, "code_mode_only");
+    }
+  }
+});
+
+test("adds both reviewed 6.2 models when neither is in the versioned catalog", async () => {
+  const { mergeModelCatalogs } = await modulePromise;
+  const { openAi, astra, deepSeek } = fixtures();
+  const fallback = openAi.models.filter((model) => model.slug.startsWith("gpt-6.2-"));
+  openAi.models = openAi.models.filter((model) => !model.slug.startsWith("gpt-6.2-"));
+
+  const merged = mergeModelCatalogs(openAi, deepSeek, astra, fallback);
+  assert.deepEqual(merged.models.slice(0, 2).map((model) => model.slug), [
+    "gpt-6.2-sol", "gpt-6.2-astra",
+  ]);
+  assert.ok(fallback.every((model) => model.tool_mode === "code_mode_only"));
+});
+
+test("requires each missing 6.2 model rather than silently publishing an incomplete catalog", async () => {
+  const { mergeModelCatalogs } = await modulePromise;
+  for (const slug of ["gpt-6.2-sol", "gpt-6.2-astra"]) {
+    const { openAi, astra, deepSeek } = fixtures();
+    openAi.models = openAi.models.filter((model) => model.slug !== slug);
+    assert.throws(
+      () => mergeModelCatalogs(openAi, deepSeek, astra),
+      new RegExp(`missing required model: ${slug.replaceAll(".", "\\.")}`),
+    );
+  }
+});
+
+test("rejects 6.2 entries that are hidden or no longer available for API use", async () => {
+  const { mergeModelCatalogs } = await modulePromise;
+  for (const slug of ["gpt-6.2-sol", "gpt-6.2-astra"]) {
+    for (const [field, value] of [["visibility", "hide"], ["supported_in_api", false]]) {
+      const { openAi, astra, deepSeek } = fixtures();
+      openAi.models.find((model) => model.slug === slug)[field] = value;
+      assert.throws(
+        () => mergeModelCatalogs(openAi, deepSeek, astra),
+        /must be visible and supported in the API/,
+      );
+    }
+  }
+});
+
+test("rejects unreviewed changes to a fallback 6.2 model", async () => {
+  const { buildApiModelCatalog } = await modulePromise;
+  const originalFetch = globalThis.fetch;
+  try {
+    for (const slug of ["gpt-6.2-sol", "gpt-6.2-astra"]) {
+      const { openAi, astra, deepSeek } = fixtures();
+      openAi.models.push(astra);
+      openAi.models = openAi.models.filter((model) => model.slug !== slug);
+      globalThis.fetch = async (url) => ({
+        ok: true,
+        text: async () => url.includes("deepseek.com")
+          ? `$ModelsJson = @'\n${JSON.stringify(deepSeek)}\n'@`
+          : JSON.stringify(url.includes("/main/") ? { models: [openAiModel(slug)] } : openAi),
+      });
+      await assert.rejects(
+        () => buildApiModelCatalog({ codexVersion: "0.169.0", outputPath: "unused.json" }),
+        new RegExp(`${slug.replaceAll(".", "\\.")} model changed`),
+      );
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("extracts the official DeepSeek ModelsJson PowerShell block", async () => {
   const { extractDeepSeekCatalog } = await modulePromise;
   const script = [
@@ -152,7 +249,7 @@ test("extracts the official DeepSeek ModelsJson PowerShell block", async () => {
 
 test("rejects an upstream GPT-5.6 / GPT-6 metadata change instead of silently overwriting it", async () => {
   const { mergeModelCatalogs } = await modulePromise;
-  for (const slug of ["gpt-5.6-sol", "gpt-6-sol", "gpt-6-luna"]) {
+  for (const slug of ["gpt-5.6-sol", "gpt-6-sol", "gpt-6-luna", "gpt-6.2-sol", "gpt-6.2-astra"]) {
     for (const [field, value] of [
       ["tool_mode", null],
       ["multi_agent_version", null],
