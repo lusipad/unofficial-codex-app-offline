@@ -33,6 +33,10 @@ const buildScriptSource = fs.readFileSync(
   path.join(repoRoot, "scripts", "build-offline-package.ps1"),
   "utf8",
 );
+const directLaunchSmokeSource = fs.readFileSync(
+  path.join(repoRoot, "scripts", "offline-direct-launch-smoke.mjs"),
+  "utf8",
+);
 const setupScriptSource = fs.readFileSync(
   path.join(repoRoot, "scripts", "setup-codex-offline.ps1"),
   "utf8",
@@ -2122,4 +2126,35 @@ test("package verification requires the durable sign-in retry stop patch", () =>
   assert.match(verifierScriptSource, /durableSignInRetryStopPatched/);
   // 守卫比较的错误文案必须仍存在于主进程 durable transport 中，否则守卫是死代码。
   assert.match(patchScriptSource, /DURABLE_SIGN_IN_ERROR_MESSAGE/);
+});
+
+test("26.1117 direct-launch smoke accepts the renderer-side readiness signal", () => {
+  // 26.1117 stopped forwarding main-process logs (including "Codex CLI
+  // initialized") to the captured stdout. The smoke must keep the legacy
+  // marker for older bundles and also accept the renderer-side
+  // "Loading local plugin inventory" line, which only fires once the local
+  // app-server connection is initialized.
+  const markersMatch = directLaunchSmokeSource.match(
+    /const APP_SERVER_READY_MARKERS = \[([\s\S]*?)\];/,
+  );
+  assert.ok(markersMatch, "APP_SERVER_READY_MARKERS declaration is missing");
+  const markers = Function(
+    `"use strict"; const APP_SERVER_READY_MARKERS = [${markersMatch[1]}]; return APP_SERVER_READY_MARKERS;`,
+  )();
+  assert.ok(markers.includes("Codex CLI initialized"), "legacy readiness marker is missing");
+  assert.ok(
+    markers.includes("Loading local plugin inventory"),
+    "26.1117 renderer-side readiness marker is missing",
+  );
+  assert.ok(markers.length >= 2, "both readiness markers must stay registered");
+  assert.match(
+    directLaunchSmokeSource,
+    /sawAppServerReadyIn = \(text\) =>\s*APP_SERVER_READY_MARKERS\.some\(\(marker\) => text\.includes\(marker\)\)/,
+    "readiness must accept any registered marker",
+  );
+  assert.match(
+    verifierScriptSource,
+    /--timeout-ms 90000/,
+    "verifier smoke window must cover slow runners on the 26.1117 readiness path",
+  );
 });

@@ -94,12 +94,23 @@ let sawWindowReady = false;
 let survivedUntilTimeout = false;
 const startedAt = Date.now();
 
+// 26.1117 stopped writing the connection's "Codex CLI initialized" log to the
+// captured stdout (main-process logs no longer forward there), but the
+// renderer-side "Loading local plugin inventory" query only fires once the
+// local app-server connection is initialized — the same readiness point.
+const APP_SERVER_READY_MARKERS = [
+  'Codex CLI initialized',
+  'Loading local plugin inventory',
+];
+const sawAppServerReadyIn = (text) =>
+  APP_SERVER_READY_MARKERS.some((marker) => text.includes(marker));
+
 try {
   while (Date.now() - startedAt < timeoutMs) {
     await delay(500);
     stdout = readFileIfExists(stdoutPath);
     stderr = readFileIfExists(stderrPath);
-    sawAppServerReady ||= stdout.includes('Codex CLI initialized');
+    sawAppServerReady ||= sawAppServerReadyIn(stdout);
     sawWindowReady ||=
       stdout.includes('window ready-to-show') ||
       stdout.includes('window main frame finished load');
@@ -118,7 +129,7 @@ try {
 
 stdout = readFileIfExists(stdoutPath);
 stderr = readFileIfExists(stderrPath);
-sawAppServerReady ||= stdout.includes('Codex CLI initialized');
+sawAppServerReady ||= sawAppServerReadyIn(stdout);
 sawWindowReady ||=
   stdout.includes('window ready-to-show') ||
   stdout.includes('window main frame finished load');

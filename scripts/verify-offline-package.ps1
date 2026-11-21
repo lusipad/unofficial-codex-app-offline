@@ -2258,10 +2258,10 @@ console.log(`[verify-offline-package] Verified app.asar patches in ${path.basena
 
     if (-not $SkipDesktopLaunchSmoke) {
         $directLaunchSmokeWorkRoot = Join-Path $tempRoot 'direct-launch-smoke'
-        # 26.1117 app-server initialize now awaits the curated-plugin
-        # startup_sync fallback chain (~35s with the network blackholed) before
-        # the handshake completes; 90s keeps the full ready assertions without
-        # racing that bounded upstream latency.
+        # 26.1117 stopped forwarding the main-process "Codex CLI initialized"
+        # log to the captured stdout; the smoke also accepts the renderer-side
+        # "Loading local plugin inventory" line, which only fires once the
+        # local app-server connection is initialized. 90s covers slow runners.
         node $directLaunchSmokeScriptPath `
             --portable-root $portableRoot `
             --work-root $directLaunchSmokeWorkRoot `
