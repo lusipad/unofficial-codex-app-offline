@@ -159,3 +159,52 @@ test("committed feature baseline and user document stay in sync", async () => {
     assert.ok(section.visible || section.reason, `${section.slug} is hidden without a reason`);
   }
 });
+
+test("26.1117 split navigation groups emit Chinese headings in rendered user document", async () => {
+  const { extractSettingsNavigation, buildFeatureReport, renderUserDocument } = await loadProbe();
+  const splitChunk = {
+    name: "settings-page-261117.js",
+    content:
+      'let eY=[' +
+      '{key:"profile",heading:(0,D.zR)({id:"settings.nav.heading.profile",defaultMessage:"Profile"}),slugs:["profile"]},' +
+      '{key:"account",heading:(0,D.zR)({id:"settings.nav.heading.account",defaultMessage:"Account"}),slugs:["account"]},' +
+      '{key:"app",heading:(0,D.zR)({id:"settings.nav.heading.app",defaultMessage:"App"}),slugs:["general-settings","notifications"]},' +
+      '{key:"data-privacy",heading:(0,D.zR)({id:"settings.nav.heading.dataPrivacy",defaultMessage:"Data & Privacy"}),slugs:["import"]},' +
+      '{key:"teams",heading:null,slugs:["teams"]},' +
+      '{key:"integrations",heading:eZ,slugs:["plugins-settings"]},' +
+      '{key:"coding",heading:(0,D.zR)({id:"settings.nav.heading.coding",defaultMessage:"Coding"}),slugs:["code-review","worktrees"]}' +
+      '];',
+  };
+  const staticGroups = extractSettingsNavigation([splitChunk]);
+  assert.deepEqual(
+    staticGroups.map((group) => group.key),
+    ["profile", "account", "app", "data-privacy", "teams", "integrations", "coding"],
+  );
+  const report = buildFeatureReport({
+    staticGroups,
+    visible: [
+      { slug: "general-settings", label: "常规" },
+      { slug: "notifications", label: "通知" },
+      { slug: "import", label: "导入" },
+      { slug: "plugins-settings", label: "插件" },
+      { slug: "code-review", label: "代码审查" },
+      { slug: "worktrees", label: "Worktrees" },
+    ],
+    expectations: {
+      mode: "api-key",
+      notes: {
+        profile: { label: "个人资料", reason: "需要 ChatGPT 账号资料" },
+        account: { label: "账户", reason: "需要登录 ChatGPT 账号" },
+        teams: { label: "团队", reason: "需要 ChatGPT 工作区账号" },
+      },
+    },
+    version: "26.1117.4957.0",
+  });
+  const doc = renderUserDocument(report);
+  for (const heading of ["个人资料", "账户", "应用", "数据与隐私", "团队", "集成", "编码"]) {
+    assert.match(doc, new RegExp(`^## ${heading}$`, "m"));
+  }
+  for (const rawKey of ["profile", "account", "app", "data-privacy", "teams", "integrations", "coding"]) {
+    assert.doesNotMatch(doc, new RegExp(`^## ${rawKey}$`, "m"));
+  }
+});

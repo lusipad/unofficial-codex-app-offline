@@ -13,21 +13,18 @@
     "worktrees",
     "plugins-settings",
     "browser-use",
-    "import"
+    "import",
+    "notifications",
+    "code-review"
   ],
   "expectHidden": [
     "billing",
     "cloud-settings",
     "codex-cloud",
     "debug",
-    "code-review",
     "rosalind"
   ],
   "notes": {
-    "notifications": {
-      "label": "通知",
-      "reason": "需要登录 ChatGPT 账号"
-    },
     "profile": {
       "label": "个人资料",
       "reason": "需要 ChatGPT 账号资料"
@@ -139,10 +136,6 @@
     "environments": {
       "label": "云端环境",
       "reason": "开启云端环境时替代本地「环境」；离线显示本地「环境」"
-    },
-    "code-review": {
-      "label": "代码审查",
-      "reason": "26.1013 起上游要求登录 ChatGPT 账号，API Key 与未登录模式不可用"
     },
     "rosalind": {
       "label": "Rosalind",

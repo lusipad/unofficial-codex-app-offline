@@ -1,41 +1,22 @@
 {
   "schemaVersion": 1,
-  "version": "26.1029.7803.0",
+  "version": "26.1117.4957.0",
   "mode": "api-key",
   "groups": [
     {
-      "key": "personal",
+      "key": "profile",
       "sections": [
-        {
-          "slug": "general-settings",
-          "visible": true,
-          "label": "General",
-          "reason": null
-        },
-        {
-          "slug": "notifications",
-          "visible": false,
-          "label": "通知",
-          "reason": "需要登录 ChatGPT 账号"
-        },
-        {
-          "slug": "import",
-          "visible": true,
-          "label": "Import",
-          "reason": null
-        },
         {
           "slug": "profile",
           "visible": false,
           "label": "个人资料",
           "reason": "需要 ChatGPT 账号资料"
-        },
-        {
-          "slug": "appearance",
-          "visible": true,
-          "label": "Appearance",
-          "reason": null
-        },
+        }
+      ]
+    },
+    {
+      "key": "account",
+      "sections": [
         {
           "slug": "security",
           "visible": false,
@@ -47,24 +28,6 @@
           "visible": false,
           "label": "账户",
           "reason": "需要登录 ChatGPT 账号"
-        },
-        {
-          "slug": "data-controls",
-          "visible": false,
-          "label": "数据管理",
-          "reason": "需要登录 ChatGPT 账号；本地归档会话在「Archived chats」中管理"
-        },
-        {
-          "slug": "archived-chats",
-          "visible": true,
-          "label": "Archived chats",
-          "reason": null
-        },
-        {
-          "slug": "ads-controls",
-          "visible": false,
-          "label": "广告设置",
-          "reason": "ChatGPT 账号功能"
         },
         {
           "slug": "parental-controls",
@@ -83,42 +46,6 @@
           "visible": false,
           "label": "安全",
           "reason": "ChatGPT 账号功能"
-        },
-        {
-          "slug": "voice",
-          "visible": true,
-          "label": "Voice",
-          "reason": null
-        },
-        {
-          "slug": "storage",
-          "visible": true,
-          "label": "Storage",
-          "reason": null
-        },
-        {
-          "slug": "agent",
-          "visible": true,
-          "label": "Configuration",
-          "reason": null
-        },
-        {
-          "slug": "personalization",
-          "visible": true,
-          "label": "Personalization",
-          "reason": null
-        },
-        {
-          "slug": "pets",
-          "visible": true,
-          "label": "Mini & Pets",
-          "reason": null
-        },
-        {
-          "slug": "keyboard-shortcuts",
-          "visible": true,
-          "label": "Keyboard shortcuts",
-          "reason": null
         },
         {
           "slug": "usage",
@@ -149,12 +76,100 @@
           "visible": false,
           "label": "代码审查用量",
           "reason": "需要 ChatGPT 账号计划"
+        }
+      ]
+    },
+    {
+      "key": "app",
+      "sections": [
+        {
+          "slug": "general-settings",
+          "visible": true,
+          "label": "常规",
+          "reason": null
+        },
+        {
+          "slug": "appearance",
+          "visible": true,
+          "label": "外观",
+          "reason": null
+        },
+        {
+          "slug": "notifications",
+          "visible": true,
+          "label": "通知",
+          "reason": null
+        },
+        {
+          "slug": "voice",
+          "visible": true,
+          "label": "语音",
+          "reason": null
+        },
+        {
+          "slug": "agent",
+          "visible": true,
+          "label": "配置",
+          "reason": null
+        },
+        {
+          "slug": "personalization",
+          "visible": true,
+          "label": "个性化",
+          "reason": null
+        },
+        {
+          "slug": "pets",
+          "visible": true,
+          "label": "迷你界面和智能伙伴",
+          "reason": null
+        },
+        {
+          "slug": "keyboard-shortcuts",
+          "visible": true,
+          "label": "键盘快捷键",
+          "reason": null
         },
         {
           "slug": "debug",
           "visible": false,
           "label": "调试",
           "reason": "内部调试页，离线包刻意保持关闭"
+        }
+      ]
+    },
+    {
+      "key": "data-privacy",
+      "sections": [
+        {
+          "slug": "import",
+          "visible": true,
+          "label": "导入",
+          "reason": null
+        },
+        {
+          "slug": "data-controls",
+          "visible": false,
+          "label": "数据管理",
+          "reason": "需要登录 ChatGPT 账号；本地归档会话在「Archived chats」中管理"
+        },
+        {
+          "slug": "archived-chats",
+          "visible": true,
+          "label": "已归档的聊天",
+          "reason": null
+        },
+        {
+          "slug": "ads-controls",
+          "visible": false,
+          "label": "广告设置",
+          "reason": "ChatGPT 账号功能"
+        },
+        {
+          "slug": "storage",
+          "visible": true,
+          "label": "Device storage",
+          "reason": null
         },
         {
           "slug": "agreements",
@@ -181,7 +196,7 @@
         {
           "slug": "plugins-settings",
           "visible": true,
-          "label": "Plugins",
+          "label": "插件",
           "reason": null
         },
         {
@@ -205,7 +220,7 @@
         {
           "slug": "computer-use",
           "visible": true,
-          "label": "Computer use",
+          "label": "电脑操控",
           "reason": null
         },
         {
@@ -217,7 +232,7 @@
         {
           "slug": "appshots",
           "visible": true,
-          "label": "Appshots",
+          "label": "应用快照",
           "reason": null
         },
         {
@@ -241,7 +256,7 @@
         {
           "slug": "browser-use",
           "visible": true,
-          "label": "Browser",
+          "label": "浏览器",
           "reason": null
         },
         {
@@ -264,19 +279,19 @@
         {
           "slug": "hooks-settings",
           "visible": true,
-          "label": "Hooks",
+          "label": "钩子",
           "reason": null
         },
         {
           "slug": "gateways",
           "visible": true,
-          "label": "Model Providers",
+          "label": "模型提供商",
           "reason": null
         },
         {
           "slug": "connections",
           "visible": true,
-          "label": "Connections",
+          "label": "连接",
           "reason": null
         },
         {
@@ -299,9 +314,9 @@
         },
         {
           "slug": "code-review",
-          "visible": false,
+          "visible": true,
           "label": "代码审查",
-          "reason": "26.1013 起上游要求登录 ChatGPT 账号，API Key 与未登录模式不可用"
+          "reason": null
         },
         {
           "slug": "git-settings",
@@ -312,7 +327,7 @@
         {
           "slug": "local-environments",
           "visible": true,
-          "label": "Environments",
+          "label": "环境",
           "reason": null
         },
         {

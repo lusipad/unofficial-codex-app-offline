@@ -123,7 +123,16 @@ export function buildFeatureReport({ staticGroups, visible, expectations, versio
   return { schemaVersion: 1, version: version ?? null, mode: expectations.mode, groups };
 }
 
-const GROUP_TITLES = { personal: '个人', teams: '团队', integrations: '集成', coding: '编码' };
+const GROUP_TITLES = {
+  personal: '个人',
+  profile: '个人资料',
+  account: '账户',
+  app: '应用',
+  'data-privacy': '数据与隐私',
+  teams: '团队',
+  integrations: '集成',
+  coding: '编码',
+};
 
 const RELEASE_ITEM_LIMIT = 5;
 const MODE_TEXT = { 'api-key': 'API Key / 未登录 ChatGPT，网络已阻断' };

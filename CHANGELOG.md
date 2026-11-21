@@ -4,7 +4,7 @@
 
 ### 中文
 
-- 修复 `26.1117.3838.0` Store 包离线构建失败问题（CI Run `44798197221` / Issue #146）：
+- 修复 `26.1117.3838.0` / `26.1117.4957.0` Store 包离线构建与验证失败问题（CI Run `44798197221` / `44866612542` / Issue #146）：
   1. **根因**（`patch-app-asar.mjs` 在 `26.1117` bundle 上共三处 required 补丁锚点漂移）：
      - **Chrome browser-use native pipe 直连补丁漂移（`/*codex-offline:browser-use-native-pipe-direct*/`）**：`resources/plugins/openai-bundled/plugins/chrome/scripts/browser-service.mjs` 的共享传输工厂将 `n.createConnection(e)` 包入 try/catch（失败时重抛 `browser_connect_failed` 诊断），socket 先存入临时变量再 `new <transport>(o,t)`；原 `transportFactoryMatch` 只匹配"直连 return"单一形态而失配。
      - **Workspace Dependencies 设置 gate 漂移（`/*codex-offline:workspace-dependencies-settings*/`）**：gate 求值从模块作用域赋值（`X=ge("3026692602")`）迁移进设置面板组件的 hook 调用 `(0,<hook>)(<eXbv别名>.D)`，再经 `wi(host, gate)` 合并决定是否渲染 Workspace Dependencies 分区；两个旧正则均失配。
@@ -21,15 +21,28 @@
      - 真正的失效点：26.1117 起主进程（main-process）日志不再转发到 `--enable-logging` 捕获的 stdout（渲染进程日志仍可见），而直连冒烟一直用主进程连接日志 `Codex CLI initialized` 作为 app-server 就绪信号，导致信号永远等不到。
      - 修复：就绪断言语义不变（本地 app-server 连接初始化完成），接受渲染进程侧 `Loading local plugin inventory` 作为同等信号（该 React Query 仅在本地连接初始化后才触发）；观察窗口 30s→90s（`scripts/verify-offline-package.ps1` 与 `scripts/offline-direct-launch-smoke.mjs`），与 `offline-feature-probe` 对齐。
      - 残余影响：`26.1117` 离线首次启动时后台会尝试 curated 插件同步并在约 30s 后失败，不影响使用；后续可考虑打包 curated 插件快照（`has_local_curated_plugins_snapshot` 可跳过存档回退）。
-  4. **验证结果**：
-     - `node --test .\scripts\test\*.test.cjs .\web-gateway\gateway\test\*.test.cjs`：284 项全部通过；
+  4. **离线功能探针与基线同步（CI Run `44866612542` 在 `offline-feature-probe` 失败）**：
+     - 根因：核对 `26.1117` 渲染层确认是上游能力变化，而非 Statsig gate 误放——
+       - `code-review`：上游在 `Sptq` / `aeqi` / `B02U`（`CodeReviewAppSettings`）新增本地 LSP `Code Navigation` 标签页（经 `appServices.lsp.configuredLanguageIds` 驱动，无需 ChatGPT 登录或 gate），未登录时仅隐藏 `cloud` 与 `app` 标签页；
+       - `notifications`：上游 `FRRX`（`use-visible-settings-sections`）在桌面端固定返回可见，`NotificationsSettingsPage` 对未登录桌面端展示本地通知开关与提示音选择，同时保持 `ChatGPT notifications` 区块隐藏；
+       - 设置导航分组：上游将原 `personal` 分组拆分为 `profile`、`account`、`app`、`data-privacy`（共 7 组，仍为 51 个唯一 slug）。
+     - 修复与同步：
+       - `scripts/offline-feature-probe.mjs`：`GROUP_TITLES` 补全 `profile`、`account`、`app`、`data-privacy` 中文分组标题映射（保留 `personal` 以兼容历史 fixture）；
+       - `scripts/test/offline-feature-probe.test.cjs`：新增 `26.1117` 七分组结构渲染中文标题的回归测试；
+       - `scripts/offline-feature-expectations.json`：将 `notifications` 与 `code-review` 迁入 `expectVisible`，从 `expectHidden` 与 `notes` 中移除；
+       - 通过 `offline-feature-probe.mjs --promote` 更新 `docs/baselines/offline-features.json` 与 `docs/offline-features.md` 至 `26.1117.4957.0`（`22/51` 设置分区离线可见）；
+       - 同步 `docs/baselines/gate-baseline.json` 至 `26.1117.4957.0`（264 个 id，二次扫描 0 new / 0 gone / 0 changed）。
+  5. **验证结果**：
+     - `node --test .\scripts\test\*.test.cjs .\web-gateway\gateway\test\*.test.cjs`：286 项全部通过；
      - `npm --prefix .\web-gateway run build:gateway`：构建通过；
-     - 使用当前 Store CDN 最新 MSIX（`26.1117.3838.0`）完整解包后运行 `node scripts/patch-app-asar.mjs --app-dir <app>`：复现 CI 失败，修复后全部补丁应用成功（`Patch drift summary: all patches applied or already correct`），asar 重打包与 `ChatGPT.exe` 内嵌 `ELECTRONASAR` 完整性资源重写均成功。
-  5. **未覆盖风险**：本地未执行完整离线包构建（`build-offline-package.ps1 -RequireInstaller`）；CI 对 `b0e9d4d` 的 attempt 2 已通过补丁阶段进入验证环节，本次推送会以双信号冒烟重跑完整矩阵。`26.1117` 离线首次启动时后台 curated 插件同步约 30 秒后失败，不影响就绪与使用。
+     - `pwsh -NoProfile -File .\scripts\build-offline-package.ps1 -RequireInstaller`：`codex-offline-26.1117.4957.0` 完整离线包与安装器构建通过（所有 `patch-app-asar` 补丁均应用且无漂移告警）；
+     - `pwsh -NoProfile -File .\scripts\verify-offline-package.ps1 -BuildMetadataPath .\dist\offline\codex-offline-26.1117.4957.0\build-metadata.json -RequireInstallerAsset`：ASAR 补丁校验、90 秒直连离线启动冒烟（`direct-exe-survived-offline-launch`）与离线功能探针（`22/51` 设置分区可见，0 警告 0 报错）全量通过；
+     - 产物路径：`dist\offline\codex-offline-26.1117.4957.0\codex-offline-26.1117.4957.0-setup.exe`（`SHA256`: `5381F7D99A28E2810EAA48D02BAD9AAA0E1600BAC1B7FADD69BA99BDD3B52F5C`）。
+  6. **未覆盖风险**：`26.1117` 离线首次启动时后台 curated 插件同步约 30 秒后失败，不影响就绪与使用；`offline-feature-probe` 仅覆盖 API Key / 未登录模式下的设置导航可见性，不覆盖 ChatGPT 登录态或设置子页内部表单交互。
 
 ### English
 
-- Fixed offline package build failure on Microsoft Store build `26.1117.3838.0` (CI Run `44798197221` / Issue #146):
+- Fixed offline package build and verification failures on Microsoft Store builds `26.1117.3838.0` / `26.1117.4957.0` (CI Runs `44798197221` / `44866612542` / Issue #146):
   1. **Root causes** (three required patch anchors drifted on the `26.1117` bundle):
      - **Chrome browser-use native pipe direct patch drift (`/*codex-offline:browser-use-native-pipe-direct*/`)**: the shared transport factory in `resources/plugins/openai-bundled/plugins/chrome/scripts/browser-service.mjs` now wraps `n.createConnection(e)` in a try/catch that rethrows a `browser_connect_failed` diagnostic, stashing the socket in a temp var before `new <transport>(o,t)`; the single-shape `transportFactoryMatch` regex missed.
      - **Workspace Dependencies settings gate drift (`/*codex-offline:workspace-dependencies-settings*/`)**: gate evaluation moved from a module-scope assignment (`X=ge("3026692602")`) into an in-component hook call `(0,<hook>)(<eXbvAlias>.D)`, combined with the host via `wi(host, gate)` to decide whether the Workspace Dependencies section renders; both legacy regexes missed.
@@ -46,11 +59,24 @@
      - The actual breakage: since `26.1117`, main-process logs are no longer forwarded to the `--enable-logging` captured stdout (renderer logs still are), and the direct-launch smoke used the main-process connection log `Codex CLI initialized` as its app-server readiness signal — so the signal never appeared.
      - Fix: readiness semantics unchanged (local app-server connection initialized); the renderer-side `Loading local plugin inventory` line is now accepted as an equivalent signal (that query only fires after the local connection initializes). The observation window also grew 30s → 90s in `scripts/verify-offline-package.ps1` and `scripts/offline-direct-launch-smoke.mjs`, matching `offline-feature-probe`.
      - Residual impact: on first offline launch `26.1117` still attempts the curated plugin sync in the background and fails after ~30s; harmless. A future improvement can ship a curated plugins snapshot (`has_local_curated_plugins_snapshot` skips the archive fallback).
-  4. **Verification**:
-     - `node --test .\scripts\test\*.test.cjs .\web-gateway\gateway\test\*.test.cjs`: all 284 tests passed;
+  4. **Offline feature probe and baseline sync (CI Run `44866612542` failed in `offline-feature-probe`)**:
+     - Root cause: inspecting the `26.1117` renderer confirmed genuine upstream capability changes rather than an unintended Statsig gate leak:
+       - `code-review`: `Sptq` / `aeqi` / `B02U` (`CodeReviewAppSettings`) added a local LSP `Code Navigation` tab backed by `appServices.lsp.configuredLanguageIds` (no ChatGPT login or gate required), while `cloud` and `app` review tabs remain hidden without ChatGPT auth;
+       - `notifications`: `FRRX` (`use-visible-settings-sections`) now makes `notifications` visible in the Codex desktop app, exposing local desktop notification toggles and sound settings in `NotificationsSettingsPage` while keeping `ChatGPT notifications` hidden unauthenticated;
+       - Settings navigation groups: upstream split `personal` into `profile`, `account`, `app`, and `data-privacy` (7 groups, 51 unique slugs).
+     - Fixes & baseline updates:
+       - `scripts/offline-feature-probe.mjs`: added Chinese `GROUP_TITLES` mappings for `profile`, `account`, `app`, and `data-privacy` (keeping `personal` for older fixtures);
+       - `scripts/test/offline-feature-probe.test.cjs`: added a regression test covering the 7-group split headings in `renderUserDocument`;
+       - `scripts/offline-feature-expectations.json`: moved `notifications` and `code-review` to `expectVisible` and removed them from `expectHidden` and `notes`;
+       - Promoted `docs/baselines/offline-features.json` and `docs/offline-features.md` to `26.1117.4957.0` via `offline-feature-probe.mjs --promote` (`22/51` sections visible);
+       - Synced `docs/baselines/gate-baseline.json` to `26.1117.4957.0` (264 ids; second scan reports `0 new / 0 gone / 0 changed`).
+  5. **Verification**:
+     - `node --test .\scripts\test\*.test.cjs .\web-gateway\gateway\test\*.test.cjs`: all 286 tests passed;
      - `npm --prefix .\web-gateway run build:gateway`: build succeeded;
-     - Extracted the current Store CDN MSIX (`26.1117.3838.0`) and ran `node scripts/patch-app-asar.mjs --app-dir <app>`: reproduced the CI failure, and after the fix all patches applied (`Patch drift summary: all patches applied or already correct`); asar repack and the embedded `ELECTRONASAR` integrity resource rewrite in `ChatGPT.exe` both succeeded.
-  5. **Residual risk**: the full offline package build (`build-offline-package.ps1 -RequireInstaller`) was not run locally; CI attempt 2 on `b0e9d4d` passed the patch stage and reached verification, and this push re-runs the complete matrix with the dual-signal smoke. On first offline launch `26.1117` still attempts the background curated plugin sync and fails after ~30s; initialization and usage are unaffected.
+     - `pwsh -NoProfile -File .\scripts\build-offline-package.ps1 -RequireInstaller`: full offline package and installer build succeeded for `26.1117.4957.0` (all `patch-app-asar` patches applied with zero drift);
+     - `pwsh -NoProfile -File .\scripts\verify-offline-package.ps1 -BuildMetadataPath .\dist\offline\codex-offline-26.1117.4957.0\build-metadata.json -RequireInstallerAsset`: ASAR patch verification, 90s direct-launch offline smoke (`direct-exe-survived-offline-launch`), and offline feature probe (`22/51` visible, 0 warnings, 0 errors) all passed;
+     - Installer output: `dist\offline\codex-offline-26.1117.4957.0\codex-offline-26.1117.4957.0-setup.exe` (`SHA256`: `5381F7D99A28E2810EAA48D02BAD9AAA0E1600BAC1B7FADD69BA99BDD3B52F5C`).
+  6. **Residual risk**: on first offline launch `26.1117` still attempts the background curated plugin sync and fails after ~30s; initialization and usage are unaffected. `offline-feature-probe` covers Settings navigation visibility in API-key / unauthenticated mode only, not authenticated ChatGPT mode or in-panel form interactions.
 
 
 ## 2026-11-18
