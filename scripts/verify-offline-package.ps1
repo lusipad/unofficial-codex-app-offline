@@ -2258,10 +2258,14 @@ console.log(`[verify-offline-package] Verified app.asar patches in ${path.basena
 
     if (-not $SkipDesktopLaunchSmoke) {
         $directLaunchSmokeWorkRoot = Join-Path $tempRoot 'direct-launch-smoke'
+        # 26.1117 app-server initialize now awaits the curated-plugin
+        # startup_sync fallback chain (~35s with the network blackholed) before
+        # the handshake completes; 90s keeps the full ready assertions without
+        # racing that bounded upstream latency.
         node $directLaunchSmokeScriptPath `
             --portable-root $portableRoot `
             --work-root $directLaunchSmokeWorkRoot `
-            --timeout-ms 30000
+            --timeout-ms 90000
         if ($LASTEXITCODE -ne 0) {
             throw "Desktop direct-launch offline smoke failed with exit code $LASTEXITCODE."
         }

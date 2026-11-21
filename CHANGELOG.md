@@ -16,11 +16,14 @@
        - `patchModelDisplayNameFallback`：descriptor 与 fallbackPattern 中的 `description` 字段改为可选（兼容 `26.1111` 及更早形态）。
      - `scripts/test/current-bundle-compatibility.test.cjs`：补充 `26.1117` 三处新形态的回归测试（含无 gate-id 映射时失败关闭的用例）。
      - `scripts/test/model-availability-patches.test.cjs`：补充无 `description` 字段 + memo 化 formatter 分支的新 fixture。
-  3. **验证结果**：
+  3. **CI 重试暴露的附加问题（直连冒烟窗口）**：
+     - `26.1117` 包内 Codex CLI（`0.171.0-alpha.13`）的 `initialize` 握手现在会等待 curated 插件 `startup_sync` 回退链（git → GitHub HTTP → export archive）；在冒烟的黑洞网络下该链路约 35 秒才耗尽（CI attempt 2 实测 `state=connected` 出现在旧 30 秒窗口结束后 1–3 秒），导致未变更的就绪断言拿不到信号。
+     - 就绪判定标准保持不变（完整 `Codex CLI initialized` 握手 + 窗口就绪 + 存活到期），仅将观察窗口从 30 秒提高到 90 秒（`scripts/verify-offline-package.ps1` 与 `scripts/offline-direct-launch-smoke.mjs`），与 `offline-feature-probe` 已有的 90 秒对齐；上游没有可跳过 `startup_sync` 的开关（`plugins.startup_sync` 不是布尔配置项，而是 otel 目标名）。
+  4. **验证结果**：
      - `node --test .\scripts\test\*.test.cjs .\web-gateway\gateway\test\*.test.cjs`：284 项全部通过；
      - `npm --prefix .\web-gateway run build:gateway`：构建通过；
      - 使用当前 Store CDN 最新 MSIX（`26.1117.3838.0`）完整解包后运行 `node scripts/patch-app-asar.mjs --app-dir <app>`：复现 CI 失败，修复后全部补丁应用成功（`Patch drift summary: all patches applied or already correct`），asar 重打包与 `ChatGPT.exe` 内嵌 `ELECTRONASAR` 完整性资源重写均成功。
-  4. **未覆盖风险**：本地未执行完整离线包构建（`build-offline-package.ps1 -RequireInstaller`）与安装器验证器，完整矩阵由推送后触发的 CI 执行。
+  5. **未覆盖风险**：本地未执行完整离线包构建（`build-offline-package.ps1 -RequireInstaller`）；CI 对 `b0e9d4d` 的 attempt 2 已通过补丁阶段进入验证环节，本次推送会以加宽后的冒烟窗口重跑完整矩阵。`26.1117` 离线首次启动仍偏慢（initialize 约 35 秒），后续可考虑打包 curated 插件快照或等待上游开放 `startup_sync` 开关。
 
 ### English
 
@@ -36,11 +39,14 @@
        - `patchModelDisplayNameFallback`: the `description` field in the descriptor and fallbackPattern is now optional (compatible with `26.1111` and earlier).
      - `scripts/test/current-bundle-compatibility.test.cjs`: added `26.1117` regression tests for all three shapes, including a fail-closed case without the gate-id mapping.
      - `scripts/test/model-availability-patches.test.cjs`: added a fixture for the description-less descriptor with the memo-ized formatter branch.
-  3. **Verification**:
+  3. **Follow-up found by the CI retry (direct-launch smoke window)**:
+     - The `26.1117` bundled Codex CLI (`0.171.0-alpha.13`) now lets the `initialize` handshake wait on the curated-plugin `startup_sync` fallback chain (git → GitHub HTTP → export archive); with the smoke's blackholed network that chain only exhausts after ~35s (observed `state=connected` ~1–3s past the old 30s smoke window in CI attempt 2), so the unchanged readiness assertions never got their signal.
+     - The readiness criteria are untouched (full `Codex CLI initialized` handshake + window ready + survive-until-timeout); only the observation window was raised 30s → 90s in `scripts/verify-offline-package.ps1` and `scripts/offline-direct-launch-smoke.mjs` to cover that bounded upstream latency (`offline-feature-probe` already used 90s). No upstream knob exists to skip `startup_sync` (`plugins.startup_sync` is not a boolean config; it is an otel target name).
+  4. **Verification**:
      - `node --test .\scripts\test\*.test.cjs .\web-gateway\gateway\test\*.test.cjs`: all 284 tests passed;
      - `npm --prefix .\web-gateway run build:gateway`: build succeeded;
      - Extracted the current Store CDN MSIX (`26.1117.3838.0`) and ran `node scripts/patch-app-asar.mjs --app-dir <app>`: reproduced the CI failure, and after the fix all patches applied (`Patch drift summary: all patches applied or already correct`); asar repack and the embedded `ELECTRONASAR` integrity resource rewrite in `ChatGPT.exe` both succeeded.
-  4. **Residual risk**: the full offline package build (`build-offline-package.ps1 -RequireInstaller`) and installer verifier were not run locally; the complete matrix runs in CI after this push.
+  5. **Residual risk**: the full offline package build (`build-offline-package.ps1 -RequireInstaller`) was not run locally; CI attempt 2 on `b0e9d4d` passed the patch stage and reached verification, and this push re-runs the complete matrix with the widened smoke window. First-launch offline UX on `26.1117` remains slower (~35s initialize) until the curated-plugin snapshot is bundled or upstream makes `startup_sync` optional.
 
 
 ## 2026-11-15

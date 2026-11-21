@@ -9,7 +9,10 @@ import { execFileSync, spawn } from 'node:child_process';
 const MAIN_EXECUTABLE_NAME = 'ChatGPT.exe';
 
 const args = parseArgs(process.argv.slice(2));
-const timeoutMs = Number(args.timeoutMs ?? args['timeout-ms'] ?? 30_000);
+// 26.1117 app-server initialize awaits the curated-plugin startup_sync
+// fallback chain (~35s with the network blackholed) before logging readiness;
+// keep the default window above that bounded upstream latency.
+const timeoutMs = Number(args.timeoutMs ?? args['timeout-ms'] ?? 90_000);
 const workRoot = path.resolve(
   args.workRoot ??
     args['work-root'] ??
