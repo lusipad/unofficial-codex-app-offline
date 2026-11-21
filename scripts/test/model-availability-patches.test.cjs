@@ -154,6 +154,21 @@ test("asar model-label patch replaces Custom with the existing ID formatter", ()
         "t[3]=e):e=t[3],u=e}else u=n;return u}function y(){}",
       expected: "else if(n)u=jW(n)/*codex-offline:model-id-display-name-fallback*/",
     },
+    {
+      // 26.1117 dropped the descriptor's `description` field and memo-izes the
+      // displayName formatter branch the same way as the Custom label branch.
+      source:
+        "function u(e){let t,n,r,i,u,m=(0,a.c)(14)," +
+        "{model:p,displayName:f,labelClassName:h,serviceTierIconKind:g," +
+        "stripGptPrefix:v}=e,_=void 0===g?null:g,w=void 0!==v&&v;" +
+        "if(null!=f){let e;m[0]!==f||m[1]!==w?" +
+        "(e=(0,d.K)(f,{stripGptPrefix:w}),m[0]=f,m[1]=w,m[2]=e):e=m[2],t=e}" +
+        "else if(p){let e;m[3]===Symbol.for(`react.memo_cache_sentinel`)?" +
+        "(e=(0,o.jsx)(s.A,{id:`composer.mode.local.model.custom`," +
+        "defaultMessage:`Custom`}),m[3]=e):e=m[3],t=e}else t=p;return t}" +
+        "function y(){}",
+      expected: "else if(p)t=(0,d.K)(p)/*codex-offline:model-id-display-name-fallback*/",
+    },
   ];
 
   for (const fixture of fixtures) {

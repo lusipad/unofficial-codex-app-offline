@@ -189,7 +189,7 @@ test("26.917 Chrome native pipe patch identifies the factory but needles the tra
   // carries the connect flow. The factory is only used to learn the minified
   // names; the needle stays on the transport that browser-use discovery calls.
   const matchSource = sourceSlice(
-    "    const transportFactoryMatch =",
+    "    // 26.1117 wraps the bridge connect",
     "\n\n    if (!content.includes(helperNeedle)",
   );
   const matchTransport = Function(
@@ -215,6 +215,41 @@ test("26.917 Chrome native pipe patch identifies the factory but needles the tra
   assert.ok(result.createNeedleMatch, "the delegating transport create must be located");
   assert.equal(result.createNeedleMatch[0], create);
   assert.deepEqual(result.createNeedleMatch.slice(1), ["e", "{decodeMessage:WM}"]);
+});
+
+test("26.1117 Chrome native pipe factory wraps the bridge connect in error translation", () => {
+  // 26.1117 wraps n.createConnection in a try/catch that rethrows a
+  // `browser_connect_failed` diagnostic, stashing the socket in a temp var
+  // before `new <transport>`. The factory names must still be captured so the
+  // browser-use transport create can delegate to it off the Windows pipe.
+  const matchSource = sourceSlice(
+    "    // 26.1117 wraps the bridge connect",
+    "\n\n    if (!content.includes(helperNeedle)",
+  );
+  const matchTransport = Function(
+    "content",
+    "nativePipeSymbols",
+    "escapeRegExp",
+    `"use strict";\n${matchSource}\nreturn { transportFactoryMatch, createNeedleMatch };`,
+  );
+  const factory =
+    "async function a5(e,t,r){let n=hAe();if(n==null)throw new Error(r??fAe());" +
+    "let o;try{o=await n.createConnection(e)}catch(i){let a;" +
+    'try{a=Um(ni.currentCommandId?.())}catch{}' +
+    'throw new Wn(vr(i),{reason:"browser_connect_failed",stage:"connect",browser_command_id:a},{cause:i})}' +
+    "return new ru(o,t)}";
+  const create = "static async create(t){return await a5(t,{decodeMessage:xZ})}";
+  const result = matchTransport(
+    `var yo=class extends ru{constructor(e){super(e,{decodeMessage:xZ})}${create}};${factory}`,
+    { bridgeGetter: "hAe", unavailableMessage: "fAe" },
+    value => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
+  );
+
+  assert.ok(result.transportFactoryMatch, "the wrapped shared transport factory must be located");
+  assert.equal(result.transportFactoryMatch[1], "a5");
+  assert.equal(result.transportFactoryMatch[7] ?? result.transportFactoryMatch[6], "ru");
+  assert.ok(result.createNeedleMatch, "the delegating transport create must be located");
+  assert.equal(result.createNeedleMatch[0], create);
 });
 
 test("26.917 Chrome native pipe replacement leaves the shared factory to the auth broker", () => {
@@ -1601,6 +1636,63 @@ test("26.1027 Workspace Dependencies enables the gate layout without adjacent ga
       "s=!0/*codex-offline:workspace-dependencies-settings*/,c=je(`2106641128`),l;",
     ),
   );
+});
+
+test("26.1117 Workspace Dependencies forces the in-component gate hook call", () => {
+  // 26.1117 moved the gate evaluation into the settings panel component: the
+  // gate-id module export (this file maps it to `3026692602`) is read through
+  // a hook call `(0,<hook>)(<alias>.D)` and combined with the host afterwards.
+  const patchSource = sourceSlice(
+    "function patchWorkspaceDependenciesSettingsGate(",
+    "// end patchWorkspaceDependenciesSettingsGate",
+  );
+  const patchWorkspaceDependenciesSettingsGate = Function(
+    "escapeRegExp",
+    `"use strict";\n${patchSource}\nreturn patchWorkspaceDependenciesSettingsGate;`,
+  )((value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  const fixture =
+    'settings.agent.dependencies.enabled.description;' +
+    'eXbv(e,t,n){n.d(t,{},{D:"3026692602"})},' +
+    'uTDl(e,t,n){var S=n("eXbv"),M=n("Z0Sb");' +
+    'function eR(e){let w=(0,eP.Zj)(S.D);' +
+    't=(0,et.wi)(h,w)}}';
+
+  const result = patchWorkspaceDependenciesSettingsGate(
+    fixture,
+    "/*codex-offline:workspace-dependencies-settings*/",
+    "/*codex-offline:renderer-known-statsig-gates*/",
+  );
+  assert.equal(result.patched, true);
+  assert.ok(
+    result.content.includes(
+      "w=!0/*codex-offline:workspace-dependencies-settings*/;",
+    ),
+  );
+});
+
+test("26.1117 Workspace Dependencies stays fail-closed without the gate id mapping", () => {
+  // Without the `{D:"3026692602"}` export mapping, a bare `(0,x)(y.D)` call
+  // must not be forced on: `D` could be anything the minified module exports.
+  const patchSource = sourceSlice(
+    "function patchWorkspaceDependenciesSettingsGate(",
+    "// end patchWorkspaceDependenciesSettingsGate",
+  );
+  const patchWorkspaceDependenciesSettingsGate = Function(
+    "escapeRegExp",
+    `"use strict";\n${patchSource}\nreturn patchWorkspaceDependenciesSettingsGate;`,
+  )((value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  const fixture =
+    'settings.agent.dependencies.enabled.description;' +
+    'uTDl(e,t,n){var S=n("eXbv");' +
+    'function eR(e){let w=(0,eP.Zj)(S.D);t=(0,et.wi)(h,w)}}';
+
+  const result = patchWorkspaceDependenciesSettingsGate(
+    fixture,
+    "/*codex-offline:workspace-dependencies-settings*/",
+    "/*codex-offline:renderer-known-statsig-gates*/",
+  );
+  assert.equal(result.patched, false);
+  assert.ok(result.content.includes("(0,eP.Zj)(S.D)"));
 });
 
 test("26.727 verifier recognizes the current agent settings surface", () => {

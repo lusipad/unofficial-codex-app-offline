@@ -1,5 +1,48 @@
 # Changelog
 
+## 2026-11-21
+
+### 中文
+
+- 修复 `26.1117.3838.0` Store 包离线构建失败问题（CI Run `44798197221` / Issue #146）：
+  1. **根因**（`patch-app-asar.mjs` 在 `26.1117` bundle 上共三处 required 补丁锚点漂移）：
+     - **Chrome browser-use native pipe 直连补丁漂移（`/*codex-offline:browser-use-native-pipe-direct*/`）**：`resources/plugins/openai-bundled/plugins/chrome/scripts/browser-service.mjs` 的共享传输工厂将 `n.createConnection(e)` 包入 try/catch（失败时重抛 `browser_connect_failed` 诊断），socket 先存入临时变量再 `new <transport>(o,t)`；原 `transportFactoryMatch` 只匹配"直连 return"单一形态而失配。
+     - **Workspace Dependencies 设置 gate 漂移（`/*codex-offline:workspace-dependencies-settings*/`）**：gate 求值从模块作用域赋值（`X=ge("3026692602")`）迁移进设置面板组件的 hook 调用 `(0,<hook>)(<eXbv别名>.D)`，再经 `wi(host, gate)` 合并决定是否渲染 Workspace Dependencies 分区；两个旧正则均失配。
+     - **Custom 模型标签回退补丁漂移（`/*codex-offline:model-id-display-name-fallback*/`）**：`composer.mode.local.model.custom` 描述符删除了 `description:"Custom model from config"` 字段，导致 descriptor 锚点失配。
+  2. **修复落点**：
+     - `scripts/patch-app-asar.mjs`：
+       - `patchChromeBrowserClient`：`transportFactoryMatch` 改为共享 guard 前缀 + 双形态匹配（直连 return / try-catch 包裹后 return，catch 翻译体仅做有界扫描），transport class 按形态取第 7/第 6 捕获组；
+       - `patchWorkspaceDependenciesSettingsGate`：新增第三形态——先要求文件内存在 `{D:"3026692602"}` 导出映射（语义锚点、失败关闭），再将 `(0,*)(<eXbv别名>.D)` 的 hook 求值调用替换为 `!0/*marker*/`；下游 `wi` 对真值 gate 即开启分区，语义与旧补丁一致；
+       - `patchModelDisplayNameFallback`：descriptor 与 fallbackPattern 中的 `description` 字段改为可选（兼容 `26.1111` 及更早形态）。
+     - `scripts/test/current-bundle-compatibility.test.cjs`：补充 `26.1117` 三处新形态的回归测试（含无 gate-id 映射时失败关闭的用例）。
+     - `scripts/test/model-availability-patches.test.cjs`：补充无 `description` 字段 + memo 化 formatter 分支的新 fixture。
+  3. **验证结果**：
+     - `node --test .\scripts\test\*.test.cjs .\web-gateway\gateway\test\*.test.cjs`：284 项全部通过；
+     - `npm --prefix .\web-gateway run build:gateway`：构建通过；
+     - 使用当前 Store CDN 最新 MSIX（`26.1117.3838.0`）完整解包后运行 `node scripts/patch-app-asar.mjs --app-dir <app>`：复现 CI 失败，修复后全部补丁应用成功（`Patch drift summary: all patches applied or already correct`），asar 重打包与 `ChatGPT.exe` 内嵌 `ELECTRONASAR` 完整性资源重写均成功。
+  4. **未覆盖风险**：本地未执行完整离线包构建（`build-offline-package.ps1 -RequireInstaller`）与安装器验证器，完整矩阵由推送后触发的 CI 执行。
+
+### English
+
+- Fixed offline package build failure on Microsoft Store build `26.1117.3838.0` (CI Run `44798197221` / Issue #146):
+  1. **Root causes** (three required patch anchors drifted on the `26.1117` bundle):
+     - **Chrome browser-use native pipe direct patch drift (`/*codex-offline:browser-use-native-pipe-direct*/`)**: the shared transport factory in `resources/plugins/openai-bundled/plugins/chrome/scripts/browser-service.mjs` now wraps `n.createConnection(e)` in a try/catch that rethrows a `browser_connect_failed` diagnostic, stashing the socket in a temp var before `new <transport>(o,t)`; the single-shape `transportFactoryMatch` regex missed.
+     - **Workspace Dependencies settings gate drift (`/*codex-offline:workspace-dependencies-settings*/`)**: gate evaluation moved from a module-scope assignment (`X=ge("3026692602")`) into an in-component hook call `(0,<hook>)(<eXbvAlias>.D)`, combined with the host via `wi(host, gate)` to decide whether the Workspace Dependencies section renders; both legacy regexes missed.
+     - **Custom model-label fallback drift (`/*codex-offline:model-id-display-name-fallback*/`)**: the `composer.mode.local.model.custom` descriptor dropped its `description:"Custom model from config"` field, breaking the descriptor anchor.
+  2. **Fixes applied**:
+     - `scripts/patch-app-asar.mjs`:
+       - `patchChromeBrowserClient`: `transportFactoryMatch` now uses a shared guard prefix with two accepted shapes (direct return / try-catch-wrapped return with only a bounded scan of the minified catch body); the transport class is taken from capture group 7 or 6 depending on the shape;
+       - `patchWorkspaceDependenciesSettingsGate`: added a third shape — require the `{D:"3026692602"}` export mapping in the file first (semantic anchor, fail-closed), then force the `(0,*)(<eXbvAlias>.D)` hook evaluations to `!0/*marker*/`; downstream `wi` treats any truthy gate as enabled, matching the legacy patch semantics;
+       - `patchModelDisplayNameFallback`: the `description` field in the descriptor and fallbackPattern is now optional (compatible with `26.1111` and earlier).
+     - `scripts/test/current-bundle-compatibility.test.cjs`: added `26.1117` regression tests for all three shapes, including a fail-closed case without the gate-id mapping.
+     - `scripts/test/model-availability-patches.test.cjs`: added a fixture for the description-less descriptor with the memo-ized formatter branch.
+  3. **Verification**:
+     - `node --test .\scripts\test\*.test.cjs .\web-gateway\gateway\test\*.test.cjs`: all 284 tests passed;
+     - `npm --prefix .\web-gateway run build:gateway`: build succeeded;
+     - Extracted the current Store CDN MSIX (`26.1117.3838.0`) and ran `node scripts/patch-app-asar.mjs --app-dir <app>`: reproduced the CI failure, and after the fix all patches applied (`Patch drift summary: all patches applied or already correct`); asar repack and the embedded `ELECTRONASAR` integrity resource rewrite in `ChatGPT.exe` both succeeded.
+  4. **Residual risk**: the full offline package build (`build-offline-package.ps1 -RequireInstaller`) and installer verifier were not run locally; the complete matrix runs in CI after this push.
+
+
 ## 2026-11-15
 
 ### 中文

@@ -1021,10 +1021,47 @@ function patchWorkspaceDependenciesSettingsGate(
     currentWorkspaceGateRe,
     `$1=!0${patchMarker},`,
   );
+  if (currentNext !== content) {
+    return {
+      content: currentNext,
+      seen: true,
+      patched: true,
+      alreadyCorrect: false,
+    };
+  }
+
+  // 26.1117 evaluates the gate inside the settings panel component instead of
+  // at module scope: the gate-id module export (mapped to `3026692602`) is read
+  // through a hook call `(0,<hook>)(<eXbvAlias>.D)` and combined with the host
+  // via wi(host, gate), where any truthy gate enables the surface. Force those
+  // hook evaluations on; the module-id alias is minified, so first prove this
+  // file maps the alias's `D` export to the workspace-dependencies gate id.
+  if (!/\{D:[`"]3026692602[`"]\}/.test(content)) {
+    return {
+      content,
+      seen: true,
+      patched: false,
+      alreadyCorrect: false,
+    };
+  }
+  let hookNext = content;
+  let hookPatched = false;
+  const eXbvImportRe = /(?:var |,|let )([A-Za-z_$][\w$]*)=n\("eXbv"\)/g;
+  let eXbvImport;
+  while ((eXbvImport = eXbvImportRe.exec(content)) !== null) {
+    const gateHookCallRe = new RegExp(
+      `\\(0,[A-Za-z_$][\\w$.]*\\)\\(${escapeRegExp(eXbvImport[1])}\\.D\\)`,
+      'g',
+    );
+    if (gateHookCallRe.test(hookNext)) {
+      hookNext = hookNext.replace(gateHookCallRe, `!0${patchMarker}`);
+      hookPatched = true;
+    }
+  }
   return {
-    content: currentNext,
+    content: hookNext,
     seen: true,
-    patched: currentNext !== content,
+    patched: hookPatched,
     alreadyCorrect: false,
   };
 }
@@ -1145,8 +1182,9 @@ function patchModelDisplayNameFallback(content) {
     return { content, patched: false, alreadyCorrect: true };
   }
 
+  // 26.1117 dropped the `description` field from the Custom descriptor.
   const descriptor =
-    /id:[`"]composer\.mode\.local\.model\.custom[`"],defaultMessage:[`"]Custom[`"],description:[`"]Custom model from config[`"]\}/;
+    /id:[`"]composer\.mode\.local\.model\.custom[`"],defaultMessage:[`"]Custom[`"](?:,description:[`"]Custom model from config[`"])?\}/;
   const descriptorMatch = descriptor.exec(content);
   if (!descriptorMatch) {
     return { content, patched: false, alreadyCorrect: false };
@@ -1171,7 +1209,7 @@ function patchModelDisplayNameFallback(content) {
     )
     : null;
   const fallbackPattern =
-    /else if\(([A-Za-z_$][\w$]*)\)\{let ([A-Za-z_$][\w$]*);[\s\S]{0,500}?id:[`"]composer\.mode\.local\.model\.custom[`"],defaultMessage:[`"]Custom[`"],description:[`"]Custom model from config[`"]\}[\s\S]{0,250}?,([A-Za-z_$][\w$]*)=\2\}else \3=\1/;
+    /else if\(([A-Za-z_$][\w$]*)\)\{let ([A-Za-z_$][\w$]*);[\s\S]{0,500}?id:[`"]composer\.mode\.local\.model\.custom[`"],defaultMessage:[`"]Custom[`"](?:,description:[`"]Custom model from config[`"])?\}[\s\S]{0,250}?,([A-Za-z_$][\w$]*)=\2\}else \3=\1/;
   if (!formatterMatch || !fallbackPattern.test(functionContent)) {
     return { content, patched: false, alreadyCorrect: false };
   }
@@ -1394,14 +1432,29 @@ function patchChromeBrowserClient(filePath) {
     // browser-use transport that delegates to it: the auth-broker call sites
     // share the factory and their sockets can carry the same pipe prefix, so
     // patching the factory would divert them off the privileged bridge too.
-    const transportFactoryMatch = content.match(
-      new RegExp(
-        `async function ([A-Za-z_$][\\w$]*)\\(([A-Za-z_$][\\w$]*),([A-Za-z_$][\\w$]*),([A-Za-z_$][\\w$]*)\\)\\{` +
-        `let ([A-Za-z_$][\\w$]*)=${escapeRegExp(nativePipeSymbols.bridgeGetter)}\\(\\);` +
-        `if\\(\\5==null\\)throw new Error\\(\\4\\?\\?${escapeRegExp(nativePipeSymbols.unavailableMessage)}\\(\\)\\);` +
-        `return new ([A-Za-z_$][\\w$]*)\\(await \\5\\.createConnection\\(\\2\\),\\3\\)\\}`,
-      ),
-    );
+    // 26.1117 wraps the bridge connect in a try/catch that rethrows a
+    // `browser_connect_failed` diagnostic, stashing the socket in a temp var
+    // before `new <transport>`. Both shapes share the guard prefix; the catch
+    // translation body is minified, so it is only bounded-scanned.
+    const transportFactoryPrefix =
+      `async function ([A-Za-z_$][\\w$]*)\\(([A-Za-z_$][\\w$]*),([A-Za-z_$][\\w$]*),([A-Za-z_$][\\w$]*)\\)\\{` +
+      `let ([A-Za-z_$][\\w$]*)=${escapeRegExp(nativePipeSymbols.bridgeGetter)}\\(\\);` +
+      `if\\(\\5==null\\)throw new Error\\(\\4\\?\\?${escapeRegExp(nativePipeSymbols.unavailableMessage)}\\(\\)\\);`;
+    const transportFactoryMatch =
+      content.match(
+        new RegExp(
+          transportFactoryPrefix +
+          `return new ([A-Za-z_$][\\w$]*)\\(await \\5\\.createConnection\\(\\2\\),\\3\\)\\}`,
+        ),
+      ) ??
+      content.match(
+        new RegExp(
+          transportFactoryPrefix +
+          `let ([A-Za-z_$][\\w$]*);try\\{\\6=await \\5\\.createConnection\\(\\2\\)\\}` +
+          `catch\\([A-Za-z_$][\\w$]*\\)\\{[\\s\\S]{0,400}?\\}` +
+          `return new ([A-Za-z_$][\\w$]*)\\(\\6,\\3\\)\\}`,
+        ),
+      );
     const createNeedleMatch = transportFactoryMatch
       ? content.match(
         new RegExp(
@@ -1418,7 +1471,8 @@ function patchChromeBrowserClient(filePath) {
     }
 
     const transportFactory = transportFactoryMatch[1];
-    const transportClass = transportFactoryMatch[6];
+    // Direct connect: class at index 6; 26.1117 wrapped connect: index 7.
+    const transportClass = transportFactoryMatch[7] ?? transportFactoryMatch[6];
     const [createNeedle, pipeArg, transportOptions] = createNeedleMatch;
     const createReplacement =
       `static async create(${pipeArg}){` +
