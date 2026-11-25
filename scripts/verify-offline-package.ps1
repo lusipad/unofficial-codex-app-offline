@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [string]$BuildMetadataPath = 'build-metadata.json',
     [string]$ConfigPath = 'config/offline-package.json',
@@ -1192,46 +1192,63 @@ try {
         throw 'Bundled Chrome plugin is missing scripts\browser-client.mjs.'
     }
     Assert-NodeSyntax -Path $chromeBrowserClientPath -Context 'Bundled Chrome browser client'
+    $browserPluginServicePath = Join-Path $browserPluginRoot 'scripts\browser-service.mjs'
     $chromeBrowserServicePath = Join-Path $chromePluginRoot 'scripts\browser-service.mjs'
-    $chromeBrowserRuntimePath = if (Test-Path $chromeBrowserServicePath -PathType Leaf) {
-        Assert-NodeSyntax -Path $chromeBrowserServicePath -Context 'Bundled Chrome browser service'
-        $chromeBrowserServicePath
-    }
-    else {
-        $chromeBrowserClientPath
-    }
-    $chromeBrowserRuntimeContent = Get-Content -Path $chromeBrowserRuntimePath -Raw
-    foreach ($removedTimeoutNeedle in @(
-        '/*codex-offline:browser-use-discovery-timeout*/',
-        '/*codex-offline:browser-use-profile-metadata-timeout*/',
-        '/*codex-offline:browser-use-request-timeout*/',
-        '_codexOfflineBrowserUseDiscoveryTimeout',
-        '_codexOfflineBrowserUseRequestTimeoutMs',
-        '_codexOfflineNativePipeConnectTimeoutMs',
-        'x-codex-browser-use-request-timeout-ms',
-        'x-codex-native-pipe-connect-timeout-ms'
-    )) {
-        if ($chromeBrowserRuntimeContent.Contains($removedTimeoutNeedle)) {
-            throw "Bundled Chrome browser runtime still contains removed timeout patch marker: $removedTimeoutNeedle"
+    $bundledBrowserServicePaths = @(
+        @(
+            $browserPluginServicePath
+            $chromeBrowserServicePath
+        ) | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf }
+    )
+    [string[]]$chromeBrowserRuntimePaths = @(
+        if ($bundledBrowserServicePaths.Count -gt 0) {
+            $bundledBrowserServicePaths
         }
+        else {
+            $chromeBrowserClientPath
+        }
+    )
+    $cuaBrowserServiceCorePath = Join-Path $portableRoot '_internal\app\resources\cua_node\bin\node_modules\@oai\browser-desktop\scripts\browser-service-core.mjs'
+    if (Test-Path -LiteralPath $cuaBrowserServiceCorePath -PathType Leaf) {
+        $chromeBrowserRuntimePaths += $cuaBrowserServiceCorePath
     }
-    if (-not $chromeBrowserRuntimeContent.Contains('/*codex-offline:browser-use-native-pipe-fallback*/')) {
-        throw 'Bundled Chrome browser runtime is missing the Windows native pipe fallback patch.'
-    }
-    if (-not $chromeBrowserRuntimeContent.Contains('/*codex-offline:browser-use-native-pipe-direct*/')) {
-        throw 'Bundled Chrome browser runtime is missing the Windows native pipe direct path patch.'
-    }
-    if (-not $chromeBrowserRuntimeContent.Contains('/*codex-offline:browser-use-discovery-diagnostics*/')) {
-        throw 'Bundled Chrome browser runtime is missing the discovery diagnostics patch.'
-    }
-    if (-not $chromeBrowserRuntimeContent.Contains('/*codex-offline:browser-use-chrome-pipe-filter*/')) {
-        throw 'Bundled Chrome browser runtime is missing the Windows Chrome pipe filter patch.'
-    }
-    if (-not $chromeBrowserRuntimeContent.Contains('/*codex-offline:browser-use-direct-setup*/')) {
-        throw 'Bundled Chrome browser runtime is missing the direct Windows pipe setup patch.'
-    }
-    if (-not $chromeBrowserRuntimeContent.Contains('/*codex-offline:browser-use-disable-ambient-network-default*/')) {
-        throw 'Bundled Chrome browser runtime is missing the offline ambient network default patch.'
+    foreach ($chromeBrowserRuntimePath in $chromeBrowserRuntimePaths) {
+        if ($chromeBrowserRuntimePath -ne $chromeBrowserClientPath) {
+            Assert-NodeSyntax -Path $chromeBrowserRuntimePath -Context 'Bundled Chrome browser service'
+        }
+        $chromeBrowserRuntimeContent = Get-Content -Path $chromeBrowserRuntimePath -Raw
+        foreach ($removedTimeoutNeedle in @(
+            '/*codex-offline:browser-use-discovery-timeout*/',
+            '/*codex-offline:browser-use-profile-metadata-timeout*/',
+            '/*codex-offline:browser-use-request-timeout*/',
+            '_codexOfflineBrowserUseDiscoveryTimeout',
+            '_codexOfflineBrowserUseRequestTimeoutMs',
+            '_codexOfflineNativePipeConnectTimeoutMs',
+            'x-codex-browser-use-request-timeout-ms',
+            'x-codex-native-pipe-connect-timeout-ms'
+        )) {
+            if ($chromeBrowserRuntimeContent.Contains($removedTimeoutNeedle)) {
+                throw "Bundled Chrome browser runtime still contains removed timeout patch marker: $removedTimeoutNeedle ($chromeBrowserRuntimePath)"
+            }
+        }
+        if (-not $chromeBrowserRuntimeContent.Contains('/*codex-offline:browser-use-native-pipe-fallback*/')) {
+            throw "Bundled Chrome browser runtime is missing the Windows native pipe fallback patch ($chromeBrowserRuntimePath)."
+        }
+        if (-not $chromeBrowserRuntimeContent.Contains('/*codex-offline:browser-use-native-pipe-direct*/')) {
+            throw "Bundled Chrome browser runtime is missing the Windows native pipe direct path patch ($chromeBrowserRuntimePath)."
+        }
+        if (-not $chromeBrowserRuntimeContent.Contains('/*codex-offline:browser-use-discovery-diagnostics*/')) {
+            throw "Bundled Chrome browser runtime is missing the discovery diagnostics patch ($chromeBrowserRuntimePath)."
+        }
+        if (-not $chromeBrowserRuntimeContent.Contains('/*codex-offline:browser-use-chrome-pipe-filter*/')) {
+            throw "Bundled Chrome browser runtime is missing the Windows Chrome pipe filter patch ($chromeBrowserRuntimePath)."
+        }
+        if (-not $chromeBrowserRuntimeContent.Contains('/*codex-offline:browser-use-direct-setup*/')) {
+            throw "Bundled Chrome browser runtime is missing the direct Windows pipe setup patch ($chromeBrowserRuntimePath)."
+        }
+        if (-not $chromeBrowserRuntimeContent.Contains('/*codex-offline:browser-use-disable-ambient-network-default*/')) {
+            throw "Bundled Chrome browser runtime is missing the offline ambient network default patch ($chromeBrowserRuntimePath)."
+        }
     }
     $chromeNativeHostCheckPath = Join-Path $chromePluginRoot 'scripts\check-native-host-manifest.js'
     if (-not (Test-Path $chromeNativeHostCheckPath -PathType Leaf)) {
@@ -1240,6 +1257,13 @@ try {
     $chromeNativeHostCheckContent = Get-Content -Path $chromeNativeHostCheckPath -Raw
     if (-not $chromeNativeHostCheckContent.Contains('/*codex-offline:localized-registry-default*/')) {
         throw 'Bundled Chrome native host check is missing the localized registry parser patch.'
+    }
+    $browserNativeHostCheckPath = Join-Path $browserPluginRoot 'scripts\check-native-host-manifest.js'
+    if (Test-Path -LiteralPath $browserNativeHostCheckPath -PathType Leaf) {
+        $browserNativeHostCheckContent = Get-Content -Path $browserNativeHostCheckPath -Raw
+        if (-not $browserNativeHostCheckContent.Contains('/*codex-offline:localized-registry-default*/')) {
+            throw 'Bundled Browser native host check is missing the localized registry parser patch.'
+        }
     }
     $chromeSkillPath = Get-ChildItem -Path (Join-Path $chromePluginRoot 'skills') -Filter 'SKILL.md' -Recurse -File -ErrorAction SilentlyContinue |
         Where-Object { (Get-Content -Path $_.FullName -Raw).Contains('scripts/browser-client.mjs') } |

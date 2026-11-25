@@ -1,5 +1,49 @@
 # Changelog
 
+## 2026-11-25
+
+### 中文
+
+- 修复 `26.1120.5083.0` Store 包离线构建失败问题（CI Run `45465718175` / Issue #147）：
+  1. **根因**：
+     - 上游在 `26.1120.5083.0` 移除了冗余的 `resources/plugins/openai-bundled/plugins/chrome/scripts/browser-service.mjs`（以及同目录下的 `.wasm` 资源）；`plugins/chrome/scripts/browser-client.mjs` 仅保留通过 `globalThis.nodeRepl.rpc("browser", ...)` 调用服务的薄封装。
+     - 运行时实际加载的浏览器服务位于两处：
+       - `resources/plugins/openai-bundled/plugins/browser/scripts/browser-service.mjs`（由主进程 `early-bootstrap` 通过 `pluginName: "browser"` 注册给 `node_repl`）；
+       - `resources/cua_node/bin/node_modules/@oai/browser-desktop/scripts/browser-service-core.mjs`（由 `cua_repl` / `unified-computer-use` 通过 `@oai/browser-desktop/service` 延迟加载，包含相同的 native-pipe 与 ambient-network 实现）。
+     - `scripts/patch-app-asar.mjs`（`patchChromePluginScripts`）与 `scripts/verify-offline-package.ps1` 此前仅检查 `plugins/chrome/scripts/browser-service.mjs`；该文件移除后两处回退到薄封装 `plugins/chrome/scripts/browser-client.mjs`，导致 native-pipe 符号查找失败。
+  2. **修复落点**：
+     - `scripts/patch-app-asar.mjs`（`patchChromePluginScripts`）：优先定位并修补存在的 `plugins/browser/scripts/browser-service.mjs` 与 `plugins/chrome/scripts/browser-service.mjs`（两者均缺失时仍回退 `plugins/chrome/scripts/browser-client.mjs` 以保持 fail-closed），同时在存在 `resources/cua_node/bin/node_modules/@oai/browser-desktop/scripts/browser-service-core.mjs` 时一并修补；同步修补 `plugins/browser/scripts/check-native-host-manifest.js`（当存在时）以兼容中文 Windows `reg query` 输出；仍按 `plugins/chrome/scripts/browser-client.mjs` 计算 SHA256。
+     - `scripts/verify-offline-package.ps1`：同步扩展浏览器服务与 `check-native-host-manifest.js` 校验，对所有命中的 bundled `browser-service.mjs` 与 `cua_node/.../browser-service-core.mjs` 执行 JS 语法检查及 6 个必需标记 / 已移除超时标记校验。
+     - `scripts/test/current-bundle-compatibility.test.cjs`：新增 `26.1120` 布局（`plugins/browser/scripts/browser-service.mjs` + `cua_node/.../browser-service-core.mjs` + 缺失 bundled service 时的 fail-closed）回归测试，并更新 `verify-offline-package.ps1` 契约正则。
+     - `docs/baselines/gate-baseline.json`、`docs/baselines/offline-features.json` 与 `docs/offline-features.md`：同步至 `26.1120.5083.0`（265 个 Statsig id，二次扫描 0 new / 0 gone / 0 changed；`22/51` 设置分区离线可见，相对 `26.1117.4957.0` 无变化）。
+  3. **验证结果**：
+     - `node --test .\scripts\test\*.test.cjs .\web-gateway\gateway\test\*.test.cjs`：287 项全部通过；
+     - `npm --prefix .\web-gateway run build:gateway`：构建通过；
+     - `pwsh -NoProfile -File .\scripts\build-offline-package.ps1 -RequireInstaller`：`codex-offline-26.1120.5083.0` 完整离线包与安装器构建通过（`patch-app-asar.mjs` 全部补丁应用且零漂移）；
+     - `pwsh -NoProfile -File .\scripts\verify-offline-package.ps1 -BuildMetadataPath .\dist\offline\codex-offline-26.1120.5083.0\build-metadata.json -RequireInstallerAsset`：ASAR 与双浏览器服务运行时校验、90 秒直连离线启动冒烟（`direct-exe-survived-offline-launch`）及离线功能探针（`22/51` 设置分区可见，0 警告 0 报错）全量通过。
+  4. **未覆盖风险**：未在真实 Chrome 扩展或 `@oai/browser-desktop` 实机浏览器会话中端到端驱动浏览器工具交互；`offline-feature-probe` 仅覆盖 API Key / 未登录模式下的设置导航可见性，不覆盖 ChatGPT 登录态或设置子页内部表单交互。
+
+### English
+
+- Fixed offline package build failure on Microsoft Store build `26.1120.5083.0` (CI Run `45465718175` / Issue #147):
+  1. **Root cause**:
+     - Upstream removed the duplicate `resources/plugins/openai-bundled/plugins/chrome/scripts/browser-service.mjs` (and its `.wasm` assets) in `26.1120.5083.0`; `plugins/chrome/scripts/browser-client.mjs` is only a thin RPC facade (`globalThis.nodeRepl.rpc("browser", ...)`).
+     - The actual browser service implementations live in:
+       - `resources/plugins/openai-bundled/plugins/browser/scripts/browser-service.mjs` (registered by `early-bootstrap` via `pluginName: "browser"` for `node_repl`), and
+       - `resources/cua_node/bin/node_modules/@oai/browser-desktop/scripts/browser-service-core.mjs` (loaded by `cua_repl` / `unified-computer-use` via `@oai/browser-desktop/service`, carrying the same native-pipe and ambient-network logic).
+     - Both `scripts/patch-app-asar.mjs` (`patchChromePluginScripts`) and `scripts/verify-offline-package.ps1` only checked `plugins/chrome/scripts/browser-service.mjs`, so after its removal they fell back to the thin `plugins/chrome/scripts/browser-client.mjs` facade and failed to locate native pipe symbols.
+  2. **Fixes applied**:
+     - `scripts/patch-app-asar.mjs` (`patchChromePluginScripts`): locate and patch every present bundled `browser-service.mjs` (`plugins/browser` and `plugins/chrome`, falling back to `plugins/chrome/scripts/browser-client.mjs` only when neither exists so a missing plugin service still fails closed), plus `resources/cua_node/bin/node_modules/@oai/browser-desktop/scripts/browser-service-core.mjs` when present; also patch `plugins/browser/scripts/check-native-host-manifest.js` when present for localized Windows `reg query` output; continue hashing `plugins/chrome/scripts/browser-client.mjs`.
+     - `scripts/verify-offline-package.ps1`: extend syntax and marker verification to every present bundled `browser-service.mjs`, `cua_node/.../browser-service-core.mjs`, and `plugins/browser/scripts/check-native-host-manifest.js`.
+     - `scripts/test/current-bundle-compatibility.test.cjs`: added a `26.1120` regression test covering `plugins/browser` + `cua_node` service patching and fail-closed fallback when both bundled `browser-service.mjs` files are absent, and updated verifier assertions.
+     - `docs/baselines/gate-baseline.json`, `docs/baselines/offline-features.json`, and `docs/offline-features.md`: synced to `26.1120.5083.0` (265 Statsig ids, `0 new / 0 gone / 0 changed` on re-scan; `22/51` settings sections visible offline, unchanged from `26.1117.4957.0`).
+  3. **Verification**:
+     - `node --test .\scripts\test\*.test.cjs .\web-gateway\gateway\test\*.test.cjs`: all 287 tests passed;
+     - `npm --prefix .\web-gateway run build:gateway`: build succeeded;
+     - `pwsh -NoProfile -File .\scripts\build-offline-package.ps1 -RequireInstaller`: full offline package and installer build succeeded for `26.1120.5083.0` (`patch-app-asar.mjs` applied with zero drift);
+     - `pwsh -NoProfile -File .\scripts\verify-offline-package.ps1 -BuildMetadataPath .\dist\offline\codex-offline-26.1120.5083.0\build-metadata.json -RequireInstallerAsset`: ASAR and dual browser-service verification, 90s direct-launch offline smoke (`direct-exe-survived-offline-launch`), and offline feature probe (`22/51` visible, 0 warnings, 0 errors) all passed.
+  4. **Residual risk**: browser-tool execution was not driven end-to-end against a live Chrome extension or `@oai/browser-desktop` session; `offline-feature-probe` covers Settings navigation visibility in API-key / unauthenticated mode only, not authenticated ChatGPT mode or in-panel form interactions.
+
 ## 2026-11-21
 
 ### 中文

@@ -380,21 +380,128 @@ test("26.814 Chrome patches browser service but hashes browser client", () => {
   }
 });
 
+test("26.1120 Chrome patches shared browser plugin service and cua_node service core", () => {
+  const patchSource = sourceSlice(
+    "function patchChromePluginScripts",
+    "function patchChromeBrowserClient",
+  );
+  const browserClientTargets = [];
+  const nativeHostTargets = [];
+  const patchChromePluginScripts = Function(
+    "path",
+    "fs",
+    "crypto",
+    "failRequiredPatch",
+    "patchChromeBrowserClient",
+    "patchChromeNativeHostCheck",
+    "patchChromeSkillInstructions",
+    `${patchSource}\nreturn patchChromePluginScripts;`,
+  )(
+    path,
+    fs,
+    require("node:crypto"),
+    () => {},
+    filePath => {
+      browserClientTargets.push(filePath);
+    },
+    filePath => {
+      nativeHostTargets.push(filePath);
+    },
+    () => {},
+  );
+  const tempRoot = fs.mkdtempSync(path.join(require("node:os").tmpdir(), "codex-offline-261120-chrome-layout-"));
+  const bundledPluginsDir = path.join(
+    tempRoot,
+    "resources",
+    "plugins",
+    "openai-bundled",
+    "plugins",
+  );
+  const chromeScriptsDir = path.join(bundledPluginsDir, "chrome", "scripts");
+  const browserScriptsDir = path.join(bundledPluginsDir, "browser", "scripts");
+  const cuaScriptsDir = path.join(
+    tempRoot,
+    "resources",
+    "cua_node",
+    "bin",
+    "node_modules",
+    "@oai",
+    "browser-desktop",
+    "scripts",
+  );
+  fs.mkdirSync(chromeScriptsDir, { recursive: true });
+  fs.mkdirSync(browserScriptsDir, { recursive: true });
+  fs.mkdirSync(cuaScriptsDir, { recursive: true });
+
+  const chromeClientPath = path.join(chromeScriptsDir, "browser-client.mjs");
+  const chromeNativeHostPath = path.join(chromeScriptsDir, "check-native-host-manifest.js");
+  const browserServicePath = path.join(browserScriptsDir, "browser-service.mjs");
+  const browserNativeHostPath = path.join(browserScriptsDir, "check-native-host-manifest.js");
+  const cuaServiceCorePath = path.join(cuaScriptsDir, "browser-service-core.mjs");
+  fs.writeFileSync(chromeClientPath, "client-261120", "utf8");
+  fs.writeFileSync(chromeNativeHostPath, "chrome-host", "utf8");
+  fs.writeFileSync(browserServicePath, "browser-service", "utf8");
+  fs.writeFileSync(browserNativeHostPath, "browser-host", "utf8");
+  fs.writeFileSync(cuaServiceCorePath, "cua-service-core", "utf8");
+
+  try {
+    const clientHash = patchChromePluginScripts(tempRoot);
+    assert.equal(
+      clientHash,
+      require("node:crypto").createHash("sha256").update("client-261120").digest("hex"),
+    );
+    assert.deepEqual(browserClientTargets, [browserServicePath, cuaServiceCorePath]);
+    assert.deepEqual(nativeHostTargets, [chromeNativeHostPath, browserNativeHostPath]);
+
+    // If neither bundled plugin ships browser-service.mjs, cua_node alone must
+    // not mask the missing service: chrome/browser-client.mjs stays in targets
+    // so patchChromeBrowserClient still fails closed.
+    fs.rmSync(browserServicePath, { force: true });
+    browserClientTargets.length = 0;
+    nativeHostTargets.length = 0;
+    patchChromePluginScripts(tempRoot);
+    assert.deepEqual(browserClientTargets, [chromeClientPath, cuaServiceCorePath]);
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
 test("26.814 package verification checks browser service markers when present", () => {
+  assert.match(
+    verifierScriptSource,
+    /\$browserPluginServicePath = Join-Path \$browserPluginRoot 'scripts\\browser-service\.mjs'/,
+  );
   assert.match(
     verifierScriptSource,
     /\$chromeBrowserServicePath = Join-Path \$chromePluginRoot 'scripts\\browser-service\.mjs'/,
   );
   assert.match(
     verifierScriptSource,
-    /\$chromeBrowserRuntimePath = if \(Test-Path \$chromeBrowserServicePath -PathType Leaf\)/,
+    /\$cuaBrowserServiceCorePath = Join-Path \$portableRoot '_internal\\app\\resources\\cua_node\\bin\\node_modules\\@oai\\browser-desktop\\scripts\\browser-service-core\.mjs'/,
   );
   assert.match(
-    verifierSourceSlice(
-      "    $chromeBrowserRuntimePath = if",
-      "    $chromeNativeHostCheckPath =",
-    ),
+    verifierScriptSource,
+    /\[string\[\]\]\$chromeBrowserRuntimePaths = @\(/,
+  );
+  const runtimeVerificationSlice = verifierSourceSlice(
+    "    [string[]]$chromeBrowserRuntimePaths = @(",
+    "    $chromeNativeHostCheckPath =",
+  );
+  assert.match(
+    runtimeVerificationSlice,
+    /foreach \(\$chromeBrowserRuntimePath in \$chromeBrowserRuntimePaths\)/,
+  );
+  assert.match(
+    runtimeVerificationSlice,
     /\$chromeBrowserRuntimeContent\.Contains\('\/\*codex-offline:browser-use-native-pipe-fallback\*\/'\)/,
+  );
+  assert.match(
+    runtimeVerificationSlice,
+    /\$chromeBrowserRuntimeContent\.Contains\('\/\*codex-offline:browser-use-disable-ambient-network-default\*\/'\)/,
+  );
+  assert.match(
+    verifierScriptSource,
+    /\$browserNativeHostCheckPath = Join-Path \$browserPluginRoot 'scripts\\check-native-host-manifest\.js'/,
   );
 });
 

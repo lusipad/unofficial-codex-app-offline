@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "version": "26.1117.4957.0",
+  "version": "26.1120.5083.0",
   "mode": "api-key",
   "groups": [
     {
@@ -168,7 +168,7 @@
         {
           "slug": "storage",
           "visible": true,
-          "label": "Device storage",
+          "label": "设备存储",
           "reason": null
         },
         {

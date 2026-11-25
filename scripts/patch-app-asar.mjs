@@ -1250,14 +1250,14 @@ function patchExternalAgentConfigGateIdLiterals(content, gateIds, patchMarker) {
 }
 
 function patchChromePluginScripts(rootAppDir) {
-  const chromePluginRoot = path.join(
+  const bundledPluginsRoot = path.join(
     rootAppDir,
     'resources',
     'plugins',
     'openai-bundled',
     'plugins',
-    'chrome',
   );
+  const chromePluginRoot = path.join(bundledPluginsRoot, 'chrome');
   if (!fs.existsSync(chromePluginRoot)) {
     failRequiredPatch('Bundled Chrome plugin was not found. Chrome plugin script patches skipped.');
     return;
@@ -1268,16 +1268,50 @@ function patchChromePluginScripts(rootAppDir) {
     'scripts',
     'browser-client.mjs',
   );
-  const chromeBrowserServicePath = path.join(
-    chromePluginRoot,
+  const browserPluginRoot = path.join(bundledPluginsRoot, 'browser');
+  // 26.1120 removed the duplicate chrome/scripts/browser-service.mjs; the
+  // bundled browser service lives under plugins/browser (which early-bootstrap
+  // already registers for node_repl). Patch every present bundled plugin
+  // browser-service.mjs, and fall back to chrome/scripts/browser-client.mjs
+  // only when neither exists so a missing plugin service still fails closed.
+  const bundledBrowserServicePaths = [
+    path.join(browserPluginRoot, 'scripts', 'browser-service.mjs'),
+    path.join(chromePluginRoot, 'scripts', 'browser-service.mjs'),
+  ].filter(candidate => fs.existsSync(candidate));
+  const browserServiceTargets =
+    bundledBrowserServicePaths.length > 0
+      ? bundledBrowserServicePaths
+      : [chromeBrowserClientPath];
+  // Unified Computer Use (cua_repl) loads @oai/browser-desktop/service from
+  // cua_node, which delegates to browser-service-core.mjs with the same
+  // native-pipe and ambient-network code.
+  const cuaBrowserServiceCorePath = path.join(
+    rootAppDir,
+    'resources',
+    'cua_node',
+    'bin',
+    'node_modules',
+    '@oai',
+    'browser-desktop',
     'scripts',
-    'browser-service.mjs',
+    'browser-service-core.mjs',
   );
-  const chromeBrowserPatchPath = fs.existsSync(chromeBrowserServicePath)
-    ? chromeBrowserServicePath
-    : chromeBrowserClientPath;
-  patchChromeBrowserClient(chromeBrowserPatchPath);
+  if (fs.existsSync(cuaBrowserServiceCorePath)) {
+    browserServiceTargets.push(cuaBrowserServiceCorePath);
+  }
+  for (const targetPath of browserServiceTargets) {
+    patchChromeBrowserClient(targetPath);
+  }
+
   patchChromeNativeHostCheck(path.join(chromePluginRoot, 'scripts', 'check-native-host-manifest.js'));
+  const browserNativeHostCheckPath = path.join(
+    browserPluginRoot,
+    'scripts',
+    'check-native-host-manifest.js',
+  );
+  if (fs.existsSync(browserNativeHostCheckPath)) {
+    patchChromeNativeHostCheck(browserNativeHostCheckPath);
+  }
   patchChromeSkillInstructions(chromePluginRoot);
 
   return crypto
