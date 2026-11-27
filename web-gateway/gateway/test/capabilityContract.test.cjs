@@ -263,8 +263,18 @@ test("gate denylist never closes a gate the offline contract opens", () => {
   assert.equal(denylist.includes("1892382740"), false, "browserUseTinysky gate");
   // Inverted kill switch: opening it disables external agent import (Settings → Import).
   assert.equal(denylist.includes("2373428540"), true, "external agent import kill switch");
+  // Inverted kill switch: opening it hides the composer context-window usage ring
+  // and Settings → General → Show context usage (26.1117+).
+  assert.equal(denylist.includes("1799487541"), true, "context window usage kill switch");
   // Opening this one starts the durable host connection, which needs a ChatGPT sign-in.
   assert.equal(denylist.includes("375130565"), true);
+
+  assert.equal(
+    contractData.DESKTOP_ASAR_PATCH_MARKERS.includes(
+      "/*codex-offline:context-window-usage-default-on*/",
+    ),
+    true,
+  );
 });
 
 test("26.1013 gate review decisions are pinned", () => {
@@ -363,6 +373,7 @@ test("source data contract covers direct exe asar patch surfaces", () => {
       "/*codex-offline:locale-source-default*/",
       "/*codex-offline:stdio-write-error-guard-v2*/",
       "/*codex-offline:i18n-default-enabled*/",
+      "/*codex-offline:context-window-usage-default-on*/",
     ]
   );
 });

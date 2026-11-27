@@ -1497,6 +1497,10 @@ const RENDERER_KNOWN_STATSIG_GATES_PATCH_MARKER =
   patchMarker('/*codex-offline:renderer-known-statsig-gates*/');
 const DEFAULT_ON_GATE_ATOM_PATCH_MARKER =
   patchMarker('/*codex-offline:default-on-gate-atom*/');
+const CONTEXT_WINDOW_USAGE_DEFAULT_ON_PATCH_MARKER =
+  patchMarker('/*codex-offline:context-window-usage-default-on*/');
+const contextWindowUsageDefaultFalseRe =
+  /showContextWindowUsage:(?:\(0,[A-Za-z_$][\w$.]*\)|[A-Za-z_$][\w$.]*)\(\{[^{}]*?\bdefault:(?:!1|false)[^{}]*?\bkey:[`"']show-context-window-usage[`"'][^{}]*\}\)/;
 const UNAUTH_CAPABILITY_PATCH_MARKER =
   patchMarker('/*codex-offline:unauthenticated-capability-default-on*/');
 // A gate atom write that still stores the raw Statsig value next to the
@@ -1732,7 +1736,11 @@ const fastModeUnpatchedSurfaceRe =
 let codexMobileRemoteControlMfaEndpointSeen = false;
 let codexMobileAuthReloginPatched = false;
 let defaultOnGateAtomPatched = false;
+let defaultOnGateAtomDeniesContextUsageKillSwitch = false;
 const defaultOnGateAtomResiduals = [];
+let contextWindowUsageDefaultMainPatched = false;
+let contextWindowUsageDefaultWebviewPatched = false;
+const contextWindowUsageDefaultResiduals = [];
 let unauthCapabilityPatched = false;
 const unauthCapabilityResiduals = [];
 // A capability selector that still hides every surface while the app is
@@ -1766,6 +1774,9 @@ for (const entry of javaScriptEntries) {
   if (isWebviewAsset) {
     if (content.split(DEFAULT_ON_GATE_ATOM_PATCH_MARKER).length - 1 === 2) {
       defaultOnGateAtomPatched = true;
+    }
+    if (content.includes(DEFAULT_ON_GATE_ATOM_PATCH_MARKER) && content.includes('"1799487541"')) {
+      defaultOnGateAtomDeniesContextUsageKillSwitch = true;
     }
     if (gateAtomUnpatchedWriteRe.test(content)) {
       defaultOnGateAtomResiduals.push(entry);
@@ -1834,6 +1845,16 @@ for (const entry of javaScriptEntries) {
       ) {
         rendererKnownStatsigGateResiduals.push(`${entry}:${gateId}`);
       }
+    }
+  }
+  if (contextWindowUsageDefaultFalseRe.test(content)) {
+    contextWindowUsageDefaultResiduals.push(entry);
+  }
+  if (content.includes(CONTEXT_WINDOW_USAGE_DEFAULT_ON_PATCH_MARKER)) {
+    if (isWebviewAsset) {
+      contextWindowUsageDefaultWebviewPatched = true;
+    } else {
+      contextWindowUsageDefaultMainPatched = true;
     }
   }
   bundledBrowserPluginsPatched ||= content.includes(BUNDLED_BROWSER_PLUGINS_PATCH_MARKER);
@@ -2212,6 +2233,29 @@ if (defaultOnGateAtomResiduals.length > 0) {
   throw new Error(
     'Renderer Statsig gate atom still stores raw offline gate values in: ' +
     defaultOnGateAtomResiduals.join(', ')
+  );
+}
+if (!defaultOnGateAtomDeniesContextUsageKillSwitch) {
+  throw new Error(
+    'Renderer Statsig gate atom does not keep inverted context-usage kill switch 1799487541 closed offline.',
+  );
+}
+if (contextWindowUsageDefaultResiduals.length > 0) {
+  throw new Error(
+    'showContextWindowUsage still defaults to false in: ' +
+    contextWindowUsageDefaultResiduals.join(', '),
+  );
+}
+if (!contextWindowUsageDefaultMainPatched) {
+  reportPatchMiss(
+    CONTEXT_WINDOW_USAGE_DEFAULT_ON_PATCH_MARKER,
+    'Main-process showContextWindowUsage default-on patch marker is missing from app.asar.',
+  );
+}
+if (!contextWindowUsageDefaultWebviewPatched) {
+  reportPatchMiss(
+    CONTEXT_WINDOW_USAGE_DEFAULT_ON_PATCH_MARKER,
+    'Webview showContextWindowUsage default-on patch marker is missing from app.asar.',
   );
 }
 if (!unauthCapabilityPatched) {

@@ -113,6 +113,9 @@ const STATSIG_DEFAULT_FEATURE_OVERRIDES = Object.freeze({
 // - 2373428540: external agent import (Claude Code etc.) — checkGate seeds the atom
 //   that hides Settings → Import and short-circuits the import flows, command palette
 //   entry and onboarding import (26.1007). Found via the offline feature probe.
+// - 1799487541: composer context window usage ring — !gate("1799487541") gates
+//   the composer context-usage indicator, Settings → General → Show context usage
+//   toggle, and thread token-usage subscription (26.1117+). Opening it hides all three.
 //
 // Added by the 26.1013.3656.0 review (33 new ids scanned, docs/maintenance/gate-report.md):
 // - Account / workspace identity: 217963745 + 1696552190 seed the accountUserId /
@@ -161,7 +164,7 @@ const DESKTOP_GATE_DENYLIST = Object.freeze([
   "1439503871", "1450647191", "1453178174", "1490494395", "1498636858", "1500581060", "1524951846", "1529702798",
   "1542198993", "1546790766", "1553649031", "1557113222", "1567168325", "1571655448", "1588629910", "1594900112",
   "1605145461", "1609929612", "1611573287", "1645387566", "1648954249", "1697652030", "1715534902", "1748737189",
-  "1753656205", "1753900615", "1760150231", "1763977100", "1793241212", "1811711706", "1811798529", "1823130936",
+  "1753656205", "1753900615", "1760150231", "1763977100", "1793241212", "1799487541", "1811711706", "1811798529", "1823130936",
   "1827303475", "1833686164", "1841893773", "1848317837", "1852804523", "1857002365", "1862054621", "1868494721",
   "1873790768", "1892621033", "1895559448", "1896812223", "1911760873", "1912312436", "1929707103",
   "1932174607", "1939400492", "1946731762", "1950211113", "1950533395", "1984032627", "1991660486", "2009341345",
@@ -696,6 +699,16 @@ const DESKTOP_ASAR_PATCHES = Object.freeze([
     evidence:
       "26.903.8094.0: the settings page offers the language selector while the i18n provider defaults enable_i18n to false, so translations never load. This patch had no marker and no assertion at all until the boundary redesign.",
     reverify: "Check whether the provider still defaults enable_i18n to false.",
+  }),
+  Object.freeze({
+    marker: "/*codex-offline:context-window-usage-default-on*/",
+    kind: "patch",
+    tier: "required",
+    assert: "marker",
+    evidence:
+      "26.1120.5083.0: upstream defines showContextWindowUsage (key \"show-context-window-usage\") with default:!1 in both .vite/build (appServices.settings.readAll) and webview/assets bundles. Flipping the schema default to !0 enables the composer context ring out of the box offline while keeping Settings -> General -> Show context usage toggleable.",
+    reverify:
+      "Check whether showContextWindowUsage (key \"show-context-window-usage\") still defaults to false in .vite/build and webview/assets.",
   }),
 ]);
 

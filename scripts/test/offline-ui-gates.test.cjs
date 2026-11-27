@@ -772,3 +772,73 @@ test("installer Chinese task labels are read and emitted as explicit UTF-8", () 
   assert.match(verifyScriptSource, /\[System\.IO\.File\]::ReadAllText/);
   assert.match(verifyScriptSource, /System\.Text\.UTF8Encoding/);
 });
+
+test("showContextWindowUsage default-on patch covers main and webview shapes and fails closed", () => {
+  const functionStart = patchScriptSource.indexOf(
+    "function patchContextWindowUsageDefaultOn",
+  );
+  const functionEnd = patchScriptSource.indexOf(
+    "\n// end patchContextWindowUsageDefaultOn",
+    functionStart,
+  );
+  assert.notEqual(functionStart, -1, "context window usage helper is missing");
+  assert.notEqual(functionEnd, -1, "context window usage helper terminator is missing");
+
+  const helperSource = patchScriptSource.slice(functionStart, functionEnd);
+  const patchContextWindowUsageDefaultOn = Function(
+    "escapeRegExp",
+    `"use strict";\n${helperSource}\nreturn patchContextWindowUsageDefaultOn;`,
+  )(escapeRegExp);
+
+  const marker = "/*codex-offline:context-window-usage-default-on*/";
+  const brokenBooleanPatchRe =
+    /(?:^|[^\w$])(?!(?:return|throw|case)\b)[A-Za-z_$][\w$]*!0(?=[?),;])/;
+
+  const atShapeFixture =
+    'composerPlainTextMode:(0,l.IZ)({default:!1,key:"composerPlainTextMode"}),showContextWindowUsage:(0,l.at)({agentAccess:"read-write",default:!1,description:"Whether context window usage is shown in the composer",key:"show-context-window-usage",schema:o.uf}),showEducationalTips:(0,l.at)({default:!0,key:"show-educational-tips"})';
+  const atPatched = patchContextWindowUsageDefaultOn(atShapeFixture, marker);
+  assert.equal(atPatched.seen, true);
+  assert.equal(atPatched.patched, true);
+  assert.equal(atPatched.count, 1);
+  assert.ok(atPatched.content.includes(`default:!0${marker},description:`));
+  assert.ok(atPatched.content.includes('composerPlainTextMode:(0,l.IZ)({default:!1,key:"composerPlainTextMode"})'));
+  assert.equal(brokenBooleanPatchRe.test(atPatched.content), false);
+  assert.doesNotThrow(() => Function(`({${atPatched.content}})`));
+
+  const fnShapeFixture =
+    'showContextWindowUsage:eW({agentAccess:"read-write",default:!1,description:"Whether context window usage is shown in the composer",key:"show-context-window-usage",schema:eS})';
+  const fnPatched = patchContextWindowUsageDefaultOn(fnShapeFixture, marker);
+  assert.equal(fnPatched.seen, true);
+  assert.equal(fnPatched.patched, true);
+  assert.equal(fnPatched.count, 1);
+  assert.ok(fnPatched.content.includes(`default:!0${marker},description:`));
+  assert.equal(brokenBooleanPatchRe.test(fnPatched.content), false);
+  assert.doesNotThrow(() => Function(`({${fnPatched.content}})`));
+
+  const secondPass = patchContextWindowUsageDefaultOn(atPatched.content, marker);
+  assert.equal(secondPass.seen, true);
+  assert.equal(secondPass.patched, false);
+  assert.equal(secondPass.alreadyCorrect, true);
+  assert.equal(secondPass.content, atPatched.content);
+
+  const drifted = patchContextWindowUsageDefaultOn(
+    'showContextWindowUsage:eW({agentAccess:"read-write",default:flag,key:"show-context-window-usage"})',
+    marker,
+  );
+  assert.equal(drifted.seen, true);
+  assert.equal(drifted.patched, false);
+  assert.equal(drifted.alreadyCorrect, false);
+
+  const unrelated = patchContextWindowUsageDefaultOn("const x = 1;", marker);
+  assert.equal(unrelated.seen, false);
+  assert.equal(unrelated.patched, false);
+
+  assert.ok(contract.DESKTOP_ASAR_PATCH_MARKERS.includes(marker));
+  assert.match(patchScriptSource, /patchContextWindowUsageDefaultOn\(/);
+  assert.match(patchScriptSource, /Could not locate showContextWindowUsage setting definition in main bundles\./);
+  assert.match(patchScriptSource, /Could not locate showContextWindowUsage setting definition in webview bundles\./);
+  assert.match(
+    verifyScriptSource,
+    /patchMarker\('\/\*codex-offline:context-window-usage-default-on\*\/'\)/,
+  );
+});

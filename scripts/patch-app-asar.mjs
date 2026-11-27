@@ -61,10 +61,13 @@
  *    selector visible so users can switch back to Standard after selecting
  *    Fast.
  *
- * 35b. Show context usage status by default for offline builds
- *    The /status command toggles a local status section containing context
- *    usage.  Offline builds should expose it by default so users do not lose
- *    the conversation usage indicator.
+ * 35b. Enable Show context usage by default for offline builds
+ *    The composer context-usage ring is controlled by `showContextWindowUsage`
+ *    (key `show-context-window-usage`, which defaults to false upstream) and
+ *    the inverted Statsig kill-switch gate `1799487541` (kept false via the
+ *    shared denylist).  We flip the schema default to true in both main and
+ *    webview bundles so the indicator is enabled out of the box while
+ *    remaining toggleable in Settings -> General.
  *
  * 36. Keep bundled browser plugins in the runtime marketplace
  *    Newer builds materialize only plugins whose feature availability checks
@@ -898,6 +901,35 @@ function patchOfflineNetworkModeDefaults(
 }
 
 // end patchOfflineNetworkModeDefaults
+
+function patchContextWindowUsageDefaultOn(content, patchMarker) {
+  const surfaceRe =
+    /showContextWindowUsage:(?:\(0,[A-Za-z_$][\w$.]*\)|[A-Za-z_$][\w$.]*)\(\{[^{}]*?\bkey:[`"']show-context-window-usage[`"'][^{}]*\}\)/;
+  const defaultFalseRe =
+    /(showContextWindowUsage:(?:\(0,[A-Za-z_$][\w$.]*\)|[A-Za-z_$][\w$.]*)\(\{[^{}]*?\bdefault:)(?:!1|false)(?=[^{}]*?\bkey:[`"']show-context-window-usage[`"'][^{}]*\}\))/g;
+  const alreadyPatchedRe = new RegExp(
+    `showContextWindowUsage:(?:\\(0,[A-Za-z_$][\\w$.]*\\)|[A-Za-z_$][\\w$.]*)\\(\\{[^{}]*?\\bdefault:(?:!0|true)${escapeRegExp(patchMarker)}[^{}]*?\\bkey:[\`"']show-context-window-usage[\`"'][^{}]*\\}\\)`,
+  );
+  if (!content.includes('show-context-window-usage')) {
+    return { content, seen: false, patched: false, alreadyCorrect: false, count: 0 };
+  }
+  const seen = surfaceRe.test(content);
+  if (!seen) {
+    return { content, seen: false, patched: false, alreadyCorrect: false, count: 0 };
+  }
+  let count = 0;
+  const next = content.replace(defaultFalseRe, (_match, prefix) => {
+    count += 1;
+    return `${prefix}!0${patchMarker}`;
+  });
+  if (count > 0) {
+    return { content: next, seen: true, patched: true, alreadyCorrect: false, count };
+  }
+  const alreadyCorrect = alreadyPatchedRe.test(content);
+  return { content, seen: true, patched: false, alreadyCorrect, count: 0 };
+}
+
+// end patchContextWindowUsageDefaultOn
 
 function removeLegacyOfflinePluginQueryPatches(content) {
   let next = content;
@@ -3637,6 +3669,40 @@ try {
   //
   // The older canUseFastMode / serviceTiers shapes this patch used to also
   // handle no longer occur anywhere in 26.903.8094.0 and were removed.
+  const CONTEXT_WINDOW_USAGE_DEFAULT_ON_PATCH_MARKER =
+    contractPatchMarker('/*codex-offline:context-window-usage-default-on*/');
+  const contextWindowUsageMainPatchedFiles = [];
+  let contextWindowUsageMainSeen = false;
+  let contextWindowUsageMainAlreadyCorrect = false;
+
+  for (const filePath of mainBundleFiles) {
+    const content = fs.readFileSync(filePath, 'utf8');
+    const result = patchContextWindowUsageDefaultOn(
+      content,
+      CONTEXT_WINDOW_USAGE_DEFAULT_ON_PATCH_MARKER,
+    );
+    contextWindowUsageMainSeen ||= result.seen;
+    if (result.patched) {
+      fs.writeFileSync(filePath, result.content, 'utf8');
+      contextWindowUsageMainPatchedFiles.push(path.relative(tmpDir, filePath));
+    } else if (result.alreadyCorrect) {
+      contextWindowUsageMainAlreadyCorrect = true;
+    }
+  }
+
+  if (contextWindowUsageMainPatchedFiles.length > 0) {
+    log(
+      'showContextWindowUsage defaults enabled in main bundles: ' +
+      `${contextWindowUsageMainPatchedFiles.join(', ')}.`,
+    );
+  } else if (!contextWindowUsageMainAlreadyCorrect) {
+    failRequiredPatch(
+      contextWindowUsageMainSeen
+        ? 'Could not flip showContextWindowUsage default to true in main bundles.'
+        : 'Could not locate showContextWindowUsage setting definition in main bundles.',
+    );
+  }
+
   const FAST_MODE_AUTH_METHOD_PATCH_MARKER =
     contractPatchMarker(FAST_MODE_CONTRACT.authMethodPatchMarker);
   const WORKSPACE_DEPENDENCIES_SETTINGS_PATCH_MARKER =
@@ -3720,6 +3786,9 @@ try {
     let modelDisplayNameAlreadyCorrect = false;
     let ultraReasoningEffortSurfaceSeen = false;
     let ultraReasoningEffortAlreadyCorrect = false;
+    const contextWindowUsageWebviewPatchedFiles = [];
+    let contextWindowUsageWebviewSeen = false;
+    let contextWindowUsageWebviewAlreadyCorrect = false;
 
     for (const filePath of webviewJsFiles) {
       let content = fs.readFileSync(filePath, 'utf8');
@@ -3899,6 +3968,18 @@ try {
       } else if (content.includes(FAST_MODE_AUTH_METHOD_PATCH_MARKER)) {
         fastModeAuthPatched = true;
       }
+      const contextWindowUsagePatch = patchContextWindowUsageDefaultOn(
+        content,
+        CONTEXT_WINDOW_USAGE_DEFAULT_ON_PATCH_MARKER,
+      );
+      contextWindowUsageWebviewSeen ||= contextWindowUsagePatch.seen;
+      if (contextWindowUsagePatch.patched) {
+        content = contextWindowUsagePatch.content;
+        contextWindowUsageWebviewPatchedFiles.push(path.relative(tmpDir, filePath));
+        changed = true;
+      } else if (contextWindowUsagePatch.alreadyCorrect) {
+        contextWindowUsageWebviewAlreadyCorrect = true;
+      }
       if (changed) {
         fs.writeFileSync(filePath, content, 'utf8');
         patchedCount++;
@@ -4026,6 +4107,16 @@ try {
     } else {
       failRequiredPatch(
         'Could not locate the renderer Ultra reasoning effort model filter.',
+      );
+    }
+    if (contextWindowUsageWebviewPatchedFiles.length > 0) {
+      log('showContextWindowUsage defaults enabled in webview bundles: ' +
+        `${contextWindowUsageWebviewPatchedFiles.join(', ')}.`);
+    } else if (!contextWindowUsageWebviewAlreadyCorrect) {
+      failRequiredPatch(
+        contextWindowUsageWebviewSeen
+          ? 'Could not flip showContextWindowUsage default to true in webview bundles.'
+          : 'Could not locate showContextWindowUsage setting definition in webview bundles.',
       );
     }
   }

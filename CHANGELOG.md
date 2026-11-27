@@ -1,5 +1,45 @@
 # Changelog
 
+## 2026-11-27
+
+### 中文
+
+- 修复桌面端对话输入框底部不显示上下文用量圆圈的问题（在 `26.1120.5083.0` 定位并同步覆盖最新 Store 包 `26.1120.6357.0`）：
+  1. **根因**：
+     - 上游新增反向 Statsig 开关 `"1799487541"`：输入框上下文圆圈（`993845`）、`设置 → 通用 → 显示上下文用量` 开关（`25051`）与会话 token 用量订阅（`304470`/`308531`/`523871`）均要求 `!gate("1799487541")`。因 `"1799487541"` 未列入 `DESKTOP_GATE_DENYLIST`，离线「未知 gate 默认开启」补丁（`/*codex-offline:default-on-gate-atom*/`）将其置为 `true`，导致圆圈与设置项一起被隐藏。
+     - `showContextWindowUsage`（存储键 `show-context-window-usage`）在上游主进程（`.vite/build/*.js`，含 `appServices.settings.readAll()`）与渲染器（`webview/assets/async/*.js`）中均默认 `default:!1`（`false`）。
+  2. **修复落点**：
+     - `web-gateway/gateway/src/ipc/codex/capabilityContractData.cjs`：将 `"1799487541"` 加入 `DESKTOP_GATE_DENYLIST` 并补充反向开关注释；在 `DESKTOP_ASAR_PATCHES` 注册 `/*codex-offline:context-window-usage-default-on*/`（`kind: "patch"`, `tier: "required"`, `assert: "marker"`）。
+     - `scripts/patch-app-asar.mjs`：新增 `patchContextWindowUsageDefaultOn` 并在主进程 bundle（6 个 `.vite/build/*.js`）与渲染器 bundle（2 个 `webview/assets/async/*.js`）双侧将 `showContextWindowUsage` 的 `default:!1` 翻转为 `!0/*codex-offline:context-window-usage-default-on*/`，未知形态 fail-closed；用户后续仍可在「设置 → 通用」中手动关闭并持久化覆盖。
+     - `scripts/verify-offline-package.ps1`：校验 `OMIV` atom denylist 包含 `"1799487541"`、主进程与 webview 均命中 `/*codex-offline:context-window-usage-default-on*/`，且无残留 `default:!1` / `default:false`。
+     - `web-gateway/gateway/test/capabilityContract.test.cjs`、`scripts/test/offline-ui-gates.test.cjs`：补充 `"1799487541"` denylist 断言、已注册补丁清单断言以及 `patchContextWindowUsageDefaultOn` 多形态/幂等/fail-closed 单元测试。
+  3. **验证结果**：
+     - `node --test .\scripts\test\*.test.cjs .\web-gateway\gateway\test\*.test.cjs`：288 项全部通过；
+     - `npm --prefix .\web-gateway run build:gateway`：构建通过；
+     - `pwsh -NoProfile -File .\scripts\build-offline-package.ps1 -RequireInstaller`：`codex-offline-26.1120.6357.0` 完整离线包与安装器构建通过（`patch-app-asar.mjs` 零漂移，6 个主进程 bundle + 2 个 webview bundle 全部打上 `context-window-usage-default-on`，`app.asar` 抽检 `patchedCount: 8, residualCount: 0, omivDenied: true`）；
+     - `pwsh -NoProfile -File .\scripts\verify-offline-package.ps1 -BuildMetadataPath .\dist\offline\codex-offline-26.1120.6357.0\build-metadata.json -RequireInstallerAsset`：ASAR 校验、90 秒直连离线启动冒烟（`direct-exe-survived-offline-launch`）及离线功能探针（`22/51` 设置分区可见）全量通过；
+     - 安装包路径：`dist/offline/codex-offline-26.1120.6357.0/codex-offline-26.1120.6357.0-setup.exe`（SHA256：`27F27F32103FB07346B2043EBEC59F41616530E9BAF7D192650100C0A898D016`）。
+  4. **未覆盖风险**：离线直启冒烟与设置探针未在带 token 用量的真实交互式对话中点击「设置 → 通用 → 显示上下文用量」开关并观察对话圆圈显隐；`gate-report.mjs` 的 `CALL_SITE_RE` 对 webpack 形态的 `e(m.JW,"...")` / `(0,tD.Zj)("...")` 仍有漏扫，需另案增强（本次保持改动最小，未调整基线扫描器）。
+
+### English
+
+- Fixed missing composer context-window usage ring in Desktop builds (diagnosed on `26.1120.5083.0` and built/verified on latest Store payload `26.1120.6357.0`):
+  1. **Root cause**:
+     - Upstream introduced an inverted Statsig kill-switch gate `"1799487541"`: the composer context ring (`993845`), Settings → General → Show context usage toggle (`25051`), and thread token-usage subscription (`304470`/`308531`/`523871`) all require `!gate("1799487541")`. Because `"1799487541"` was missing from `DESKTOP_GATE_DENYLIST`, `/*codex-offline:default-on-gate-atom*/` defaulted it to `true` offline, hiding both the ring and the Settings toggle.
+     - Upstream also defines `showContextWindowUsage` (`key: "show-context-window-usage"`) with `default: !1` in both main-process (`.vite/build/*.js`, backing `appServices.settings.readAll()`) and renderer (`webview/assets/async/*.js`) bundles.
+  2. **Fixes applied**:
+     - `web-gateway/gateway/src/ipc/codex/capabilityContractData.cjs`: added `"1799487541"` to `DESKTOP_GATE_DENYLIST` and registered `/*codex-offline:context-window-usage-default-on*/` (`kind: "patch"`, `tier: "required"`, `assert: "marker"`) in `DESKTOP_ASAR_PATCHES`.
+     - `scripts/patch-app-asar.mjs`: added `patchContextWindowUsageDefaultOn` and applied it to both `mainBundleFiles` (6 `.vite/build/*.js` files) and `webviewJsFiles` (2 `webview/assets/async/*.js` files), flipping `default:!1` to `!0/*codex-offline:context-window-usage-default-on*/` while keeping the setting toggleable in Settings → General and failing closed on drift.
+     - `scripts/verify-offline-package.ps1`: verified `"1799487541"` in the patched `OMIV` denylist, `/*codex-offline:context-window-usage-default-on*/` in both main and webview bundles, and zero `default:!1`/`default:false` residuals.
+     - `web-gateway/gateway/test/capabilityContract.test.cjs`, `scripts/test/offline-ui-gates.test.cjs`: added denylist, contract-list, and unit tests for `patchContextWindowUsageDefaultOn`.
+  3. **Verification**:
+     - `node --test .\scripts\test\*.test.cjs .\web-gateway\gateway\test\*.test.cjs`: all 288 tests passed;
+     - `npm --prefix .\web-gateway run build:gateway`: build succeeded;
+     - `pwsh -NoProfile -File .\scripts\build-offline-package.ps1 -RequireInstaller`: built `codex-offline-26.1120.6357.0` with zero patch drift (`patchedCount: 8, residualCount: 0, omivDenied: true` verified in `app.asar`);
+     - `pwsh -NoProfile -File .\scripts\verify-offline-package.ps1 -BuildMetadataPath .\dist\offline\codex-offline-26.1120.6357.0\build-metadata.json -RequireInstallerAsset`: ASAR checks, 90s direct-launch smoke (`direct-exe-survived-offline-launch`), and offline feature probe (`22/51` visible) all passed;
+     - Installer: `dist/offline/codex-offline-26.1120.6357.0/codex-offline-26.1120.6357.0-setup.exe` (SHA256: `27F27F32103FB07346B2043EBEC59F41616530E9BAF7D192650100C0A898D016`).
+  4. **Residual risk**: direct-launch smoke and the settings probe do not drive a multi-turn conversation with live token usage or toggle `Show context usage` in the Settings UI; `gate-report.mjs`'s `CALL_SITE_RE` still does not parse webpack `e(m.JW,"...")` / `(0,tD.Zj)("...")` call sites (kept out of scope for minimal diff).
+
 ## 2026-11-25
 
 ### 中文
