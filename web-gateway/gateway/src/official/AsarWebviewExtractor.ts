@@ -3,7 +3,7 @@ export {};
 
 const path = require("path");
 
-/** 校验 asar entry 解压目标，只允许写入目标 webview 目录内部。 */
+/** 校验 asar entry 解压目标，只允许写入目标 webview 或 host 目录内部。 */
 class WebviewExtractionPathGuard {
   resolve(webviewDestDir: string, relativeEntryPath: string): string {
     if (this.isUnsafeRelativePath(relativeEntryPath)) {
@@ -27,7 +27,7 @@ class WebviewExtractionPathGuard {
   }
 }
 
-/** 只从 app.asar 中解压官方渲染器的 webview 资源，其他入口全部忽略。 */
+/** 从 app.asar 解压官方渲染器 webview 资源；26.1120 起同步按需提取 app-server-host*.js。 */
 class AsarWebviewExtractor {
   constructor({
     archive,
@@ -69,6 +69,35 @@ class AsarWebviewExtractor {
       throw new Error(`从 ${asarPath} 解压出的 Codex webview 缺少 index.html`);
     }
     return { fileCount, byteCount };
+  }
+
+  /** 提取 .vite/build/app-server-host.js 及其分块（排除 .owl-cjs-cache）到 hostDestDir。 */
+  extractHost(asarPath: string, hostDestDir: string): { present: boolean; fileCount: number; byteCount: number } {
+    const entries = this.archive.listPackage(asarPath);
+    let hasMainHost = false;
+    let fileCount = 0;
+    let byteCount = 0;
+
+    for (const rawEntry of entries) {
+      const archiveEntry = this.stripArchiveRoot(rawEntry);
+      const entry = this.normalizeArchiveEntry(archiveEntry);
+      if (!entry.startsWith(".vite/build/")) continue;
+      const rel = entry.slice(".vite/build/".length);
+      if (!rel || rel.includes("/")) continue;
+      if (!/^app-server-host(?:-[^/]+)?\.js$/.test(rel)) continue;
+
+      const stat = this.archive.statFile(asarPath, archiveEntry);
+      if (stat && stat.files) continue;
+
+      const data = this.archive.extractFile(asarPath, archiveEntry);
+      const dest = this.pathGuard.resolve(hostDestDir, rel);
+      this.fileSystem.writeFile(dest, data);
+      if (rel === "app-server-host.js") hasMainHost = true;
+      fileCount += 1;
+      byteCount += data.length;
+    }
+
+    return { present: hasMainHost, fileCount, byteCount };
   }
 
   private normalizeArchiveEntry(rawEntry: unknown): string {

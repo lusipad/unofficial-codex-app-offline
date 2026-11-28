@@ -106,11 +106,6 @@ function Assert-CapabilityContractDefaults {
         }
     }
 
-    $pluginsPageGate = $Contract.statsigDefaultFeatureOverrides.PSObject.Properties['3413548395']
-    if ($null -eq $pluginsPageGate -or $pluginsPageGate.Value -ne $false) {
-        throw "$Context capability contract does not select the unified plugins page"
-    }
-
     foreach ($needle in @($Contract.requiredDesktopFeatureMarkers | Where-Object { $_ -ne 'setDesktopFeatureValues' })) {
         $featureProperty = $Contract.defaultDesktopFeatureState.PSObject.Properties[[string]$needle]
         if ($null -eq $featureProperty -or $featureProperty.Value -ne $true) {
@@ -743,7 +738,7 @@ try {
 
     $webGatewayAssetPatchesPath = Join-Path $portableRoot '_internal\web\gateway\dist\official\assetPatches.js'
     $webGatewayAssetPatchesContent = Get-Content -Path $webGatewayAssetPatchesPath -Raw
-    foreach ($needle in @('"codex-web-patch=" + crypto.createHash("sha256").update(fs.readFileSync(__filename))', '.includes("{type:`connect-app-host`")')) {
+    foreach ($needle in @('"codex-web-patch=" + crypto.createHash("sha256").update(fs.readFileSync(__filename))', '.includes("connect-app-host")')) {
         if (-not $webGatewayAssetPatchesContent.Contains($needle)) {
             throw "Web gateway asset patches are missing expected marker: $needle"
         }
@@ -894,7 +889,7 @@ try {
 
         $webZipAssetPatchesPath = Join-Path $webRoot 'gateway\dist\official\assetPatches.js'
         $webZipAssetPatchesContent = Get-Content -Path $webZipAssetPatchesPath -Raw
-        foreach ($needle in @('"codex-web-patch=" + crypto.createHash("sha256").update(fs.readFileSync(__filename))', '.includes("{type:`connect-app-host`")')) {
+        foreach ($needle in @('"codex-web-patch=" + crypto.createHash("sha256").update(fs.readFileSync(__filename))', '.includes("connect-app-host")')) {
             if (-not $webZipAssetPatchesContent.Contains($needle)) {
                 throw "Web zip gateway asset patches are missing expected marker: $needle"
             }

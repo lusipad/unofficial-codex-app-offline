@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "version": "26.1120.5083.0",
+  "version": "26.1120.6357.0",
   "mode": "api-key",
   "groups": [
     {
@@ -151,7 +151,7 @@
           "slug": "data-controls",
           "visible": false,
           "label": "数据管理",
-          "reason": "需要登录 ChatGPT 账号；本地归档会话在「Archived chats」中管理"
+          "reason": "需要登录 ChatGPT 账号；本地归档会话在「已归档的聊天」中管理"
         },
         {
           "slug": "archived-chats",

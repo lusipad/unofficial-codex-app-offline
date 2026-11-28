@@ -10,6 +10,8 @@
   const AUTH_TOKEN_STORAGE_KEY = "codex_web_auth_token";
   const AUTH_EXPIRES_STORAGE_KEY = "codex_web_auth_expires_at";
   const CODEX_WEB_SETTINGS_STORAGE_KEY = "codex_web_settings_v1";
+  let sawPersistedAtomSyncRequest = false;
+  let hasReceivedPersistedAtomSync = false;
   const CODEX_WEB_DEFAULT_SETTINGS = {
     mobileKeyboardOptimization: true,
     mobileSidebarAutoCollapse: true,
@@ -277,32 +279,20 @@
       ? capabilityConfig.statsigDefaultFeaturesConfig
       : "statsig_default_enable_features";
   const FALLBACK_STATSIG_DEFAULT_FEATURE_OVERRIDES = {
-    "4166894088": true,
     guardian_approval: true,
     fast_mode: true,
     "410262010": true,
     "410065390": true,
-    "4250630194": true,
-    "2679188970": true,
-    "1060282072": true,
     "1506311413": true,
     "2171042036": true,
-    "3903563814": true,
-    "3032432888": true,
     browserPane: true,
     inAppBrowserUse: true,
     inAppBrowserUseAllowed: true,
     externalBrowserUse: true,
     externalBrowserUseAllowed: true,
     computerUse: true,
-    computerUseNodeRepl: true,
     control: true,
     avatarOverlay: true,
-    "3903742690": true,
-    "3326157269": true,
-    "2900529421": true,
-    "2711149772": true,
-    "816842483": true,
     artifacts: true,
   };
   const configuredStatsigOverrides =
@@ -760,14 +750,14 @@
         if (!data.response && payload.response) {
           data.response = payload.response;
         }
-        w.dispatchEvent(new MessageEvent("message", { data }));
+        w.dispatchEvent(new MessageEvent("message", { data, origin: w.location.origin, source: w }));
         return;
       }
       const data =
         payload && typeof payload === "object"
           ? { type: channel, ...payload }
           : { type: channel, payload };
-      w.dispatchEvent(new MessageEvent("message", { data }));
+      w.dispatchEvent(new MessageEvent("message", { data, origin: w.location.origin, source: w }));
     } catch (error) {
       console.warn("[codex-web] failed to emit window message", channel, error);
     }
@@ -1381,10 +1371,52 @@
     node.querySelectorAll("img[src^='app://fs/']").forEach((element) => rewriteAppFsImageElement(element));
   }
 
-  /** 安装 MutationObserver，只处理新增图片节点和 src 更新，避免启动时全量扫描 DOM。 */
+  /** 安装同步 property/setAttribute 拦截与 MutationObserver fallback，在发起请求前改写 app://fs/ 图片 URL。 */
   function installAppFsImageRewrite() {
     if (!document || document.__codexAppFsImageRewriteInstalled) return;
     document.__codexAppFsImageRewriteInstalled = true;
+
+    if (typeof Element === "function" && typeof Element.prototype.setAttribute === "function") {
+      const origSetAttribute = Element.prototype.setAttribute;
+      Element.prototype.setAttribute = function patchedSetAttribute(name, value) {
+        if (
+          this &&
+          String(this.tagName || "").toLowerCase() === "img" &&
+          String(name || "").toLowerCase() === "src" &&
+          typeof value === "string" &&
+          value.startsWith("app://fs/")
+        ) {
+          const rewritten = appFsUrlToGatewayUrl(value);
+          if (rewritten) {
+            origSetAttribute.call(this, "data-codex-web-app-fs-src", value);
+            return origSetAttribute.call(this, name, rewritten);
+          }
+        }
+        return origSetAttribute.call(this, name, value);
+      };
+    }
+
+    if (typeof HTMLImageElement === "function") {
+      const srcDesc = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, "src");
+      if (srcDesc && typeof srcDesc.set === "function") {
+        Object.defineProperty(HTMLImageElement.prototype, "src", {
+          configurable: true,
+          enumerable: srcDesc.enumerable,
+          get: srcDesc.get,
+          set(value) {
+            if (typeof value === "string" && value.startsWith("app://fs/")) {
+              const rewritten = appFsUrlToGatewayUrl(value);
+              if (rewritten) {
+                this.setAttribute("data-codex-web-app-fs-src", value);
+                return srcDesc.set.call(this, rewritten);
+              }
+            }
+            return srcDesc.set.call(this, value);
+          },
+        });
+      }
+    }
+
     const start = () => {
       const observer = new MutationObserver((mutations) => {
         for (const mutation of mutations) {
@@ -1540,6 +1572,9 @@
           const value = setSharedObjectSnapshotValue(payload.key, payload.value);
           dispatch("shared-object-updated", { ...payload, value });
         }
+        if (payload && typeof payload === "object" && payload.type === "persisted-atom-sync-request") {
+          sawPersistedAtomSyncRequest = true;
+        }
         if (payload && typeof payload === "object" && payload.type === "shared-object-subscribe" && payload.key) {
           emitSharedObjectSnapshotValue(payload.key);
         }
@@ -1610,6 +1645,7 @@
   w.process = w.process || {
     env: {},
     platform: "browser",
+    type: "renderer",
     versions: {
       electron: "0.0.0-web-poc",
       node: "0.0.0-web-poc",
@@ -1675,6 +1711,7 @@
         return { platform: () => "browser", homedir: () => homeDir };
       }
       if (name === "process") return w.process;
+      if (name === "@emotion/is-prop-valid") return {};
       console.warn("[codex-web] unhandled require:", name);
       return {};
     };
@@ -1684,10 +1721,547 @@
   attachBridge(w.electronAPI);
   attachBridge(w.electronBridge);
   // gateway 的 mock app services 以 httpFetch 暴露给 26.924+ renderer。
+  // gateway 的 mock app services 以 httpFetch 暴露给 26.924+ renderer。
   w.__codexWebHttpFetch = createCodexWebHttpFetch({
     send: (message) => w.electronBridge.sendMessageFromView(message),
     subscribe,
   });
+
+  /** 26.1120+ Cap'n Web structuredClonable <-> JSON 无损编解码器及 AppServerManager WS 端口桥。 */
+  const CAPNWEB_SENTINEL = "$cw";
+  const CAPNWEB_TYPED_ARRAYS = {
+    Int8Array: w.Int8Array,
+    Uint8Array: w.Uint8Array,
+    Uint8ClampedArray: w.Uint8ClampedArray,
+    Int16Array: w.Int16Array,
+    Uint16Array: w.Uint16Array,
+    Int32Array: w.Int32Array,
+    Uint32Array: w.Uint32Array,
+    Float32Array: w.Float32Array,
+    Float64Array: w.Float64Array,
+    BigInt64Array: w.BigInt64Array,
+    BigUint64Array: w.BigUint64Array,
+    DataView: w.DataView,
+  };
+
+  function bytesToBase64(bytes) {
+    let bin = "";
+    const chunkSize = 0x8000;
+    for (let i = 0; i < bytes.length; i += chunkSize) {
+      bin += String.fromCharCode.apply(null, bytes.subarray(i, i + chunkSize));
+    }
+    return btoa(bin);
+  }
+
+  function base64ToBytes(b64) {
+    const bin = atob(String(b64 || ""));
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i += 1) {
+      bytes[i] = bin.charCodeAt(i);
+    }
+    return bytes;
+  }
+
+  function encodeCapnwebFrame(value) {
+    if (value === undefined) return { [CAPNWEB_SENTINEL]: "undef" };
+    if (value === null || typeof value === "boolean" || typeof value === "string") return value;
+    if (typeof value === "number") {
+      if (Number.isNaN(value)) return { [CAPNWEB_SENTINEL]: "nan" };
+      if (value === Infinity) return { [CAPNWEB_SENTINEL]: "inf" };
+      if (value === -Infinity) return { [CAPNWEB_SENTINEL]: "-inf" };
+      return value;
+    }
+    if (typeof value === "bigint") return { [CAPNWEB_SENTINEL]: "bigint", v: value.toString() };
+    if (value instanceof Date) {
+      const time = value.getTime();
+      return { [CAPNWEB_SENTINEL]: "date", v: Number.isNaN(time) ? null : time };
+    }
+    if (value instanceof ArrayBuffer) {
+      return { [CAPNWEB_SENTINEL]: "bytes", v: bytesToBase64(new Uint8Array(value)), t: "ArrayBuffer" };
+    }
+    if (ArrayBuffer.isView(value)) {
+      const bytes = new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+      const name = value.constructor && value.constructor.name ? value.constructor.name : "Uint8Array";
+      return name === "Uint8Array"
+        ? { [CAPNWEB_SENTINEL]: "bytes", v: bytesToBase64(bytes) }
+        : { [CAPNWEB_SENTINEL]: "bytes", v: bytesToBase64(bytes), t: name };
+    }
+    if (Array.isArray(value)) return value.map(encodeCapnwebFrame);
+    if (typeof value === "object") {
+      if (Object.prototype.hasOwnProperty.call(value, CAPNWEB_SENTINEL)) {
+        return {
+          [CAPNWEB_SENTINEL]: "obj",
+          v: Object.entries(value).map(([k, v]) => [k, encodeCapnwebFrame(v)]),
+        };
+      }
+      const out = {};
+      for (const [k, v] of Object.entries(value)) {
+        out[k] = encodeCapnwebFrame(v);
+      }
+      return out;
+    }
+    return null;
+  }
+
+  function decodeCapnwebFrame(value) {
+    if (value === null || typeof value !== "object") return value;
+    if (Array.isArray(value)) return value.map(decodeCapnwebFrame);
+    if (Object.prototype.hasOwnProperty.call(value, CAPNWEB_SENTINEL)) {
+      switch (value[CAPNWEB_SENTINEL]) {
+        case "undef":
+          return undefined;
+        case "nan":
+          return Number.NaN;
+        case "inf":
+          return Infinity;
+        case "-inf":
+          return -Infinity;
+        case "bigint":
+          return BigInt(value.v);
+        case "date":
+          return value.v === null ? new Date(Number.NaN) : new Date(value.v);
+        case "bytes": {
+          const bytes = base64ToBytes(value.v);
+          const ab = bytes.buffer;
+          if (!value.t || value.t === "Uint8Array") return bytes;
+          if (value.t === "ArrayBuffer") return ab;
+          const Ctor = CAPNWEB_TYPED_ARRAYS[value.t];
+          return Ctor ? new Ctor(ab) : bytes;
+        }
+        case "obj": {
+          const restored = {};
+          if (Array.isArray(value.v)) {
+            for (const [k, v] of value.v) restored[k] = decodeCapnwebFrame(v);
+          }
+          return restored;
+        }
+        default:
+          break;
+      }
+    }
+    const out = {};
+    for (const [k, v] of Object.entries(value)) {
+      out[k] = decodeCapnwebFrame(v);
+    }
+    return out;
+  }
+
+  function gatewayAppServerManagerWsUrl(hostId, generation) {
+    const base = cfg.gatewayWsUrl || location.origin.replace(/^http/, "ws") + "/ws";
+    const url = new URL(base, location.href);
+    url.pathname = "/ws/app-server-manager";
+    url.searchParams.set("hostId", String(hostId || "local"));
+    url.searchParams.set("generation", String(generation || "1"));
+    const token = gatewayAuthToken();
+    if (token) url.searchParams.set("token", token);
+    return url.href;
+  }
+
+  w.addEventListener("message", (event) => {
+    const data = event && event.data;
+    if (!data || typeof data !== "object" || data.type !== "codex_desktop:connect-app-server-manager") return;
+    const port = event.ports && event.ports[0];
+    if (!port) return;
+    let socket = null;
+    let open = false;
+    let closed = false;
+    const pendingOut = [];
+
+    const closeBoth = () => {
+      if (closed) return;
+      closed = true;
+      pendingOut.length = 0;
+      try {
+        port.postMessage(null);
+      } catch {}
+      try {
+        port.close();
+      } catch {}
+      try {
+        if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) {
+          socket.close();
+        }
+      } catch {}
+    };
+
+    try {
+      socket = new WebSocket(gatewayAppServerManagerWsUrl(data.hostId, data.generation));
+    } catch {
+      closeBoth();
+      return;
+    }
+
+    port.onmessage = (portEv) => {
+      if (closed) return;
+      if (portEv.data === null) {
+        closeBoth();
+        return;
+      }
+      const wire = JSON.stringify(encodeCapnwebFrame(portEv.data));
+      if (open && socket && socket.readyState === WebSocket.OPEN) {
+        socket.send(wire);
+      } else {
+        pendingOut.push(wire);
+      }
+    };
+    if (typeof port.start === "function") port.start();
+
+    socket.addEventListener("open", () => {
+      if (closed) return;
+      open = true;
+      while (pendingOut.length > 0 && socket.readyState === WebSocket.OPEN) {
+        socket.send(pendingOut.shift());
+      }
+    });
+    socket.addEventListener("message", (wsEv) => {
+      if (closed) return;
+      try {
+        const frame = JSON.parse(wsEv.data);
+        port.postMessage(decodeCapnwebFrame(frame));
+      } catch {}
+    });
+    socket.addEventListener("close", closeBoth);
+    socket.addEventListener("error", closeBoth);
+  });
+
+  function makeRpcLease(onDispose) {
+    let disposed = false;
+    const dispose = () => {
+      if (disposed) return;
+      disposed = true;
+      if (typeof onDispose === "function") {
+        try {
+          onDispose();
+        } catch {}
+      }
+    };
+    const lease = {
+      onRpcBroken: () => {},
+      dup: () => lease,
+      [Symbol.dispose]: dispose,
+      dispose,
+      unsubscribe: dispose,
+    };
+    return lease;
+  }
+
+  function makeRpcLeasePromise(value, onDispose) {
+    const resolvedValue = value === undefined ? makeRpcLease(onDispose) : value;
+    const p = Promise.resolve(resolvedValue);
+    const wrapper = {
+      then: (onFulfilled, onRejected) => p.then(onFulfilled, onRejected),
+      catch: (onRejected) => p.catch(onRejected),
+      finally: (onFinally) => p.finally(onFinally),
+      onRpcBroken: () => {},
+      dup: () => wrapper,
+      [Symbol.dispose]: () => {
+        if (typeof onDispose === "function") onDispose();
+      },
+      unsubscribe: () => {
+        if (typeof onDispose === "function") onDispose();
+      },
+    };
+    return wrapper;
+  }
+
+  function makeRpcSubscriptionPromise(onDispose) {
+    const lease = makeRpcLease(onDispose);
+    return makeRpcLeasePromise(lease, lease.dispose);
+  }
+
+  const webRpcRequestIds = new Set();
+
+  function sendMcpGatewayRequest(method, params) {
+    const requestId = w.crypto?.randomUUID?.() || `web-rpc-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    webRpcRequestIds.add(String(requestId));
+    const p = new Promise((resolve, reject) => {
+      let unsub = null;
+      const cleanup = () => {
+        w.clearTimeout(timer);
+        if (unsub) {
+          unsub();
+          unsub = null;
+        }
+        webRpcRequestIds.delete(String(requestId));
+      };
+      const timer = w.setTimeout(() => {
+        cleanup();
+        reject(new Error(`Web gateway MCP request timed out: ${method}`));
+      }, 30000);
+      unsub = subscribe("mcp-response", (msg) => {
+        const message = msg && (msg.message || msg);
+        if (!message || String(message.id) !== String(requestId)) return;
+        cleanup();
+        if (message.error) reject(new Error(message.error.message || JSON.stringify(message.error)));
+        else resolve(message.result);
+      });
+      w.electronBridge
+        .sendMessageFromView({
+          type: "mcp-request",
+          hostId: "local",
+          request: { id: requestId, method, params },
+        })
+        .catch((error) => {
+          cleanup();
+          reject(error);
+        });
+    });
+    p.onRpcBroken = () => {};
+    p.dup = () => p;
+    p[Symbol.dispose] = () => {};
+    return p;
+  }
+
+  function makeAppServerManagersService() {
+    const managerStub = {
+      dup: () => managerStub,
+      onRpcBroken: () => {},
+      [Symbol.dispose]: () => {},
+    };
+    const openState = (hostId) =>
+      !hostId || hostId === "local"
+        ? { status: "ready", directPortGeneration: "1", manager: managerStub }
+        : { status: "disconnected" };
+
+    const accountService = {
+      getAccount: () => sendMcpGatewayRequest("account/read", { refreshToken: false }),
+      getAuthMethod: () =>
+        sendMcpGatewayRequest("getAuthStatus", { includeToken: false, refreshToken: false }).then(
+          (res) => (res && res.authMethod) || null
+        ),
+      createCustomGateway: ({ name, baseUrl, envKey }) =>
+        sendMcpGatewayRequest("modelProvider/config/write", {
+          settings: { type: "customGateway", name, baseUrl, envKey },
+        }),
+      setDefaultModelProvider: (providerId, cfgMeta) =>
+        sendMcpGatewayRequest("config/value/write", {
+          keyPath: "model_provider",
+          value: providerId,
+          mergeStrategy: "replace",
+          filePath: cfgMeta && cfgMeta.filePath,
+          expectedVersion: cfgMeta && cfgMeta.expectedVersion,
+        }),
+      loginWithApiKey: (apiKey) =>
+        sendMcpGatewayRequest("account/login/start", { type: "apiKey", apiKey }),
+      logout: () => sendMcpGatewayRequest("account/logout", undefined),
+      createChatGptLoginSession: () => Promise.reject(new Error("ChatGPT login is disabled in offline web mode")),
+      createChatGptDeviceCodeLoginSession: () => Promise.reject(new Error("Device login is disabled in offline web mode")),
+      createGatewayOAuthLoginSession: () => Promise.reject(new Error("OAuth login is disabled in offline web mode")),
+      subscribeAuthStatus: (cb) => {
+        let active = true;
+        const off = w.electronBridge.addAuthStatusCallback((status) => {
+          if (active && typeof cb === "function") cb(status);
+        });
+        return makeRpcSubscriptionPromise(() => {
+          active = false;
+          off && off();
+        });
+      },
+      readConfigValues: (params) =>
+        sendMcpGatewayRequest("config/read", params).then((res) => (res && res.config) || res || {}),
+      sendRequest: (method, params) => sendMcpGatewayRequest(method, params),
+      onRpcBroken: () => {},
+      dup: () => accountService,
+      [Symbol.dispose]: () => {},
+    };
+
+    const service = {
+      open: openState,
+      subscribe: (hostId, cb) => {
+        let active = true;
+        queueMicrotask(() => {
+          if (active && typeof cb === "function") cb(openState(hostId));
+        });
+        return makeRpcSubscriptionPromise(() => {
+          active = false;
+        });
+      },
+      openAccount: () => accountService,
+      onRpcBroken: () => {},
+      dup: () => service,
+      [Symbol.dispose]: () => {},
+    };
+    return service;
+  }
+
+  w.__codexWebAppServices = {
+    httpFetch: w.__codexWebHttpFetch,
+    appServerManagers: makeAppServerManagersService(),
+    windowAppServerEvents: "all",
+    accountInfo: {
+      readAccountInfo: () =>
+        invoke("account-info").then((info) => {
+          const data = info && typeof info === "object" ? info : {};
+          const accountId = data.accountId || null;
+          const userId = data.userId || null;
+          return {
+            status: "ready",
+            data: {
+              accountId,
+              userId,
+              authenticatedUserId: data.authenticatedUserId || userId,
+              plan: data.plan || null,
+              email: data.email || null,
+              hasChatGptToken:
+                typeof data.hasChatGptToken === "boolean"
+                  ? data.hasChatGptToken
+                  : Boolean(accountId || userId),
+            },
+          };
+        }),
+    },
+    applicationState: {
+      read: (key) => invoke("get-global-state", { key }).catch(() => ({ value: null })),
+      write: (key, value) => invoke("set-global-state", { key, value }).catch(() => ({ success: false })),
+    },
+    threadProjectAssignments: {
+      readMemberships: () =>
+        Promise.all([
+          invoke("get-global-state", { key: "thread-project-assignments" }).catch(() => ({ value: {} })),
+          invoke("get-global-state", { key: "projectless-thread-ids" }).catch(() => ({ value: [] })),
+        ]).then(([a, p]) => ({
+          assignments: a && a.value && typeof a.value === "object" && !Array.isArray(a.value) ? a.value : {},
+          projectlessThreadIds: Array.isArray(p && p.value) ? p.value : [],
+        })),
+      setAssignment: (req) => {
+        if (!req || !req.threadId) return Promise.resolve();
+        return invoke("get-global-state", { key: "thread-project-assignments" })
+          .then((r) => {
+            const map = r && r.value && typeof r.value === "object" && !Array.isArray(r.value) ? { ...r.value } : {};
+            map[req.threadId] = req.assignment;
+            return invoke("set-global-state", { key: "thread-project-assignments", value: map });
+          })
+          .catch(() => {});
+      },
+      setProjectless: (req) => {
+        if (!req || !req.threadId) return Promise.resolve();
+        return invoke("get-global-state", { key: "projectless-thread-ids" })
+          .then((r) => {
+            const ids = Array.isArray(r && r.value) ? r.value.filter((x) => x !== req.threadId) : [];
+            if (req.projectless) ids.push(req.threadId);
+            return invoke("set-global-state", { key: "projectless-thread-ids", value: ids });
+          })
+          .catch(() => {});
+      },
+      setMembership: () => Promise.resolve(),
+      restoreMemberships: () => Promise.resolve(),
+      getThreadStartProjectId: () => Promise.resolve(null),
+    },
+    notifications: {
+      dispatchMessage: () => {},
+      show: () => makeRpcLease(),
+      hide: () => makeRpcLease(),
+      registerVisibleConversation: () => makeRpcSubscriptionPromise(),
+      importSound: () => Promise.resolve(null),
+    },
+    primaryRuntime: {
+      ensurePrimaryRuntimeInstalled: () => Promise.resolve(),
+      getPrimaryRuntimeInstallState: () => Promise.resolve({ state: "installed" }),
+      publishConfiguration: () => Promise.resolve(),
+      getInstalledBundleVersion: () =>
+        Promise.resolve({ bundleVersion: cfg.appVersion || "26.1120.0", bundledArtifactToolVersion: null }),
+      diagnoseDependencies: () => Promise.resolve({ ok: true, missing: [] }),
+      executeLoadDependenciesTool: () => Promise.resolve({ ok: true }),
+    },
+    remoteConnections: {
+      catalog: {
+        subscribe: (cb) => {
+          let active = true;
+          queueMicrotask(() => {
+            if (active && typeof cb === "function") cb({});
+          });
+          return makeRpcSubscriptionPromise(() => {
+            active = false;
+          });
+        },
+      },
+      preferences: {
+        getState: () => Promise.resolve({}),
+        subscribe: () => makeRpcSubscriptionPromise(),
+      },
+      setRemoteControlEnabled: () => Promise.resolve(),
+      refreshRemoteControl: () => Promise.resolve(),
+      authorizeRemoteControl: () => Promise.reject(new Error("Remote control unavailable offline")),
+    },
+    executionHosts: {
+      getDefaultHost: () =>
+        Promise.resolve({
+          id: "local",
+          display_name: "Local",
+          kind: "local",
+        }),
+    },
+    statsig: {
+      getStableId: () => Promise.resolve(null),
+      importLegacyStableId: (id) => Promise.resolve(id || null),
+    },
+    appInfo: {
+      getSystemInfo: () =>
+        Promise.resolve({
+          platform: "web",
+          os: "web",
+          arch: "x64",
+          appVersion: cfg.appVersion || "26.1120.0",
+          buildFlavor: "prod",
+        }),
+      get: () =>
+        Promise.resolve({
+          version: cfg.appVersion || "26.1120.0",
+          buildFlavor: "prod",
+          platform: "web",
+        }),
+      getPackagingInfo: () => Promise.resolve({ isPackaged: false, channel: "web" }),
+      getLocaleInfo: () => Promise.resolve({ locale: (typeof navigator !== "undefined" && navigator.language) || "en-US" }),
+      getThirdPartyNotices: () => Promise.resolve({ text: null }),
+    },
+    clipboard: {
+      writeText: (text) =>
+        navigator.clipboard && typeof navigator.clipboard.writeText === "function"
+          ? navigator.clipboard.writeText(String(text || "")).catch(() => {})
+          : Promise.resolve(),
+      readText: () =>
+        navigator.clipboard && typeof navigator.clipboard.readText === "function"
+          ? navigator.clipboard.readText().catch(() => "")
+          : Promise.resolve(""),
+    },
+    executionPaths: {
+      readCodexHome: () => invoke("codex-home").then((r) => (r && r.codexHome) || ""),
+      readHomePaths: () => invoke("codex-home"),
+      readHomeDirectory: () => Promise.resolve(cfg.homeDir || ""),
+      readWorkspacesRoot: () => Promise.resolve((Array.isArray(cfg.workspaceRoots) && cfg.workspaceRoots[0]) || ""),
+    },
+    workspaceRoots: {
+      read: (_requestId, opts) =>
+        invoke("workspace-root-options", opts || {}).catch(() => ({
+          roots: Array.isArray(cfg.workspaceRoots) ? cfg.workspaceRoots : [],
+          labels: {},
+        })),
+      cancel: () => Promise.resolve(),
+    },
+    settings: {
+      readAll: () => invoke("get-settings").catch(() => ({})),
+      get: (key) => invoke("get-setting", { key }).catch(() => undefined),
+      set: (key, value) => invoke("set-setting", { key, value }).catch(() => false),
+      read: (key) =>
+        invoke("get-setting", { key })
+          .then((v) => ({ value: v, effective: v }))
+          .catch(() => ({ value: undefined, effective: undefined })),
+      write: (key, value) =>
+        invoke("set-setting", { key, value })
+          .then(() => ({ success: true }))
+          .catch(() => ({ success: false })),
+      subscribe: () => makeRpcSubscriptionPromise(),
+    },
+    openIn: {
+      open: () => Promise.resolve(false),
+      getTargets: () => Promise.resolve({ targets: [], preferredTarget: null }),
+      setGlobalPreferredTarget: () => Promise.resolve(),
+    },
+  };
+
+  w.__codexWebWrapAppServices = function wrapAppServices(base) {
+    return { ...(base || {}), ...w.__codexWebAppServices };
+  };
   installAppFsImageRewrite();
 
   subscribe("window:setTitle", (title) => setWindowTitle(title));
@@ -1758,7 +2332,13 @@
         if (msg && typeof msg.channel === "string") {
           if (msg.channel === "codex-web:server-hello") {
             maybeReloadForServerGeneration(msg.payload);
+            if (sawPersistedAtomSyncRequest && !hasReceivedPersistedAtomSync) {
+              invoke("codex_desktop:message-from-view", { type: "persisted-atom-sync-request" }).catch(() => {});
+            }
             return;
+          }
+          if (msg.channel === "persisted-atom-sync") {
+            hasReceivedPersistedAtomSync = true;
           }
           if (shouldClearModelListCache(msg.channel, msg.payload)) {
             clearModelListCache();
@@ -1774,6 +2354,16 @@
           }
           if (msg.channel === "fetch-stream-error") {
             surfaceFetchIpcError("fetch-stream-error", msg.payload);
+          }
+          if (msg.channel === "mcp-response") {
+            const respId =
+              msg.payload && typeof msg.payload === "object"
+                ? (msg.payload.message && msg.payload.message.id) ?? msg.payload.id
+                : null;
+            if (respId != null && webRpcRequestIds.has(String(respId))) {
+              dispatch("mcp-response", msg.payload);
+              return;
+            }
           }
           if (msg.channel !== "mcp-response" && msg.channel !== "mcp-notification") {
             dispatch(msg.channel, msg.payload);

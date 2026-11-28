@@ -9,6 +9,17 @@ export {};
 
 const crypto = require("node:crypto");
 const fs = require("node:fs");
+const {
+  DESKTOP_GATE_DENYLIST,
+  STATSIG_DEFAULT_FEATURE_OVERRIDES,
+} = require("../ipc/codex/capabilityContract");
+
+const EXPLICIT_FALSE_GATE_OVERRIDES = Object.entries(STATSIG_DEFAULT_FEATURE_OVERRIDES || {})
+  .filter(([, value]) => value === false)
+  .map(([key]) => String(key));
+const DENIED_GATE_IDS_JSON = JSON.stringify(
+  Array.from(new Set([...EXPLICIT_FALSE_GATE_OVERRIDES, ...Array.from(DESKTOP_GATE_DENYLIST || []).map(String)]))
+);
 
 /**
  * 官方资源按 immutable 缓存一年，query 是让浏览器丢弃旧 gateway 补丁版本的唯一手段；
@@ -21,13 +32,13 @@ function officialAssetPatchQuery() {
   return OFFICIAL_ASSET_PATCH_QUERY;
 }
 
-/** 所有官方 JS 都可能包含相对 import，需要统一加 query，避免新旧模块图混用。 */
+/** 所有官方 JS（含 Rspack async 子目录 chunk）都可能包含相对 import，需要统一加 query，避免新旧模块图混用。 */
 function shouldPatchOfficialAsset(reqPath) {
-  return /^\/official\/assets\/[^/]+\.js$/.test(reqPath);
+  return /^\/official\/assets\/(?:[^/]+\/)*[^/]+\.js$/.test(reqPath);
 }
 
 /** Web 环境下没有 Electron 宿主，这些宿主 services 由 gateway 侧 mock。 */
-const MOCK_APP_SERVICES =
+const MOCK_APP_SERVICES_OBJECT =
   "{" +
   // 26.924 起 renderer 的 HTTP 请求走宿主 httpFetch service，由 web-shell polyfill 转发到 gateway。
   "httpFetch:window.__codexWebHttpFetch," +
@@ -35,7 +46,9 @@ const MOCK_APP_SERVICES =
   "dismiss:function(){},transitionDone:function(){},setEnabled:function(){},open:function(){}" +
   "}," +
   "notifications:{" +
-  "dispatchMessage:function(){},show:function(){},hide:function(){}" +
+  "dispatchMessage:function(){},show:function(){},hide:function(){}," +
+  "registerVisibleConversation:function(){return{[Symbol.dispose]:function(){}}}," +
+  "importSound:function(){return Promise.resolve(null)}" +
   "}," +
   "primaryRuntime:{ensurePrimaryRuntimeInstalled:function(){return Promise.resolve()}," +
   "  getPrimaryRuntimeInstallState:function(){return Promise.resolve({state:'installed'})}}," +
@@ -90,12 +103,34 @@ const MOCK_APP_SERVICES =
   "};})()" +
   "}";
 
+const MOCK_APP_SERVICES = `(window.__codexWebWrapAppServices?window.__codexWebWrapAppServices(${MOCK_APP_SERVICES_OBJECT}):${MOCK_APP_SERVICES_OBJECT})`;
+
 /** JS module graph 内的相对 import 也要带同一个 query，否则会出现同一 chunk 两份实例。 */
 function patchOfficialJsModuleSpecifiers(source) {
-  return source.replace(
-    /((?:from|import)\s*(?:\(\s*)?)(["'`])(\.\/[^"'`?#]+\.js)\2/g,
-    (_match, prefix, quote, specifier) => `${prefix}${quote}${specifier}?${OFFICIAL_ASSET_PATCH_QUERY}${quote}`
-  );
+  return source
+    .replace(
+      /((?:from|import)\s*(?:\(\s*)?)(["'`])(\.\.?\/[^"'`?#]+\.js)\2/g,
+      (_match, prefix, quote, specifier) => `${prefix}${quote}${specifier}?${OFFICIAL_ASSET_PATCH_QUERY}${quote}`
+    )
+    .replace(
+      /((?:from|import)\s*\(\s*)(["'`])\/assets\/([^"'`?#]+\.js)\2/g,
+      (_match, prefix, quote, assetPath) => `${prefix}${quote}/official/assets/${assetPath}?${OFFICIAL_ASSET_PATCH_QUERY}${quote}`
+    );
+}
+
+/** Rspack runtime 把资源 publicPath 设为 "/"；Web 端全部托管在 "/official/" 下，且动态 async JS 必须携带补丁 query。 */
+function patchRspackRuntimeChunk(source) {
+  if (!source.includes('.p="/"') && !source.includes(".p='/'")) return source;
+  if (!source.includes(".f.miniCss") && !source.includes(".u=") && !source.includes('.j="')) {
+    return source;
+  }
+  return source
+    .replace(/(\b[A-Za-z_$][\w$]*)\.p=(["'])\/\2/g, "$1.p=$2/official/$2")
+    .replace(
+      /import\((["'])\.\.\/\1\+([A-Za-z_$][\w$]*)\.u\(([A-Za-z_$][\w$]*)\)\)/g,
+      (_match, quote, runtimeVar, chunkVar) =>
+        `import(${quote}../${quote}+${runtimeVar}.u(${chunkVar})+${quote}?${OFFICIAL_ASSET_PATCH_QUERY}${quote})`
+    );
 }
 
 let hasWarnedWorkedForPatchMiss = false;
@@ -119,11 +154,6 @@ function patchAppServerManagerSignalsChunk(source) {
   );
 }
 
-/** Settings 页面已打包，但官方 renderer 在 Statsig 不可用时会隐藏入口。 */
-function patchSettingsGateChunk(source) {
-  return source.replace(/([,;]\s*[A-Za-z_$][\w$]*\s*=)\s*[$A-Za-z_][\w$]*\(`4166894088`\)/g, "$1!0");
-}
-
 /** Settings 里能选语言不代表 i18n provider 会加载语言包；Web 端默认按系统语言启用。 */
 function patchI18nDefaultsChunk(source) {
   return source
@@ -131,6 +161,54 @@ function patchI18nDefaultsChunk(source) {
     .replaceAll('.get("enable_i18n",!1)', '.get("enable_i18n",!0)')
     .replaceAll(".get(`locale_source`,`IDE`)", ".get(`locale_source`,`SYSTEM`)")
     .replaceAll('.get("locale_source","IDE")', '.get("locale_source","SYSTEM")');
+}
+
+const CHECK_GATE_WRAPPER_RE =
+  /checkGate\(([A-Za-z_$][\w$]*),([A-Za-z_$][\w$]*)\)\{return this\.getFeatureGate\(\1,\2\)\.value\}/;
+const CHECK_GATE_MARKER = "/*codex-offline:default-on-gate-wrapper*/";
+
+/** 对齐桌面端：未知 renderer gate 在 Statsig checkGate 接缝默认开启，同时尊重共享 denylist 与显式 false 覆写。 */
+function patchDefaultOnStatsigCheckGateChunk(source) {
+  if (source.includes(CHECK_GATE_MARKER)) return source;
+  const match = CHECK_GATE_WRAPPER_RE.exec(source);
+  if (!match) return source;
+  return source.replace(
+    CHECK_GATE_WRAPPER_RE,
+    `checkGate(${match[1]},${match[2]}){return ${DENIED_GATE_IDS_JSON}.includes(String(${match[1]}))?this.getFeatureGate(${match[1]},${match[2]}).value:!0${CHECK_GATE_MARKER}}`
+  );
+}
+
+const GATE_ATOM_MARKER = "/*codex-offline:default-on-gate-atom*/";
+const GATE_ATOM_PREDICATE_RE =
+  /function ([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*)\)\{return\s*(?:\2\.details\.reason===[`"']LocalOverride[`"']|[`"']LocalOverride[`"']===\2\.details\.reason)\|\|\2\.details\.reason\?\.endsWith\([`"']:Recognized[`"']\)===!0\}/;
+
+/** 对齐桌面端：jotai gate atom 路径对未识别的 gate 默认开启，仅放行共享 denylist 之外的本地能力。 */
+function patchDefaultOnStatsigGateAtomChunk(source) {
+  if (source.includes(GATE_ATOM_MARKER)) return source;
+  const predicate = GATE_ATOM_PREDICATE_RE.exec(source);
+  if (!predicate) return source;
+  const recognized = predicate[1].replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const id = "[A-Za-z_$][\\w$]*";
+  const mountWrite = new RegExp(
+    `let (${id})=(${id})\\.getFeatureGate\\((${id})\\);(${id})\\(\\1\\.value\\),(${id})\\.set\\((${id}),\\3,${recognized}\\(\\1\\)\\)`
+  );
+  const refreshWrite = new RegExp(
+    `let (${id})=(${id})\\.getFeatureGate\\((${id})\\);(${id})\\.set\\((${id}),\\3,\\1\\.value\\),\\4\\.set\\((${id}),\\3,${recognized}\\(\\1\\)\\)`
+  );
+  if (!mountWrite.test(source) || !refreshWrite.test(source)) return source;
+  const openValue = (gate, key) =>
+    `(${gate}.value||!${predicate[1]}(${gate})&&!${DENIED_GATE_IDS_JSON}.includes(String(${key}))${GATE_ATOM_MARKER})`;
+  return source
+    .replace(
+      mountWrite,
+      (_m, gate, client, key, setValue, store, recognizedAtom) =>
+        `let ${gate}=${client}.getFeatureGate(${key});${setValue}(${openValue(gate, key)}),${store}.set(${recognizedAtom},${key},${predicate[1]}(${gate}))`
+    )
+    .replace(
+      refreshWrite,
+      (_m, gate, client, key, store, valueAtom, recognizedAtom) =>
+        `let ${gate}=${client}.getFeatureGate(${key});${store}.set(${valueAtom},${key},${openValue(gate, key)}),${store}.set(${recognizedAtom},${key},${predicate[1]}(${gate}))`
+    );
 }
 
 let hasWarnedRpcInitPatchMiss = false;
@@ -156,19 +234,19 @@ let hasWarnedConnectAppHostPatchMiss = false;
 /**
  * 26.908 起 renderer 通过 window.postMessage({type:`connect-app-host`}) 向 Electron 宿主换取
  * MessagePort 再 await services；Web 端无人应答会让 initializeAppHostServices 永久挂起，
- * 页面停在官方启动屏（issue #112）。锚定协议常量 connect-app-host，把该函数替换为 mock。
+ * 页面停在官方启动屏（issue #112）。26.1120 Rspack 下改用双引号和匿名函数导出，锚定协议常量
+ * connect-app-host 统一替换为 mock。
  */
 const CONNECT_APP_HOST_PATTERN =
-  /function ([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*)\)\{let\{port1:([A-Za-z_$][\w$]*),port2:([A-Za-z_$][\w$]*)\}=new MessageChannel;return window\.postMessage\(\{type:`connect-app-host`,port:\4\},window\.location\.origin,\[\4\]\),[A-Za-z_$][\w$]*\(\3,\2\)\}/;
+  /function(?:\s+([A-Za-z_$][\w$]*))?\(([A-Za-z_$][\w$]*)?\)\{let\{port1:([A-Za-z_$][\w$]*),port2:([A-Za-z_$][\w$]*)\}=new MessageChannel;return window\.postMessage\(\{type:[`"']connect-app-host[`"'],port:\4\},window\.location\.origin,\[\4\]\),(?:\(0,[A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*\)|[A-Za-z_$][\w$]*)\(\3(?:,[^)]*)?\)\}/g;
 
 function patchConnectAppHostChunk(source) {
-  if (CONNECT_APP_HOST_PATTERN.test(source)) {
-    return source.replace(
-      CONNECT_APP_HOST_PATTERN,
-      (_match, name, param) =>
-        `function ${name}(${param}){return{services:Promise.resolve(${MOCK_APP_SERVICES})}}`
-    );
-  }
+  const replaced = source.replace(
+    CONNECT_APP_HOST_PATTERN,
+    (_match, name, param) =>
+      `function${name ? " " + name : ""}(${param || ""}){return{services:Promise.resolve(${MOCK_APP_SERVICES}),onRpcBroken:function(){},dup:function(){return this}}}`
+  );
+  if (replaced !== source) return replaced;
   if (!hasWarnedConnectAppHostPatchMiss) {
     hasWarnedConnectAppHostPatchMiss = true;
     console.warn("[gateway] connect-app-host patch skipped: current bundle shape did not match");
@@ -194,19 +272,25 @@ function patchOfficialAsset(reqPath, data) {
   if (!shouldPatchOfficialAsset(reqPath)) return data;
   const source = data.toString("utf-8");
   const withPatchedImports = patchOfficialJsModuleSpecifiers(source);
-  const withSettingsGate = patchSettingsGateChunk(withPatchedImports);
-  const withI18nDefaults = patchI18nDefaultsChunk(withSettingsGate);
+  const withRspackRuntime = patchRspackRuntimeChunk(withPatchedImports);
+  const withI18nDefaults = patchI18nDefaultsChunk(withRspackRuntime);
   const withAppServerPatch = /\/app-server-manager-signals-[^/]+\.js$/.test(reqPath)
     ? patchAppServerManagerSignalsChunk(withI18nDefaults)
     : withI18nDefaults;
   const withRpcMock = /\/rpc-[^/]+\.js$/.test(reqPath)
     ? patchRpcInitChunk(withAppServerPatch)
     : withAppServerPatch;
-  // 26.917 起握手被并进 app-shared，chunk 文件名不再稳定；按协议常量分派。
-  const patched = withRpcMock.includes("{type:`connect-app-host`")
+  // 26.917 起握手被并进 app-shared，26.1120 起拆进 Rspack async chunk，均按协议常量分派。
+  const withConnectMock = withRpcMock.includes("connect-app-host")
     ? patchConnectAppHostChunk(withRpcMock)
     : withRpcMock;
-  const withFastMode = patchFastModeChunk(patched);
+  const withCheckGate = withConnectMock.includes("checkGate(")
+    ? patchDefaultOnStatsigCheckGateChunk(withConnectMock)
+    : withConnectMock;
+  const withGateAtom = withCheckGate.includes(":Recognized")
+    ? patchDefaultOnStatsigGateAtomChunk(withCheckGate)
+    : withCheckGate;
+  const withFastMode = patchFastModeChunk(withGateAtom);
   return Buffer.from(withFastMode, "utf-8");
 }
 
@@ -214,7 +298,11 @@ module.exports = {
   OFFICIAL_ASSET_PATCH_QUERY,
   officialAssetPatchQuery,
   shouldPatchOfficialAsset,
+  patchOfficialJsModuleSpecifiers,
+  patchRspackRuntimeChunk,
   patchConnectAppHostChunk,
+  patchDefaultOnStatsigCheckGateChunk,
+  patchDefaultOnStatsigGateAtomChunk,
   patchRpcInitChunk,
   patchFastModeChunk,
   patchOfficialAsset,

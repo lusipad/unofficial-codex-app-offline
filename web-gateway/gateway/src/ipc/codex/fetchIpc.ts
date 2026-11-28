@@ -3,6 +3,7 @@ export {};
 
 const path = require("path");
 const {
+  matchPluginServiceRequest,
   pluginServiceFallbackForError,
 } = require("./pluginServiceCompat.cjs");
 const { UNHANDLED_CODEX_CHANNEL } = require("./IGatewayCodexIpcPort");
@@ -73,6 +74,24 @@ function createFetchIpcHandlers(deps) {
         return null;
       case "/wham/environments":
         return [];
+      case "/wham/onboarding/context":
+      case "/wham/onboarding/desktop/complete":
+        return { desktop_onboarding_completed_at: "2026-01-01T00:00:00Z" };
+      case "/wham/workspace-messages":
+        return { messages: [] };
+      default:
+        return undefined;
+    }
+  }
+
+  function localRelativeFallback(pathname) {
+    switch (pathname) {
+      case "/tbo":
+        return { items: [], cursor: null };
+      case "/automations":
+        return { items: [] };
+      case "/settings/user":
+        return {};
       default:
         return undefined;
     }
@@ -332,6 +351,34 @@ function createFetchIpcHandlers(deps) {
           }
         }
         broadcastFetchHttpResponse(requestId, fetchPayload, targetClientId);
+        return true;
+      }
+
+      if (pathname === "/celsius/ws/user") {
+        broadcastFetchError(requestId, new Error("Offline: realtime pubsub unavailable"), 503, targetClientId, { url });
+        return true;
+      }
+
+      if (pathname.startsWith("/ps/plugins/")) {
+        const pluginMatch = matchPluginServiceRequest({
+          method: String(message.method || "GET"),
+          url,
+        });
+        if (pluginMatch) {
+          broadcastFetchResponse(requestId, pluginMatch.value, 200, targetClientId);
+          return true;
+        }
+        if (pathname === "/ps/plugins/installed") {
+          broadcastFetchResponse(requestId, { items: [], plugins: [], nextPageToken: null }, 200, targetClientId);
+          return true;
+        }
+        broadcastFetchError(requestId, new Error("Plugin metadata unavailable offline"), 404, targetClientId, { url });
+        return true;
+      }
+
+      const relativeFallback = localRelativeFallback(pathname);
+      if (relativeFallback !== undefined) {
+        broadcastFetchResponse(requestId, relativeFallback, 200, targetClientId);
         return true;
       }
 

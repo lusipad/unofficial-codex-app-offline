@@ -247,14 +247,11 @@
   var STATSIG_GATE_OVERRIDES = _capabilityContract &&
     _capabilityContract.STATSIG_DEFAULT_FEATURE_OVERRIDES || {};
   /** Forced desktop feature state (always-on). */
-  var FORCED_DESKTOP_FEATURE_STATE = {
-    artifactsPane: true,
+  var FORCED_DESKTOP_FEATURE_STATE = (_capabilityContract &&
+    _capabilityContract.FORCED_DESKTOP_FEATURE_STATE) || {
     avatarOverlay: true,
-    browserAgent: true,
-    browserAgentAvailable: true,
     browserPane: true,
     computerUse: true,
-    computerUseNodeRepl: true,
     control: true,
     externalBrowserUse: true,
     externalBrowserUseAllowed: true,

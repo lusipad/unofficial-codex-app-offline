@@ -114,23 +114,49 @@ if (isUnsafeDestination(webviewDestDir)) {
 fs.rmSync(webviewDestDir, { recursive: true, force: true });
 fs.mkdirSync(webviewDestDir, { recursive: true });
 
+const hostDestDir = path.join(path.dirname(webviewDestDir), "host");
+fs.rmSync(hostDestDir, { recursive: true, force: true });
+
 let fileCount = 0;
 let byteCount = 0;
+let hostFileCount = 0;
+let hostByteCount = 0;
 for (const rawEntry of asar.listPackage(asarPath)) {
   const archiveEntry = stripArchiveRoot(rawEntry);
   const entry = normalizeArchiveEntry(rawEntry);
-  if (!entry.startsWith("webview/")) continue;
+  if (entry.startsWith("webview/")) {
+    const relativeEntryPath = entry.slice("webview/".length);
+    if (!relativeEntryPath) continue;
 
-  const relativeEntryPath = entry.slice("webview/".length);
-  if (!relativeEntryPath) continue;
+    const stat = asar.statFile(asarPath, archiveEntry);
+    if (stat && stat.files) continue;
 
-  const stat = asar.statFile(asarPath, archiveEntry);
-  if (stat && stat.files) continue;
+    const data = asar.extractFile(asarPath, archiveEntry);
+    writeFile(resolveDestination(webviewDestDir, relativeEntryPath), data);
+    fileCount += 1;
+    byteCount += data.length;
+    continue;
+  }
 
-  const data = asar.extractFile(asarPath, archiveEntry);
-  writeFile(resolveDestination(webviewDestDir, relativeEntryPath), data);
-  fileCount += 1;
-  byteCount += data.length;
+  if (entry.startsWith(".vite/build/")) {
+    const relativeHostEntry = entry.slice(".vite/build/".length);
+    if (!relativeHostEntry || relativeHostEntry.includes("/")) continue;
+    if (!/^app-server-host(?:-[^/]+)?\.js$/.test(relativeHostEntry)) continue;
+
+    const stat = asar.statFile(asarPath, archiveEntry);
+    if (stat && stat.files) continue;
+
+    const data = asar.extractFile(asarPath, archiveEntry);
+    writeFile(resolveDestination(hostDestDir, relativeHostEntry), data);
+    hostFileCount += 1;
+    hostByteCount += data.length;
+  }
+}
+
+if (hostFileCount > 0 && !fs.existsSync(path.join(hostDestDir, "app-server-host.js"))) {
+  fs.rmSync(hostDestDir, { recursive: true, force: true });
+  hostFileCount = 0;
+  hostByteCount = 0;
 }
 
 ensureWebviewComplete(webviewDestDir);
@@ -166,8 +192,11 @@ writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 console.log(
   JSON.stringify({
     webviewDir: webviewDestDir,
+    hostDir: hostFileCount > 0 ? hostDestDir : null,
     manifestPath,
     fileCount,
     byteCount,
+    hostFileCount,
+    hostByteCount,
   })
 );

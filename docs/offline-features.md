@@ -2,7 +2,7 @@
 
 <!-- 由 scripts/offline-feature-probe.mjs --promote 生成，请勿手工编辑；不可见原因在 scripts/offline-feature-expectations.json 中维护。 -->
 
-本清单在 **26.1120.5083.0** 离线包上实测生成，读取「设置」导航中实际显示的分区。启动方式：API Key / 未登录 ChatGPT，网络已阻断。
+本清单在 **26.1120.6357.0** 离线包上实测生成，读取「设置」导航中实际显示的分区。启动方式：API Key / 未登录 ChatGPT，网络已阻断。
 
 - ✅ 离线可用：设置中可见。
 - — 离线不可见：「说明」列给出原因。
@@ -49,7 +49,7 @@
 | 设置项 | 离线可见 | 说明 |
 | --- | --- | --- |
 | 导入 (`import`) | ✅ |  |
-| 数据管理 (`data-controls`) | — | 需要登录 ChatGPT 账号；本地归档会话在「Archived chats」中管理 |
+| 数据管理 (`data-controls`) | — | 需要登录 ChatGPT 账号；本地归档会话在「已归档的聊天」中管理 |
 | 已归档的聊天 (`archived-chats`) | ✅ |  |
 | 广告设置 (`ads-controls`) | — | ChatGPT 账号功能 |
 | 设备存储 (`storage`) | ✅ |  |

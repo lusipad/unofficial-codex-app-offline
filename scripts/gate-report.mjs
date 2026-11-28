@@ -45,6 +45,10 @@ const CALL_SITE_RE = new RegExp(String.raw`(${IDENT})\(\s*(?:(${IDENT}),\s*)?${I
 const STATSIG_LIST_RE = new RegExp(String.raw`\bstatsig:\[((?:\s*${ID}\s*,?)+)\]`, 'g');
 const IMPORT_RE = /import\{([^}]*)\}from["']\.\/([^"']+)["']/g;
 const EXPORT_RE = /export\{([^}]*)\}/g;
+const RSPACK_MOD_SPLIT_RE = /(?:^|[{,])([A-Za-z0-9_$+\/]{4}):?\(?(?:function)?\([A-Za-z_$],[A-Za-z_$],([A-Za-z_$])\)\{/g;
+const RSPACK_REQ_RE = /\b([A-Za-z_$][\w$]*)\s*=\s*([A-Za-z_$])\("([A-Za-z0-9_$+\/]{4})"\)/g;
+const RSPACK_CALL_RE = new RegExp(String.raw`(?:\(0,\s*(${IDENT})\.(${IDENT})\s*\)|(${IDENT})\.(${IDENT}))\(\s*${ID}\s*[,)]`, 'g');
+const RSPACK_GET_RE = new RegExp(String.raw`(?:${IDENT}|\(0,\s*${IDENT}\.${IDENT}\s*\))\(\s*(${IDENT})\.(${IDENT})\s*,\s*${ID}\s*[,)]`, 'g');
 
 const SDK_KIND = {
   checkGate: 'gate',
@@ -130,6 +134,166 @@ function symbolResolver(file) {
   return (name) => imported.get(name) ?? ownExports.get(name) ?? `${file.name}~${name}`;
 }
 
+function splitRspackModules(content) {
+  const starts = [];
+  for (const match of content.matchAll(RSPACK_MOD_SPLIT_RE)) {
+    starts.push({ modId: match[1], reqVar: match[2], index: match.index });
+  }
+  if (starts.length === 0) return [];
+  return starts.map((entry, idx) => ({
+    modId: entry.modId,
+    reqVar: entry.reqVar,
+    text: content.slice(entry.index, idx + 1 < starts.length ? starts[idx + 1].index : content.length),
+  }));
+}
+
+function parseRspackRequires(text, reqVar) {
+  const varToMod = new Map();
+  for (const match of text.matchAll(RSPACK_REQ_RE)) {
+    if (match[2] === reqVar) varToMod.set(match[1], match[3]);
+  }
+  return varToMod;
+}
+
+function extractBalancedObject(text, openBraceIndex) {
+  let depth = 0;
+  let quote = null;
+  for (let i = openBraceIndex; i < text.length; i++) {
+    const ch = text[i];
+    if (quote) {
+      if (ch === '\\') { i++; continue; }
+      if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === '`') { quote = ch; continue; }
+    if (ch === '{') depth++;
+    else if (ch === '}') {
+      depth--;
+      if (depth === 0) return text.slice(openBraceIndex + 1, i);
+    }
+  }
+  return '';
+}
+
+function inferSdkKindFromSnippet(snippet) {
+  const kinds = new Set();
+  if (/\.(?:getFeatureGate|checkGate)\b/.test(snippet)) kinds.add('gate');
+  if (/\.getDynamicConfig\b/.test(snippet)) kinds.add('config');
+  if (/\.getLayer\b/.test(snippet)) kinds.add('layer');
+  if (/\.getExperiment\b/.test(snippet)) kinds.add('experiment');
+  return kinds;
+}
+
+// Inspect Rspack `req.d(exports, ...)` export definitions so direct Statsig
+// wrappers and re-export hooks are recognized by structure rather than only
+// seed precision (which drops below 50% when an upstream release adds many new gates).
+function learnRspackStatsigExports(files) {
+  const modules = [];
+  for (const file of files) {
+    for (const mod of splitRspackModules(file.content)) {
+      modules.push(mod);
+    }
+  }
+  const directKinds = new Map(); // "MODID#EXPORT" -> kind
+  const moduleBindings = [];
+  for (const mod of modules) {
+    const varToMod = parseRspackRequires(mod.text, mod.reqVar);
+    const localKinds = new Map();
+    const dIndex = mod.text.search(new RegExp(String.raw`\b${mod.reqVar}\.d\(`));
+    const bodyRegion = dIndex >= 0 ? mod.text.slice(0, dIndex) : mod.text;
+    const fnMatches = bodyRegion.matchAll(
+      new RegExp(String.raw`\b(?:function\s+(${IDENT})\([^)]*\)\s*\{|(?:let|var|const)\s+(${IDENT})\s*=)`, 'g'),
+    );
+    const fnStarts = [...fnMatches].map((m) => ({
+      name: m[1] || m[2],
+      idx: m.index,
+      isFunc: Boolean(m[1]),
+      braceIdx: m[1] ? m.index + m[0].length - 1 : -1,
+    }));
+    for (let i = 0; i < fnStarts.length; i++) {
+      const fn = fnStarts[i];
+      const end = i + 1 < fnStarts.length ? fnStarts[i + 1].idx : bodyRegion.length;
+      const body = fn.isFunc
+        ? extractBalancedObject(bodyRegion, fn.braceIdx)
+        : bodyRegion.slice(fn.idx, Math.min(end, fn.idx + 600));
+      const kinds = inferSdkKindFromSnippet(body);
+      if (kinds.size > 0) localKinds.set(fn.name, kinds);
+    }
+    const dRe = new RegExp(String.raw`\b${mod.reqVar}\.d\(\s*${IDENT}\s*,(?:\s*\{\s*\}\s*,)?\s*\{`, 'g');
+    const exportsList = [];
+    for (const dMatch of mod.text.matchAll(dRe)) {
+      const objBody = extractBalancedObject(mod.text, dMatch.index + dMatch[0].length - 1);
+      if (!objBody) continue;
+      let depth = 0;
+      let start = 0;
+      let quote = null;
+      const entries = [];
+      for (let i = 0; i <= objBody.length; i++) {
+        const ch = i < objBody.length ? objBody[i] : ',';
+        if (quote) {
+          if (ch === '\\') { i++; continue; }
+          if (ch === quote) quote = null;
+          continue;
+        }
+        if (ch === '"' || ch === "'" || ch === '`') { quote = ch; continue; }
+        if (ch === '{' || ch === '(' || ch === '[') depth++;
+        else if (ch === '}' || ch === ')' || ch === ']') depth--;
+        else if (ch === ',' && depth === 0) {
+          const item = objBody.slice(start, i).trim();
+          if (item) entries.push(item);
+          start = i + 1;
+        }
+      }
+      for (const entry of entries) {
+        const colon = entry.indexOf(':');
+        if (colon < 0) continue;
+        const expName = entry.slice(0, colon).trim();
+        const rhs = entry.slice(colon + 1).trim();
+        if (!new RegExp(`^${IDENT}$`).test(expName)) continue;
+        exportsList.push({ expName, rhs });
+        const kinds = inferSdkKindFromSnippet(rhs);
+        const arrowTarget = rhs.match(new RegExp(String.raw`^(?:\(\)\s*=>\s*)?(${IDENT})$`));
+        if (arrowTarget && localKinds.has(arrowTarget[1])) {
+          for (const k of localKinds.get(arrowTarget[1])) kinds.add(k);
+        }
+        for (const [localName, lKinds] of localKinds) {
+          if (new RegExp(String.raw`\b${localName}\b`).test(rhs)) {
+            for (const k of lKinds) kinds.add(k);
+          }
+        }
+        if (kinds.size === 1) {
+          directKinds.set(`${mod.modId}#${expName}`, [...kinds][0]);
+        }
+      }
+    }
+    moduleBindings.push({ modId: mod.modId, text: mod.text, varToMod, exportsList, localKinds });
+  }
+  for (const { modId, text, varToMod, exportsList } of moduleBindings) {
+    if (varToMod.size === 0) continue;
+    for (const { expName, rhs } of exportsList) {
+      const key = `${modId}#${expName}`;
+      if (directKinds.has(key)) continue;
+      let combined = rhs;
+      const refId = rhs.match(new RegExp(String.raw`^(?:\(\)\s*=>\s*)?(${IDENT})$`));
+      if (refId) {
+        const localFnMatch = text.match(new RegExp(String.raw`\bfunction\s+${refId[1]}\([^)]*\)\{[^}]{0,300}\}`));
+        if (localFnMatch) combined += ' ' + localFnMatch[0];
+      }
+      const importedKinds = new Set();
+      for (const m of combined.matchAll(new RegExp(String.raw`\b(${IDENT})\.(${IDENT})\b`, 'g'))) {
+        const targetMod = varToMod.get(m[1]);
+        if (!targetMod) continue;
+        const targetKind = directKinds.get(`${targetMod}#${m[2]}`);
+        if (targetKind) importedKinds.add(targetKind);
+      }
+      if (importedKinds.size === 1) {
+        directKinds.set(key, [...importedKinds][0]);
+      }
+    }
+  }
+  return directKinds;
+}
+
 /**
  * @param {{name: string, surface: string, content: string}[]} files
  * @param {Set<string>} seedIds ids known to be gates before scanning
@@ -163,6 +327,13 @@ export function scanGateReferences(files, seedIds = new Set()) {
     if (!sites.has(key)) sites.set(key, []);
     sites.get(key).push({ id, file });
   };
+  const rspackWrapperKinds = learnRspackStatsigExports(files);
+  const rspackSites = new Map(); // "MODID#PROP" -> [{ id, file }]
+  const addRspackSite = (exportKey, id, file) => {
+    if (!rspackSites.has(exportKey)) rspackSites.set(exportKey, []);
+    rspackSites.get(exportKey).push({ id, file });
+  };
+
   for (const file of files) {
     const resolve = symbolResolver(file);
     for (const match of file.content.matchAll(CALL_SITE_RE)) {
@@ -176,6 +347,21 @@ export function scanGateReferences(files, seedIds = new Set()) {
         addSite(`call:${resolve(callee)}`, id, file);
       }
     }
+
+    for (const mod of splitRspackModules(file.content)) {
+      const varToMod = parseRspackRequires(mod.text, mod.reqVar);
+      if (varToMod.size === 0) continue;
+      for (const match of mod.text.matchAll(RSPACK_CALL_RE)) {
+        const localVar = match[1] || match[3];
+        const prop = match[2] || match[4];
+        const targetMod = varToMod.get(localVar);
+        if (targetMod) addRspackSite(`${targetMod}#${prop}`, match[5], file);
+      }
+      for (const match of mod.text.matchAll(RSPACK_GET_RE)) {
+        const targetMod = varToMod.get(match[1]);
+        if (targetMod) addRspackSite(`${targetMod}#${match[2]}`, match[3], file);
+      }
+    }
   }
   const typed = new Map([...refs].map(([id, entry]) => [id, new Set(entry.kinds)]));
   for (const entries of sites.values()) {
@@ -186,6 +372,17 @@ export function scanGateReferences(files, seedIds = new Set()) {
     const kinds = new Set(entries.flatMap(({ id }) => [...(typed.get(id) ?? [])]));
     const kind = kinds.size === 1 ? [...kinds][0] : undefined;
     for (const { id, file } of entries) record(refs, id, file, { kind, via: 'reader' });
+  }
+  for (const [exportKey, entries] of rspackSites.entries()) {
+    const wrapperKind = rspackWrapperKinds.get(exportKey);
+    if (!wrapperKind) {
+      const uniqueIds = new Set(entries.map(({ id }) => id));
+      const knownCount = [...uniqueIds].filter((id) => known.has(id)).length;
+      if (knownCount < READER_MIN_KNOWN || knownCount / uniqueIds.size < READER_MIN_PRECISION) continue;
+    }
+    const kinds = new Set(entries.flatMap(({ id }) => [...(typed.get(id) ?? [])]));
+    const kind = wrapperKind ?? (kinds.size === 1 ? [...kinds][0] : undefined);
+    for (const { id, file } of entries) record(refs, id, file, { kind, via: 'rspack-reader' });
   }
   return refs;
 }

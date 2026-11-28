@@ -26,6 +26,7 @@ const {
 const { GatewayIpcPort } = require("./ipc/GatewayIpcPort");
 const { GatewayWebClient } = require("./ipc/GatewayWebClient");
 const { ensureOfficialBundle } = require("./official/LocalCodexBundleProvider");
+const { AppServerHostService } = require("./official/AppServerHostService");
 const {
   OFFICIAL_ASSET_PATCH_QUERY,
   officialAssetPatchQuery,
@@ -39,6 +40,9 @@ const REPORTS_DIR = path.join(PROJECT_ROOT, "reports");
 const CODEX_HOME = process.env.CODEX_HOME || path.join(os.homedir(), ".codex");
 const CODEX_GENERATED_IMAGES_DIR = path.join(CODEX_HOME, "generated_images");
 const CODEX_WEB_PICKED_FILES_DIR = path.join(CODEX_HOME, ".tmp", "web-picked-files");
+const CODEX_BUNDLED_MARKETPLACES_DIR = path.join(CODEX_HOME, ".tmp", "bundled-marketplaces");
+const CODEX_PLUGINS_DIR = path.join(CODEX_HOME, "plugins");
+const CODEX_RUNTIMES_CACHE_DIR = path.join(os.homedir(), ".cache", "codex-runtimes");
 const PORT = Number(process.env.PORT || 3737);
 const { patchModelListResult } = require("./ipc/codex/modelCatalogCompat.cjs");
 const HOST = process.env.HOST || "0.0.0.0";
@@ -69,6 +73,8 @@ const TARGETED_CHANNELS = new Set([
   "mcp-response",
   "codex-web:preview-file",
   "persisted-atom-sync",
+  "codex-app-server-initialized",
+  "codex-app-server-connection-changed",
 ]);
 
 /** 统一整理远端地址，后续可在这里接入设备验证/访问控制。 */
@@ -336,6 +342,7 @@ function authenticatedScriptSrc(src, authToken = "") {
 function transformOfficialHtml(rawHtml, authToken = "") {
   let html = rawHtml;
   html = html.replace(/(src|href)=["']\/(?!official\/)([^"'#?]+)["']/g, '$1="/official/$2"');
+  html = html.replace(/(content=["'])\/(?!official\/)(assets\/[^"'#?]+)(["'])/g, '$1/official/$2$3');
   html = html.replace(/(src|href)=["']\.\/([^"'#?]+)["']/g, '$1="/official/$2"');
   const base = [
     '<base href="/official/">',
@@ -352,7 +359,7 @@ function transformOfficialHtml(rawHtml, authToken = "") {
 function patchOfficialAssetUrls(rawHtml, authToken = "") {
   return rawHtml
     .replace(
-      /((?:src|href)=["']\/official\/assets\/[^"'?#]+\.js)(["'])/g,
+      /((?:src|href|content)=["']\/official\/assets\/(?:[^"'?#]+\/)*[^"'?#]+\.js)(["'])/g,
       (_match, prefix, quote) => `${prefix}?${officialAssetPatchQuery()}${quote}`
     );
 }
@@ -433,7 +440,7 @@ function createWebShellIndexResponse() {
 }
 
 function isPublicOfficialStyleAsset(reqPath) {
-  return /^\/official\/assets\/[^/]+\.(?:css|woff2?|ttf|otf)$/.test(reqPath);
+  return /^\/(?:official\/)?assets\/(?:[^/]+\/)*[^/]+\.(?:css|woff2?|ttf|otf)$/.test(reqPath);
 }
 
 /** 读取并转换官方 renderer HTML，作为浏览器访问 Codex 的主页面。 */
@@ -451,7 +458,7 @@ function createRendererResponse(authToken = "") {
 /** 判断是否应该回退到 SPA shell；刷新 /local/:id 这类官方前端路由时不能返回 404。 */
 function isAppShellRoute(req, pathname) {
   if (req.method !== "GET" && req.method !== "HEAD") return false;
-  if (pathname.startsWith("/api/") || pathname === "/ws") return false;
+  if (pathname.startsWith("/api/") || pathname === "/ws" || pathname.startsWith("/ws/")) return false;
   if (pathname === "/" || pathname === "") return true;
   if (path.extname(pathname)) return false;
   const accept = String(req.headers.accept || "");
@@ -479,6 +486,9 @@ function staticFile(reqPath) {
   if (reqPath.startsWith("/official/")) {
     const rel = reqPath.slice("/official/".length);
     return locateOfficialAsset(rel);
+  }
+  if (reqPath.startsWith("/assets/")) {
+    return locateOfficialAsset(reqPath.slice(1));
   }
   return null;
 }
@@ -589,7 +599,7 @@ function sendUnauthorized(req, res) {
 /** 静态资源缓存策略：hash asset 长缓存，入口 HTML/no-store 保持可更新。 */
 function cacheControlForRequestPath(reqPath) {
   if (process.env.CODEX_WEB_DISABLE_ASSET_CACHE === "1") return "no-store";
-  if (reqPath.startsWith("/official/assets/")) return "public, max-age=31536000, immutable";
+  if (reqPath.startsWith("/official/assets/") || reqPath.startsWith("/assets/")) return "public, max-age=31536000, immutable";
   if (reqPath.startsWith("/official/")) return "public, max-age=3600";
   return "no-store";
 }
@@ -629,18 +639,24 @@ function appFsPathFromRequestPath(pathname) {
   if (!pathname.startsWith(prefix)) return null;
   try {
     const decoded = decodeURIComponent(pathname.slice(prefix.length));
-    const filePath = path.normalize(`/${decoded}`);
+    const isWindowsDrive = /^\/?[A-Za-z]:[\\/]/.test(decoded);
+    const filePath = isWindowsDrive
+      ? path.normalize(decoded.replace(/^\/+/, ""))
+      : path.normalize(`/${decoded}`);
     return path.isAbsolute(filePath) ? filePath : null;
   } catch {
     return null;
   }
 }
 
-/** app://fs 只服务 Codex 生成图、Web 附件临时目录和当前允许的 workspace roots。 */
+/** app://fs 只服务 Codex 生成图、只读插件/运行时资源、Web 附件临时目录和当前允许的 workspace roots。 */
 function isAllowedAppFsFile(filePath) {
   const roots = [
     CODEX_GENERATED_IMAGES_DIR,
     CODEX_WEB_PICKED_FILES_DIR,
+    CODEX_BUNDLED_MARKETPLACES_DIR,
+    CODEX_PLUGINS_DIR,
+    CODEX_RUNTIMES_CACHE_DIR,
     ...(buildGatewayConfig().workspaceRoots || []),
   ];
   return roots.some((root) => typeof root === "string" && root.length > 0 && isWithinRoot(filePath, root));
@@ -724,7 +740,7 @@ function cachedModelListForWebConfig(appServer) {
 const SERVER_GENERATION = `${process.pid}-${Date.now()}`;
 
 /** 创建 WebSocket hub，负责浏览器连接管理和 gateway 事件分发。 */
-function createWsHub(server, getGatewayIpcPort) {
+function createWsHub(server, getGatewayIpcPort, getAppServerHostService) {
   if (!WebSocketServer) {
     throw new Error("The ws package is required for gateway websocket support.");
   }
@@ -762,11 +778,79 @@ function createWsHub(server, getGatewayIpcPort) {
     return !!socket && socket.readyState === socket.OPEN;
   }
 
-  // 只接受 /ws 升级，并校验 gateway 访问 token。浏览器 WebSocket 不能自定义 header，所以允许 query/cookie。
+  // 只接受 /ws 和 /ws/app-server-manager 升级，并校验 gateway 访问 token。
   server.on("upgrade", (req, socket, head) => {
     const url = new URL(req.url || "", `http://${req.headers.host || "localhost"}`);
-    if (url.pathname !== "/ws") return socket.destroy();
+    if (url.pathname !== "/ws" && url.pathname !== "/ws/app-server-manager") return socket.destroy();
     if (!isAuthed(req, url)) return socket.destroy();
+    if (url.pathname === "/ws/app-server-manager") {
+      const hostService = getAppServerHostService && getAppServerHostService();
+      if (!hostService || !hostService.isAvailable()) return socket.destroy();
+      const hostId = url.searchParams.get("hostId") || "local";
+      const generation = url.searchParams.get("generation") || hostService.getGeneration();
+      wss.handleUpgrade(req, socket, head, (ws) => {
+        let handle = null;
+        let closed = false;
+        const pendingFrames = [];
+        ws.on("message", (raw) => {
+          if (closed) return;
+          let frame = null;
+          try {
+            frame = JSON.parse(String(raw));
+          } catch {
+            return;
+          }
+          if (handle) handle.sendFrame(frame);
+          else pendingFrames.push(frame);
+        });
+        const closeTunnel = () => {
+          if (closed) return;
+          closed = true;
+          pendingFrames.length = 0;
+          try {
+            handle && handle.close();
+          } catch {}
+        };
+        ws.on("close", closeTunnel);
+        ws.on("error", closeTunnel);
+        hostService
+          .attachRenderer({
+            hostId,
+            generation,
+            onFrame: (frame) => {
+              if (ws.readyState === ws.OPEN) {
+                try {
+                  ws.send(JSON.stringify(frame));
+                } catch {}
+              }
+            },
+            onClose: () => {
+              if (ws.readyState === ws.OPEN || ws.readyState === ws.CONNECTING) {
+                try {
+                  ws.close();
+                } catch {}
+              }
+            },
+          })
+          .then((attached) => {
+            if (closed) {
+              attached.close();
+              return;
+            }
+            handle = attached;
+            for (const frame of pendingFrames.splice(0, pendingFrames.length)) {
+              handle.sendFrame(frame);
+            }
+          })
+          .catch((error) => {
+            console.warn("[gateway] failed to attach app-server-manager renderer port", error);
+            try {
+              ws.close();
+            } catch {}
+          });
+      });
+      return;
+    }
     wss.handleUpgrade(req, socket, head, (ws) => {
       clients.add(ws);
       ws.on("message", (raw) => {
@@ -868,6 +952,20 @@ async function createGateway() {
 
   const localFileTokenTimer = setInterval(pruneLocalFileTokens, Math.min(60 * 1000, LOCAL_FILE_TOKEN_TTL_MS));
   if (localFileTokenTimer && typeof localFileTokenTimer.unref === "function") localFileTokenTimer.unref();
+  const gatewayConfig = buildGatewayConfig();
+  const appServerHostService = officialBundle.hostDir
+    ? new AppServerHostService({
+        hostDir: officialBundle.hostDir,
+        codexBinaryPath: officialBundle.codexBinaryPath,
+        codexHome: CODEX_HOME,
+        workspaceDir:
+          Array.isArray(gatewayConfig.workspaceRoots) && gatewayConfig.workspaceRoots[0]
+            ? gatewayConfig.workspaceRoots[0]
+            : process.cwd(),
+        version: officialBundle.version || "26.1120.0",
+        logger: createAppLogger(),
+      })
+    : null;
   // Codex 业务数据统一通过 app-server 走 gateway，不让远端浏览器直接接触 app-server/token。
   const appServer = createCodexAppServerClient({
     broadcast: (msg) => {
@@ -880,6 +978,33 @@ async function createGateway() {
   let startupWarmupStartedAtMs = null;
   let startupWarmupCompletedAtMs = null;
   let startupWarmupError = null;
+  let startupWarmupPromise = null;
+
+  function startCacheWarmupInBackground() {
+    if (startupWarmupPromise) return startupWarmupPromise;
+    const warmFn = appServer.warmStartupCache
+      ? () => appServer.warmStartupCache()
+      : appServer.warmCache
+        ? () => appServer.warmCache()
+        : null;
+    if (!warmFn) {
+      startupWarmupCompletedAtMs = Date.now();
+      return Promise.resolve(null);
+    }
+    startupWarmupPromise = Promise.resolve()
+      .then(warmFn)
+      .then((value) => {
+        startupWarmupCompletedAtMs = Date.now();
+        return value;
+      })
+      .catch((error) => {
+        startupWarmupPromise = null;
+        startupWarmupError = error instanceof Error ? error.message : String(error);
+        console.warn("[gateway] background app-server cache warmup failed", error);
+        return null;
+      });
+    return startupWarmupPromise;
+  }
 
   function ensureAppServerStarted() {
     if (!appServer || !appServer.ensureConnection) return Promise.resolve();
@@ -888,16 +1013,9 @@ async function createGateway() {
       startupWarmupError = null;
       appServerStartPromise = appServer
         .ensureConnection()
-        .then(() =>
-          appServer.warmStartupCache
-            ? appServer.warmStartupCache()
-            : appServer.warmCache
-              ? appServer.warmCache()
-              : null
-        )
-        .then((value) => {
-          startupWarmupCompletedAtMs = Date.now();
-          return value;
+        .then(() => {
+          startCacheWarmupInBackground();
+          return null;
         })
         .catch((error) => {
           appServerStartPromise = null;
@@ -912,6 +1030,11 @@ async function createGateway() {
     ensureAppServerStarted().catch((error) => {
       console.warn("[gateway] background app-server warmup failed", error);
     });
+    if (appServerHostService && appServerHostService.isAvailable()) {
+      appServerHostService.ensureReady().catch((error) => {
+        console.warn("[gateway] background app-server-host warmup failed", error);
+      });
+    }
   }
 
   /** 补齐 IPC handler 需要的上下文和 Electron 能力适配函数。 */
@@ -1120,7 +1243,6 @@ async function createGateway() {
 
     if (pathname === "/api/ipc/invoke" && req.method === "POST") {
       // web-shell 的 Electron/Codex invoke 都汇聚到这里，再由 GatewayIpcPort 分流。
-      await ensureAppServerStarted();
       const body = await readBody(req);
       let parsed = {};
       try {
@@ -1134,6 +1256,18 @@ async function createGateway() {
         return sendJson(res, 400, { ok: false, error: "Invalid IPC channel" });
       }
       const payload = Object.prototype.hasOwnProperty.call(parsed, "payload") ? parsed.payload : null;
+      const payloadType = payload && typeof payload === "object" && typeof payload.type === "string" ? payload.type : "";
+      const isLocalStateViewMessage =
+        channel === "codex_desktop:message-from-view" &&
+        (payloadType === "persisted-atom-sync-request" ||
+          payloadType === "persisted-atom-update" ||
+          payloadType === "shared-object-subscribe" ||
+          payloadType === "log-message");
+      if (isLocalStateViewMessage) {
+        warmAppServerInBackground();
+      } else {
+        await ensureAppServerStarted();
+      }
       const clientId = typeof parsed.clientId === "string" ? parsed.clientId : "";
       const remoteAddress = normalizeRemoteAddress(req);
       const startedAtMs = Date.now();
@@ -1223,7 +1357,7 @@ async function createGateway() {
     });
   }
 
-  Object.assign(wsHub, createWsHub(server, () => gatewayIpcPort));
+  Object.assign(wsHub, createWsHub(server, () => gatewayIpcPort, () => appServerHostService));
 
   server.listen(PORT, HOST, () => {
     console.log(`[gateway] listening on http://${HOST}:${PORT}`);
@@ -1237,6 +1371,11 @@ async function createGateway() {
     if (shuttingDown) return;
     shuttingDown = true;
     clearInterval(localFileTokenTimer);
+    if (appServerHostService && typeof appServerHostService.dispose === "function") {
+      try {
+        appServerHostService.dispose();
+      } catch {}
+    }
     if (appServer && typeof appServer.dispose === "function") {
       try {
         appServer.dispose();
@@ -1260,7 +1399,18 @@ async function createGateway() {
   process.once("SIGTERM", () => shutdown("SIGTERM"));
 }
 
-createGateway().catch((error) => {
-  console.error("[gateway] fatal error", error);
-  process.exitCode = 1;
-});
+if (require.main === module) {
+  createGateway().catch((error) => {
+    console.error("[gateway] fatal error", error);
+    process.exitCode = 1;
+  });
+}
+
+module.exports = {
+  appFsPathFromRequestPath,
+  isAllowedAppFsFile,
+  isWithinRoot,
+  staticFile,
+  isPublicOfficialStyleAsset,
+  createGateway,
+};

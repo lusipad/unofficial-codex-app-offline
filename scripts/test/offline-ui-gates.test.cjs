@@ -45,11 +45,9 @@ function escapeRegExp(value) {
 }
 
 const requiredOfflineUiGates = {
-  "824038554": "Codex/Work mode selector",
   "2106641128": "experimental features settings",
   "3693343337": "model features settings",
   "3026692602": "workspace dependencies settings",
-  "2177625257": "browser history and profile import",
   "4039078146": "sidebar activity view",
   "717035860": "sidebar customization and destination discovery",
   "3278809559": "current import settings page",
@@ -80,24 +78,6 @@ test("offline builds force the supported product and navigation UI gates", () =>
   assert.match(
     verifyScriptSource,
     /patchMarker\('\/\*codex-offline:workspace-dependencies-settings\*\/'\)/,
-  );
-});
-
-test("offline builds select the unified plugins page instead of the legacy storefront", () => {
-  const gateId = "3413548395";
-
-  // The unified page is now selected purely by the contract gate override. The
-  // asar-level marker was retired together with the legacy-shape migration that
-  // was its only writer.
-  assert.equal(contract.STATSIG_DEFAULT_FEATURE_OVERRIDES[gateId], false);
-  assert.equal(contract.DESKTOP_ASAR_KNOWN_GATE_IDS.includes(gateId), false);
-  assert.equal(contract.REQUIRED_STATSIG_FEATURE_MARKERS.includes(gateId), false);
-  assert.match(initSource, /_capabilityContract\.STATSIG_DEFAULT_FEATURE_OVERRIDES/);
-  assert.equal(
-    patchScriptSource.includes(
-      "contractPatchMarker('/*codex-offline:plugins-management-in-skills*/')",
-    ),
-    false,
   );
 });
 
@@ -427,43 +407,6 @@ test("plugin-service fallback no longer patches renderer query functions", () =>
   assert.match(verifyScriptSource, /LEGACY_PLUGIN_RENDERER_PATCH_MARKERS/);
 });
 
-test("legacy renderer plugin injections are removed only by owned markers", () => {
-  const functionStart = patchScriptSource.indexOf(
-    "function removeLegacyOfflinePluginQueryPatches",
-  );
-  const functionEnd = patchScriptSource.indexOf(
-    "\n// end removeLegacyOfflinePluginQueryPatches",
-    functionStart,
-  );
-  assert.notEqual(functionStart, -1, "legacy plugin cleanup helper is missing");
-  assert.notEqual(functionEnd, -1, "legacy plugin cleanup terminator is missing");
-
-  const helperSource = patchScriptSource.slice(functionStart, functionEnd);
-  const removeLegacyOfflinePluginQueryPatches = Function(
-    `"use strict";\n${helperSource}\nreturn removeLegacyOfflinePluginQueryPatches;`,
-  )();
-  const original =
-    "queryFn:()=>T_.safeGet(`/ps/plugins/home`),retry:!1,staleTime:vm.ONE_MINUTE";
-  const legacy =
-    "queryFn:()=>T_.safeGet(`/ps/plugins/home`)" +
-    ".catch(e=>globalThis.navigator?.onLine===!1?({sections:[]}):Promise.reject(e))" +
-    "/*codex-offline:plugin-cloud-fallback*/" +
-    "/*codex-offline:plugin-fallback-surface:cloud-home*/,retry:!1," +
-    "networkMode:`always`/*codex-offline:plugin-query-network-mode*/" +
-    "/*codex-offline:plugin-query-surface:cloud-home*/,staleTime:vm.ONE_MINUTE";
-  const result = removeLegacyOfflinePluginQueryPatches(legacy);
-  assert.equal(result.removed, 2);
-  assert.equal(result.content, original);
-
-  assert.throws(
-    () =>
-      removeLegacyOfflinePluginQueryPatches(
-        "officialCode()/*codex-offline:plugin-cloud-fallback*/" +
-          "/*codex-offline:plugin-fallback-surface:cloud-home*/",
-      ),
-    /unexpected shape/,
-  );
-});
 test("priority surface carries its dedicated static gate marker", () => {
   const functionStart = patchScriptSource.indexOf(
     "function patchSidebarActivitySurface",

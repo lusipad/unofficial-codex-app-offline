@@ -3,7 +3,12 @@ const test = require("node:test");
 
 const {
   OFFICIAL_ASSET_PATCH_QUERY,
+  shouldPatchOfficialAsset,
+  patchOfficialJsModuleSpecifiers,
+  patchRspackRuntimeChunk,
   patchConnectAppHostChunk,
+  patchDefaultOnStatsigCheckGateChunk,
+  patchDefaultOnStatsigGateAtomChunk,
   patchRpcInitChunk,
   patchFastModeChunk,
   patchOfficialAsset,
@@ -45,7 +50,8 @@ test("connect-app-host chunk: 26.908 shape is replaced with mock services", () =
   assert.equal(warnings.length, 0);
   assert.ok(!result.includes("new MessageChannel"), "must not keep the MessageChannel connect");
   assert.ok(!result.includes("connect-app-host`),"), "must not keep the postMessage to the host");
-  assert.ok(result.includes("services:Promise.resolve({"), "must return mock services");
+  assert.ok(result.includes("services:Promise.resolve("), "must return mock services");
+  assert.ok(result.includes("window.__codexWebWrapAppServices"), "must wrap mock services with polyfill helper");
   assert.ok(result.includes("hotkeyWindowHotkeys"), "must keep the mock service keys");
   assert.ok(result.includes("export{s as a"), "must keep the export statement intact");
 });
@@ -62,7 +68,7 @@ test("rpc chunk: legacy de() init is replaced with mock services", () => {
   const { result, warnings } = captureWarns(() => patchRpcInitChunk(RPC_INIT_LEGACY));
   assert.equal(warnings.length, 0);
   assert.ok(!result.includes("Q=ue()"), "must not keep the real RPC connect");
-  assert.ok(result.includes("services:Promise.resolve({"));
+  assert.ok(result.includes("services:Promise.resolve("));
   assert.ok(result.includes("$=await Q.services"), "must keep the export-compatible shape");
 });
 
@@ -84,7 +90,7 @@ test("patchOfficialAsset wires the connect-app-host mock and module specifier qu
   const reqPath = "/official/assets/connect-app-host-e569c097489b.js";
   const out = patchOfficialAsset(reqPath, Buffer.from(CONNECT_APP_HOST_26908, "utf-8")).toString("utf-8");
   assert.ok(!out.includes("new MessageChannel"));
-  assert.ok(out.includes("services:Promise.resolve({"));
+  assert.ok(out.includes("services:Promise.resolve("));
   assert.ok(
     out.includes(`from"./rolldown-runtime-c05d78c594d1.js?${OFFICIAL_ASSET_PATCH_QUERY}"`),
     "relative imports must carry the patch query"
@@ -105,7 +111,7 @@ test("patchOfficialAsset mocks connect-app-host wherever the handshake lives (26
   );
   assert.equal(warnings.length, 0);
   assert.ok(!result.includes("new MessageChannel"), "must not keep the MessageChannel connect");
-  assert.ok(result.includes("function mWr(e){return{services:Promise.resolve({"));
+  assert.ok(result.includes("function mWr(e){return{services:Promise.resolve("));
   assert.ok(result.includes("s5=mWr(fWr),c5=await s5.services"), "callers stay intact");
   assert.ok(
     result.includes("httpFetch:window.__codexWebHttpFetch"),
@@ -128,7 +134,7 @@ test("26.928 codexMicro mock covers the micro-bridge service surface", () => {
   // render; a mock missing any of them throws inside the AppRoutes error
   // boundary and takes the whole web UI to the crash screen.
   const { result } = captureWarns(() => patchConnectAppHostChunk(CONNECT_APP_HOST_26908));
-  const services = result.slice(result.indexOf("services:Promise.resolve({"));
+  const services = result.slice(result.indexOf("services:Promise.resolve("));
   assert.match(services, /codexMicro:\{/, "codexMicro mock must stay present");
   for (const method of [
     "getMicroStatus",
@@ -183,4 +189,62 @@ test("patchFastModeChunk enables Fast mode serviceTierAccess hook", () => {
   const patched261029 = patchFastModeChunk(sample261029);
   assert.ok(patched261029.includes("n={fast:!0,ultrafast:!0},u[3]=f"));
   assert.equal(patchFastModeChunk(patched261029), patched261029);
+});
+
+test("26.1120 Rspack async asset paths, relative imports, and runtime publicPath are patched", () => {
+  assert.equal(shouldPatchOfficialAsset("/official/assets/async/972521.6cec9fea8c.js"), true);
+  assert.equal(shouldPatchOfficialAsset("/official/assets/348410.f0081c7d18.js"), true);
+
+  const importSample =
+    'import{a as e}from"../883398.12d9a6e686.js";import{b as t}from"./525097.810f94ea8a.js";const m=import("/assets/dotnet.js");';
+  const patchedImports = patchOfficialJsModuleSpecifiers(importSample);
+  assert.ok(patchedImports.includes(`from"../883398.12d9a6e686.js?${OFFICIAL_ASSET_PATCH_QUERY}"`));
+  assert.ok(patchedImports.includes(`from"./525097.810f94ea8a.js?${OFFICIAL_ASSET_PATCH_QUERY}"`));
+  assert.ok(patchedImports.includes(`import("/official/assets/dotnet.js?${OFFICIAL_ASSET_PATCH_QUERY}")`));
+
+  const runtimeSample =
+    'p.u=e=>"assets/async/"+e+".js",p.p="/",p.j="348410",p.f.miniCss=function(){};var d=import("../"+p.u(e)).then(i);';
+  const patchedRuntime = patchRspackRuntimeChunk(runtimeSample);
+  assert.ok(patchedRuntime.includes('p.p="/official/"'));
+  assert.ok(patchedRuntime.includes(`import("../"+p.u(e)+"?${OFFICIAL_ASSET_PATCH_QUERY}")`));
+});
+
+test("26.1120 Rspack connect-app-host shapes (object method and anonymous IIFE) are mocked", () => {
+  const shape972521 =
+    'ay3C:(function(e,t,i){var o=i("ZG9f");i.d(t,{},{o:function(e){let{port1:t,port2:i}=new MessageChannel;' +
+    'return window.postMessage({type:"connect-app-host",port:i},window.location.origin,[i]),(0,o.ab)(t,e,void 0)}})})';
+  const { result: res1, warnings: warn1 } = captureWarns(() =>
+    patchOfficialAsset("/official/assets/async/972521.6cec9fea8c.js", Buffer.from(shape972521, "utf-8")).toString("utf-8")
+  );
+  assert.equal(warn1.length, 0);
+  assert.ok(!res1.includes("new MessageChannel"));
+  assert.ok(res1.includes("o:function(e){return{services:Promise.resolve("));
+  assert.ok(res1.includes("onRpcBroken:function(){}"));
+
+  const shape979387 =
+    'y=v.use(function(){let{port1:e,port2:t}=new MessageChannel;' +
+    'return window.postMessage({type:"connect-app-host",port:t},window.location.origin,[t]),(0,u.ab)(e,void 0,void 0)}())';
+  const { result: res2, warnings: warn2 } = captureWarns(() =>
+    patchOfficialAsset("/official/assets/async/979387.c58778aac3.js", Buffer.from(shape979387, "utf-8")).toString("utf-8")
+  );
+  assert.equal(warn2.length, 0);
+  assert.ok(!res2.includes("new MessageChannel"));
+  assert.ok(res2.includes("y=v.use(function(){return{services:Promise.resolve("));
+});
+
+test("Web Gateway patches checkGate and gate-atom defaults using shared denylist", () => {
+  const checkGateSample = "class C{checkGate(e,t){return this.getFeatureGate(e,t).value}}";
+  const patchedCheckGate = patchDefaultOnStatsigCheckGateChunk(checkGateSample);
+  assert.ok(patchedCheckGate.includes("/*codex-offline:default-on-gate-wrapper*/"));
+  assert.ok(patchedCheckGate.includes('"2373428540"'));
+  assert.equal(patchDefaultOnStatsigCheckGateChunk(patchedCheckGate), patchedCheckGate);
+
+  const atomSample =
+    'function E(e){return"LocalOverride"===e.details.reason||e.details.reason?.endsWith(":Recognized")===!0}' +
+    'function m(e,t){let r=i.getFeatureGate(n);e(r.value),t.set(c,n,E(r))}' +
+    'function r(){for(let n of e.get(l)){let i=t.getFeatureGate(n);e.set(u,n,i.value),e.set(c,n,E(i))}}';
+  const patchedAtom = patchDefaultOnStatsigGateAtomChunk(atomSample);
+  assert.equal(patchedAtom.split("/*codex-offline:default-on-gate-atom*/").length - 1, 2);
+  assert.ok(patchedAtom.includes('"1799487541"'));
+  assert.equal(patchDefaultOnStatsigGateAtomChunk(patchedAtom), patchedAtom);
 });

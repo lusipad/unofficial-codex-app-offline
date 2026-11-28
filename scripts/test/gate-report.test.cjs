@@ -119,3 +119,52 @@ test("committed gate baseline parses and matches the report schema", async () =>
     assert.ok(Array.isArray(gate.kinds) && Array.isArray(gate.names) && Array.isArray(gate.surfaces));
   }
 });
+
+test("gate report discovers Rspack Statsig wrapper readers even with >60% unseeded gates", async () => {
+  const { scanGateReferences, buildGateReport } = await loadGateReport();
+  const atomChunk = {
+    name: "366996.aaa.js",
+    surface: "renderer",
+    content:
+      "export const __rspack_esm_ids=[366996];export const __webpack_modules__={" +
+      "OMIV:(function(e,t,n){var i=n(\"Hl6a\");let a=(0,i.vP)(null);" +
+      "let c=(0,i.bD)((e,{get:t})=>t(a)?t(a).getFeatureGate(e):null);" +
+      "let u=(0,i.bD)((e,{get:t})=>t(a)?.getFeatureGate(e).value??!1);" +
+      "n.d(t,{},{JW:u,dx:c})})};",
+  };
+  const hooksChunk = {
+    name: "49792.bbb.js",
+    surface: "renderer",
+    content:
+      "export const __rspack_esm_ids=[49792];export const __webpack_modules__={" +
+      "hZax:(function(e,t,n){var i=n(\"IozE\"),o=n(\"OMIV\");" +
+      "function u(){return (0,i.useStatsigClient)()}" +
+      "function d(e,t,n){return e.getLayer(t,n)}" +
+      "n.d(t,{},{Zj:function(e){return (0,i.Ul)(o.JW,e)},Ou:function(e,t){return d(u().client,e,t)},Fj:function(e,t){return u().getDynamicConfig(e,t)}})})};",
+  };
+  const consumerChunk = {
+    name: "25051.ccc.js",
+    surface: "renderer",
+    content:
+      "export const __rspack_esm_ids=[25051];export const __webpack_modules__={" +
+      "mABC:(function(e,t,n){var h=n(\"hZax\"),o=n(\"OMIV\");" +
+      "let x=(0,h.Zj)(\"1000100\"),y=(0,h.Zj)(\"9000001\"),z=(0,h.Zj)(\"9000002\"),w=(0,h.Zj)(\"9000003\");" +
+      "let a=t(o.JW,\"9000004\"),l=(0,h.Ou)(\"9000005\"),c=(0,h.Fj)(\"9999999\");" +
+      "let nonGate={port:\"30000\"};})};",
+  };
+  const seeds = new Set([...contract.forcedTrue, ...contract.dynamicConfigs]);
+  const refs = scanGateReferences([atomChunk, hooksChunk, consumerChunk], seeds);
+  const report = buildGateReport({ refs, contract, version: "26.1120.test" });
+  const byId = new Map(report.gates.map((gate) => [gate.id, gate]));
+
+  for (const id of ["1000100", "9000001", "9000002", "9000003", "9000004"]) {
+    assert.ok(byId.has(id), `expected gate ${id}`);
+    assert.deepEqual(byId.get(id).kinds, ["gate"]);
+  }
+  assert.equal(byId.get("9000001").decision, "default-on");
+  assert.equal(byId.get("9000005").decision, "not-a-gate");
+  assert.deepEqual(byId.get("9000005").kinds, ["layer"]);
+  assert.equal(byId.get("9999999").decision, "seeded-config");
+  assert.deepEqual(byId.get("9999999").kinds, ["config"]);
+  assert.ok(!byId.has("30000"));
+});

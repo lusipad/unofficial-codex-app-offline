@@ -15,7 +15,17 @@
     "browser-use",
     "import",
     "notifications",
-    "code-review"
+    "code-review",
+    "voice",
+    "agent",
+    "personalization",
+    "archived-chats",
+    "storage",
+    "hooks-settings",
+    "gateways",
+    "connections",
+    "git-settings",
+    "local-environments"
   ],
   "expectHidden": [
     "billing",
@@ -39,7 +49,7 @@
     },
     "data-controls": {
       "label": "数据管理",
-      "reason": "需要登录 ChatGPT 账号；本地归档会话在「Archived chats」中管理"
+      "reason": "需要登录 ChatGPT 账号；本地归档会话在「已归档的聊天」中管理"
     },
     "ads-controls": {
       "label": "广告设置",

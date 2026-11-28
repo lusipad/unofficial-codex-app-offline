@@ -25,11 +25,6 @@ test("capability contract exports required statsig defaults", () => {
     "fast_mode",
     "inAppBrowserUseAllowed",
     "externalBrowserUseAllowed",
-    "computerUseNodeRepl",
-    "3903742690",
-    "3326157269",
-    "2900529421",
-    "3278809559",
     "1042620455",
     "4114442250",
   ]) {
@@ -41,13 +36,9 @@ test("capability contract exports desktop defaults and forced capabilities", () 
   const defaults = contract.DEFAULT_DESKTOP_FEATURE_STATE;
 
   for (const key of [
-    "artifactsPane",
     "avatarOverlay",
-    "browserAgent",
-    "browserAgentAvailable",
     "browserPane",
     "computerUse",
-    "computerUseNodeRepl",
     "control",
     "externalBrowserUse",
     "externalBrowserUseAllowed",
@@ -65,7 +56,7 @@ test("normalizeDesktopFeatureValues accepts renderer booleans but keeps required
   const normalized = contract.normalizeDesktopFeatureValues(
     {
       ambientSuggestions: true,
-      browserAgentAvailable: false,
+      browserPane: false,
       inAppBrowserUseAllowed: false,
       multiWindow: true,
       unknownString: "true",
@@ -75,7 +66,7 @@ test("normalizeDesktopFeatureValues accepts renderer booleans but keeps required
 
   assert.equal(normalized.ambientSuggestions, true);
   assert.equal(normalized.multiWindow, true);
-  assert.equal(normalized.browserAgentAvailable, true);
+  assert.equal(normalized.browserPane, true);
   assert.equal(normalized.inAppBrowserUseAllowed, true);
   assert.equal(normalized.control, true);
   assert.equal(Object.hasOwn(normalized, "unknownString"), false);
@@ -86,9 +77,8 @@ test("capability contract provides verifier marker lists", () => {
     "fast_mode",
     "inAppBrowserUseAllowed",
     "externalBrowserUseAllowed",
-    "computerUseNodeRepl",
     "setDesktopFeatureValues",
-    "browserAgentAvailable",
+    "computerUse",
   ]) {
     assert.ok(contract.REQUIRED_CAPABILITY_MARKERS.includes(key), key);
   }
@@ -277,19 +267,29 @@ test("gate denylist never closes a gate the offline contract opens", () => {
   );
 });
 
-test("26.1013 gate review decisions are pinned", () => {
+test("26.1013 and 26.1120 gate review decisions are pinned", () => {
   const denylist = contractData.DESKTOP_GATE_DENYLIST;
-  // New cloud / account / billing / ads / NUX / telemetry ids from the 26.1013.3656.0
-  // gate-report diff (see the DESKTOP_GATE_DENYLIST header comment).
+  // Surviving cloud / account / billing / ads / NUX / space ids from 26.1013.3656.0
+  // plus 26.1120.6357.0 cloud / ads / checkout / gizmo / telemetry gates.
   for (const gateId of [
-    "217963745", "1696552190", "2034334892", "2259614083", "2777527054",
-    "2438148931", "3042818307", "2799430872", "1199393483", "1665452992",
-    "4101895715", "349610806", "1010509169", "2247892263", "1442582935",
-    "2092319279", "2648108507", "3368287113", "581294493",
-    "494797613", "711121807", "4117608041", "1205965498", "1450219610",
+    "217963745", "1696552190", "2034334892", "2777527054",
+    "2438148931", "3042818307", "2799430872", "1199393483",
+    "4101895715", "1010509169", "2247892263", "1442582935",
+    "2092319279", "3368287113",
+    "494797613", "4117608041", "1205965498", "1450219610",
     "2230082701", "2457328746", "3104400975",
+    // 26.1120.6357.0 additions:
+    "15851580", "1825130190", "2160578039",
+    "1970737597", "200883286", "2021736494",
+    "4189971933", "1357702419",
+    "2989431347", "1468404277", "3063076119",
+    "1878141435",
   ]) {
     assert.equal(denylist.includes(gateId), true, gateId);
+  }
+  // Dynamic configs must not be listed in DESKTOP_GATE_DENYLIST.
+  for (const configId of ["1193530394", "107580212"]) {
+    assert.equal(denylist.includes(configId), false, configId);
   }
   // Reviewed and deliberately left default-on (local features / harmless behavior).
   for (const gateId of ["1538937767", "1937538638", "3681340459", "451195040", "2733752831"]) {
@@ -306,10 +306,9 @@ test("source data contract covers direct exe asar patch surfaces", () => {
     "externalBrowserUse",
     "externalBrowserUseAllowed",
     "computerUse",
-    "computerUseNodeRepl",
   ]);
   assert.deepEqual(contractData.DESKTOP_BROWSER_USE_AVAILABILITY_MARKERS, [
-    "computerUseNodeRepl",
+    "computerUse",
     "externalBrowserUse",
     "inAppBrowserUse",
   ]);
@@ -317,13 +316,8 @@ test("source data contract covers direct exe asar patch surfaces", () => {
   for (const gateId of [
     "410262010",
     "410065390",
-    "4250630194",
     "1506311413",
     "2171042036",
-    "3326157269",
-    "2900529421",
-    "2711149772",
-    "816842483",
     "3278809559",
     "1042620455",
     "4114442250",

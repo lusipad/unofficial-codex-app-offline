@@ -15,6 +15,7 @@ const { AsarWebviewExtractor } = require("./AsarWebviewExtractor");
 type EnsureOfficialBundleResult = {
   bundleDir: string;
   webviewDir: string;
+  hostDir: string | null;
   manifest: any;
   sourceAppPath: string;
   sourceAsarPath: string;
@@ -78,6 +79,7 @@ class LocalCodexBundleProvider {
         return {
           bundleDir: cache.bundleDir,
           webviewDir: cache.webviewDir,
+          hostDir: cache.isHostReady() ? cache.hostDir : null,
           manifest,
           sourceAppPath: manifest.sourceAppPath || "",
           sourceAsarPath: manifest.sourceAsarPath || "",
@@ -104,6 +106,7 @@ class LocalCodexBundleProvider {
     return {
       bundleDir: cache.bundleDir,
       webviewDir: cache.webviewDir,
+      hostDir: cache.isHostReady() ? cache.hostDir : null,
       manifest: activeManifest,
       sourceAppPath: sourceInfo.installRoot,
       sourceAsarPath: sourceInfo.asarPath,
@@ -156,11 +159,18 @@ class LocalCodexBundleProvider {
     try {
       const webviewDir = path.join(tmpDir, "webview");
       const result = this.extractor.extract(sourceInfo.asarPath, webviewDir);
+      const hostDestDir = path.join(tmpDir, "host");
+      const hostResult = typeof this.extractor.extractHost === "function"
+        ? this.extractor.extractHost(sourceInfo.asarPath, hostDestDir)
+        : { present: false, fileCount: 0, byteCount: 0 };
+      if (!hostResult.present) {
+        this.fileSystem.removeTree(hostDestDir);
+      }
       const manifest = this.manifestFactory.create(sourceInfo);
       this.fileSystem.writeJson(path.join(tmpDir, "manifest.json"), manifest);
       cache.replaceWith(tmpDir);
       this.logger.info(
-        `已解压 ${result.fileCount} 个 webview 文件（${this.byteFormatter.format(result.byteCount)}），耗时 ${Date.now() - startedAt}ms`
+        `已解压 ${result.fileCount} 个 webview 文件（${this.byteFormatter.format(result.byteCount)}）${hostResult.present ? ` + ${hostResult.fileCount} 个 host 文件` : ""}，耗时 ${Date.now() - startedAt}ms`
       );
       return manifest;
     } catch (error) {

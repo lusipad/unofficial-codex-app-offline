@@ -931,47 +931,6 @@ function patchContextWindowUsageDefaultOn(content, patchMarker) {
 
 // end patchContextWindowUsageDefaultOn
 
-function removeLegacyOfflinePluginQueryPatches(content) {
-  let next = content;
-  let removed = 0;
-  const legacyNetworkModeRe =
-    /networkMode:`always`\/\*codex-offline:plugin-query-network-mode\*\/\/\*codex-offline:plugin-query-surface:[a-z-]+\*\/,/g;
-  next = next.replace(legacyNetworkModeRe, () => {
-    removed += 1;
-    return '';
-  });
-
-  const legacyFallbackMarkerRe =
-    /\/\*codex-offline:plugin-cloud-fallback\*\/\/\*codex-offline:plugin-fallback-surface:[a-z-]+\*\//;
-  for (;;) {
-    const marker = legacyFallbackMarkerRe.exec(next);
-    if (!marker) break;
-    const catchIndex = next.lastIndexOf('.catch(e=>', marker.index);
-    const fallbackSource = catchIndex < 0 ? '' : next.slice(catchIndex, marker.index);
-    if (
-      catchIndex < 0 ||
-      fallbackSource.length > 1500 ||
-      !fallbackSource.includes('Promise.reject(e))') ||
-      !(
-        fallbackSource.includes('globalThis.navigator') ||
-        fallbackSource.includes('ERR_NETWORK_ACCESS_DENIED')
-      )
-    ) {
-      throw new Error(
-        'Legacy plugin fallback marker has an unexpected shape; refusing to remove it.',
-      );
-    }
-    next =
-      next.slice(0, catchIndex) +
-      next.slice(marker.index + marker[0].length);
-    removed += 1;
-  }
-
-  return { content: next, removed };
-}
-
-// end removeLegacyOfflinePluginQueryPatches
-
 function patchSidebarActivitySurface(content) {
   let next = content;
   let patched = false;
@@ -3749,7 +3708,6 @@ try {
   if (!fs.existsSync(assetsDir)) {
     throw new Error('webview/assets directory not found. Package structure may have changed.');
   }
-  let legacyPluginRendererPatchesRemoved = 0;
   {
     const webviewJsFiles = listJavaScriptFiles(assetsDir);
     let patchedCount = 0;
@@ -3937,13 +3895,6 @@ try {
       offlineQueryNetworkModePatched ||= offlineNetworkModePatch.correct;
       offlineMutationNetworkModePatched ||= offlineNetworkModePatch.correct;
 
-      const legacyPluginPatchCleanup =
-        removeLegacyOfflinePluginQueryPatches(content);
-      if (legacyPluginPatchCleanup.removed > 0) {
-        content = legacyPluginPatchCleanup.content;
-        legacyPluginRendererPatchesRemoved += legacyPluginPatchCleanup.removed;
-        changed = true;
-      }
       for (const needle of I18N_NEEDLES) {
         if (content.includes(needle)) {
           content = content.replaceAll(needle, I18N_REPLACEMENT);
@@ -4119,11 +4070,6 @@ try {
           : 'Could not locate showContextWindowUsage setting definition in webview bundles.',
       );
     }
-  }
-  if (legacyPluginRendererPatchesRemoved > 0) {
-    log(
-      `Removed ${legacyPluginRendererPatchesRemoved} legacy renderer plugin-service injections.`,
-    );
   }
   log('Renderer Statsig gates handled by static surface patches plus init.cjs runtime fallback.');
   if (!defaultOnStatsigGateSeen) {

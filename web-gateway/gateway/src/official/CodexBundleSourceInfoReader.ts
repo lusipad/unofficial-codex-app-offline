@@ -24,6 +24,13 @@ class CodexBundleSourceInfoReader {
     const plistInfo = layout.infoPlistPath ? this.readInfoPlist(layout.infoPlistPath) : null;
     const packageInfo = this.archive.extractJson(layout.asarPath, "package.json") || {};
     const asarIdentity = AsarFileIdentity.read(layout.asarPath, this.fileSystem);
+    let hasAppServerHost = false;
+    try {
+      const entries = this.archive.listPackage(layout.asarPath);
+      hasAppServerHost = entries.some(
+        (entry) => String(entry).replace(/^[\\/]+/, "").replace(/\\/g, "/") === ".vite/build/app-server-host.js"
+      );
+    } catch {}
     const bundleIdentifier = String(
       plistInfo?.CFBundleIdentifier ||
         packageInfo.build?.appId ||
@@ -51,6 +58,7 @@ class CodexBundleSourceInfoReader {
       ),
       sourceAsarSize: asarIdentity.size,
       sourceAsarMtimeMs: asarIdentity.mtimeMs,
+      hasAppServerHost,
       layoutKind: layout.layoutKind,
       platformHint: layout.platformHint,
     };

@@ -14,10 +14,12 @@ class OfficialBundleRefreshPolicy {
     manifest,
     sourceInfo,
     webviewReady,
+    hostReady = true,
   }: {
     manifest: any | null;
     sourceInfo: any;
     webviewReady: boolean;
+    hostReady?: boolean;
   }): string {
     if (!manifest) return "缓存清单不存在";
     if (manifest.schemaVersion !== this.schemaVersion) {
@@ -36,6 +38,7 @@ class OfficialBundleRefreshPolicy {
       return `app.asar 修改时间变化：${manifest.sourceAsarMtimeMs} -> ${sourceInfo.sourceAsarMtimeMs}`;
     }
     if (!webviewReady) return "已处理的 webview 缓存缺失或不完整";
+    if (sourceInfo?.hasAppServerHost && !hostReady) return "app-server-host 缓存缺失";
     return "";
   }
 }
@@ -77,6 +80,10 @@ class OfficialBundleCache {
     return path.join(this.bundleDir, "webview");
   }
 
+  get hostDir(): string {
+    return path.join(this.bundleDir, "host");
+  }
+
   readManifest(): any | null {
     const manifestPath = path.join(this.bundleDir, "manifest.json");
     if (!this.fileSystem.exists(manifestPath)) return null;
@@ -93,6 +100,7 @@ class OfficialBundleCache {
       manifest,
       sourceInfo,
       webviewReady: this.isWebviewReady(),
+      hostReady: this.isHostReady(),
     });
   }
 
@@ -123,6 +131,10 @@ class OfficialBundleCache {
     } catch {
       return false;
     }
+  }
+
+  isHostReady(): boolean {
+    return this.fileSystem.exists(path.join(this.hostDir, "app-server-host.js"));
   }
 }
 

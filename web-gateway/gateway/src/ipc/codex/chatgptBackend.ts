@@ -82,17 +82,30 @@ function authClaimsFromToken(token) {
   const payload = decodeJwtPayload(token);
   if (!payload || typeof payload !== "object") return {};
   const openaiAuth = payload["https://api.openai.com/auth"];
+  const profile = payload["https://api.openai.com/profile"];
+  const accountId =
+    openaiAuth && typeof openaiAuth === "object"
+      ? (typeof openaiAuth.chatgpt_account_id === "string" && openaiAuth.chatgpt_account_id) ||
+        (typeof openaiAuth.account_id === "string" && openaiAuth.account_id) ||
+        null
+      : null;
+  const openaiUserId =
+    openaiAuth && typeof openaiAuth === "object"
+      ? (typeof openaiAuth.user_id === "string" && openaiAuth.user_id) ||
+        (typeof openaiAuth.chatgpt_user_id === "string" && openaiAuth.chatgpt_user_id) ||
+        null
+      : null;
   return {
-    accountId:
-      openaiAuth && typeof openaiAuth === "object" && typeof openaiAuth.chatgpt_account_id === "string"
-        ? openaiAuth.chatgpt_account_id
-        : null,
+    accountId,
+    openaiUserId,
     plan:
       openaiAuth && typeof openaiAuth === "object" && typeof openaiAuth.chatgpt_plan_type === "string"
         ? openaiAuth.chatgpt_plan_type
         : null,
-    userId: typeof payload.sub === "string" ? payload.sub : null,
-    email: typeof payload.email === "string" ? payload.email : null,
+    userId: openaiUserId || (typeof payload.sub === "string" ? payload.sub : null),
+    email:
+      (typeof payload.email === "string" && payload.email) ||
+      (profile && typeof profile === "object" && typeof profile.email === "string" ? profile.email : null),
   };
 }
 
@@ -330,32 +343,55 @@ async function accountInfoFromCodexAccount(callAppServer, payload) {
     const auth = await readChatgptAuth(callAppServer, { refreshToken: false });
     tokenClaims = auth ? auth.claims : {};
   } catch {}
+  const routingAccountId =
+    accountResult &&
+    typeof accountResult === "object" &&
+    accountResult.workspaceRouting &&
+    typeof accountResult.workspaceRouting === "object" &&
+    typeof accountResult.workspaceRouting.chatgptAccountId === "string"
+      ? accountResult.workspaceRouting.chatgptAccountId
+      : null;
+  const topLevelUserId =
+    accountResult && typeof accountResult === "object" && typeof accountResult.userId === "string"
+      ? accountResult.userId
+      : null;
   if (!account || typeof account !== "object") {
+    const accountId = tokenClaims.accountId || routingAccountId || null;
+    const userId = tokenClaims.openaiUserId || topLevelUserId || tokenClaims.userId || null;
     return {
-      accountId: tokenClaims.accountId || null,
-      userId: tokenClaims.userId || null,
+      accountId,
+      userId,
+      authenticatedUserId: userId,
       plan: tokenClaims.plan || null,
       email: tokenClaims.email || null,
+      hasChatGptToken: Boolean(accountId || userId),
     };
   }
+  const accountId =
+    tokenClaims.accountId ||
+    routingAccountId ||
+    (typeof account.accountId === "string" && account.accountId) ||
+    (typeof account.account_id === "string" && account.account_id) ||
+    (typeof account.id === "string" && account.id) ||
+    null;
+  const userId =
+    tokenClaims.openaiUserId ||
+    topLevelUserId ||
+    (typeof account.userId === "string" && account.userId) ||
+    (typeof account.user_id === "string" && account.user_id) ||
+    tokenClaims.userId ||
+    null;
   return {
-    accountId:
-      tokenClaims.accountId ||
-      (typeof account.accountId === "string" && account.accountId) ||
-      (typeof account.account_id === "string" && account.account_id) ||
-      (typeof account.id === "string" && account.id) ||
-      null,
-    userId:
-      tokenClaims.userId ||
-      (typeof account.userId === "string" && account.userId) ||
-      (typeof account.user_id === "string" && account.user_id) ||
-      null,
+    accountId,
+    userId,
+    authenticatedUserId: userId,
     plan:
       tokenClaims.plan ||
       (typeof account.plan === "string" && account.plan) ||
       (typeof account.planType === "string" && account.planType) ||
       null,
     email: tokenClaims.email || (typeof account.email === "string" && account.email ? account.email : null),
+    hasChatGptToken: Boolean(accountId || userId || account.type === "chatgpt"),
   };
 }
 
@@ -373,25 +409,77 @@ async function buildWhamAccountsCheck(callAppServer, logger) {
       : null;
   if (account && typeof account === "object") {
     const email = typeof account.email === "string" ? account.email : "";
+    const routingAccountId =
+      accountResult &&
+      typeof accountResult === "object" &&
+      accountResult.workspaceRouting &&
+      typeof accountResult.workspaceRouting === "object" &&
+      typeof accountResult.workspaceRouting.chatgptAccountId === "string"
+        ? accountResult.workspaceRouting.chatgptAccountId
+        : "";
+    const topLevelUserId =
+      accountResult && typeof accountResult === "object" && typeof accountResult.userId === "string"
+        ? accountResult.userId
+        : "";
     const id =
+      routingAccountId ||
       (typeof account.accountId === "string" && account.accountId) ||
       (typeof account.account_id === "string" && account.account_id) ||
       (typeof account.id === "string" && account.id) ||
       email ||
       "local";
+    const userId =
+      topLevelUserId ||
+      (typeof account.userId === "string" && account.userId) ||
+      (typeof account.user_id === "string" && account.user_id) ||
+      id;
+    const planType =
+      (typeof account.planType === "string" && account.planType) ||
+      (typeof account.plan === "string" && account.plan) ||
+      "free";
     return {
+      account_ordering: [id],
+      default_account_id: id,
       accounts: [
         {
           id,
           email,
+          account_id: id,
+          account_user_id: userId,
+          account_user_role: "member",
+          structure: "personal",
+          plan_type: planType,
+          is_zdr: false,
+          is_deactivated: false,
+          is_openai_internal: false,
+          can_access_with_session: true,
+          entitlement: {
+            subscription_id: null,
+            subscription_plan: `chatgpt${planType}`,
+            has_active_subscription: planType !== "free",
+            is_active_subscription_gratis: false,
+            expires_at: null,
+            renews_at: null,
+            trial: null,
+          },
+          last_active_subscription: {
+            subscription_id: null,
+            purchase_origin_platform: null,
+            will_renew: false,
+          },
+          features: [],
+          eligible_offers: [],
           account: {
             id,
+            account_id: id,
+            account_user_id: userId,
             email,
             account_user_role: "member",
-            plan_type:
-              (typeof account.planType === "string" && account.planType) ||
-              (typeof account.plan === "string" && account.plan) ||
-              null,
+            structure: "personal",
+            plan_type: planType,
+            is_zdr: false,
+            is_deactivated: false,
+            is_openai_internal: false,
           },
         },
       ],
@@ -409,16 +497,47 @@ async function buildWhamAccountsCheck(callAppServer, logger) {
 /** 把 /wham/accounts/check 响应转成旧 accounts/check 的兼容结构。 */
 async function buildAccountsCheck(callAppServer, logger) {
   const wham = await buildWhamAccountsCheck(callAppServer, logger);
+  const ordering =
+    Array.isArray(wham.account_ordering) && wham.account_ordering.length > 0
+      ? wham.account_ordering
+      : wham.accounts.map((account) => account.id);
+  const defaultAccountId = wham.default_account_id || ordering[0] || null;
   return {
+    account_ordering: ordering,
+    default_account_id: defaultAccountId,
     accounts: Object.fromEntries(
       wham.accounts.map((account) => [
         account.id,
         {
           account: account.account || {
             id: account.id,
+            account_id: account.account_id || account.id,
+            account_user_id: account.account_user_id || account.id,
             email: account.email || "",
             account_user_role: "member",
+            structure: account.structure || "personal",
+            plan_type: account.plan_type || "free",
+            is_zdr: typeof account.is_zdr === "boolean" ? account.is_zdr : false,
+            is_deactivated: typeof account.is_deactivated === "boolean" ? account.is_deactivated : false,
+            is_openai_internal: typeof account.is_openai_internal === "boolean" ? account.is_openai_internal : false,
           },
+          entitlement: account.entitlement || {
+            subscription_id: null,
+            subscription_plan: `chatgpt${account.plan_type || "free"}`,
+            has_active_subscription: Boolean(account.plan_type && account.plan_type !== "free"),
+            is_active_subscription_gratis: false,
+            expires_at: null,
+            renews_at: null,
+            trial: null,
+          },
+          last_active_subscription: account.last_active_subscription || {
+            subscription_id: null,
+            purchase_origin_platform: null,
+            will_renew: false,
+          },
+          features: Array.isArray(account.features) ? account.features : [],
+          eligible_offers: Array.isArray(account.eligible_offers) ? account.eligible_offers : [],
+          can_access_with_session: account.can_access_with_session !== false,
         },
       ])
     ),

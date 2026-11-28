@@ -172,15 +172,27 @@ function createViewMessageHandlers(deps) {
       if (String(payload.type || "").startsWith("pending-worktree-")) {
         return pendingWorktrees.handlePendingWorktreeMessage(payload);
       }
-      if (payload.type === "ready") {
-        // 与桌面端一致：renderer ready 后补发 app-server 初始化快照；
-        // 26.924 起 renderer 依赖其中的版本判定 gateway OAuth 就绪，否则一直停在加载页。
+      if (payload.type === "ready" || payload.type === "request-app-server-state") {
+        // 与桌面端一致：renderer ready 或 request-app-server-state 后补发 app-server 初始化快照；
+        // 26.924+ / 26.1120 renderer 依赖其中的版本判定 gateway OAuth 就绪，否则一直停在加载页。
         const initializationMessage = appServer && appServer.getInitializationMessage();
+        const targetClientId = targetClientIdForContext(context);
         if (initializationMessage && typeof broadcast === "function") {
           broadcast(withTargetClient({
             channel: "codex-app-server-initialized",
             payload: { ...initializationMessage, isSnapshot: true },
-          }, targetClientIdForContext(context)));
+          }, targetClientId));
+          if (payload.type === "request-app-server-state") {
+            broadcast(withTargetClient({
+              channel: "codex-app-server-connection-changed",
+              payload: {
+                hostId: initializationMessage.hostId || "local",
+                state: "connected",
+                error: null,
+                isSnapshot: true,
+              },
+            }, targetClientId));
+          }
         }
         return true;
       }
